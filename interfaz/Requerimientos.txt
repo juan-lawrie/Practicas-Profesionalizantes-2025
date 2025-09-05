@@ -9,3 +9,7 @@ psycopg2-binary               2.9.10
 PyJWT                         2.10.1
 python-dotenv                 1.1.1
 sqlparse                      0.5.3
+
+Crear un entorno virtual de python con pipenv en la carpeta de Backend: 
+Primero instalar pipenv: pip install pipenv
+Y luego crea el entorno virtual: pipenv install .
