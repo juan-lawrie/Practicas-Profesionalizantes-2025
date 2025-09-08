@@ -39,7 +39,26 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = '__all__'
-
+    
+    def validate_name(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("El nombre del producto es obligatorio.")
+        return value.strip()
+    
+    def validate_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("El precio debe ser mayor a 0.")
+        return value
+    
+    def validate_stock(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El stock no puede ser negativo.")
+        return value
+    
+    def validate_low_stock_threshold(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El umbral de stock bajo no puede ser negativo.")
+        return value
 # Serializer para el modelo de movimiento de caja
 class CashMovementSerializer(serializers.ModelSerializer):
     user = serializers.ReadOnlyField(source='user.username')
