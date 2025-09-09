@@ -1,8 +1,7 @@
 # backend/api/serializers.py
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Product, CashMovement, InventoryChange, Sale, SaleItem
-from .models import User, Role
+from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role
 
 User = get_user_model()  # Usa el modelo de usuario personalizado
 

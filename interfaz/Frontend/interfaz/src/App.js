@@ -72,7 +72,7 @@ const App = () => {
      
     // Estado para el rol del usuario actualmente autenticado.
     const [userRole, setUserRole] = useState(null);
-    // Estado para la página actual a mostrar.
+    // Estado para la página current a mostrar.
     const [currentPage, setCurrentPage] = useState('login');
     
     // Estado para el inventario
@@ -240,7 +240,7 @@ const App = () => {
         return '';
     };
 
-    // Función para manejar el inicio de sesión con credenciales
+    // Función para manejar el inicio de sesión with credenciales
     const handleLogin = async (e, credentials = null) => {
       e.preventDefault();
       
@@ -1945,21 +1945,41 @@ const App = () => {
             };
     
             // Función para exportar datos
-            const exportData = () => {
+            const exportData = async () => {
                 if (!queryResults) {
                     setMessage('🚫 Error: No hay datos para exportar.');
                     return;
                 }
-    
-                const dataStr = JSON.stringify(queryResults, null, 2);
-                const dataBlob = new Blob([dataStr], { type: 'application/json' });
-                const url = URL.createObjectURL(dataBlob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `${selectedQuery}_report_${formatDate(new Date())}.json`;
-                link.click();
-                URL.revokeObjectURL(url);
-                setMessage('✅ Datos exportados exitosamente.');
+                try {
+                    const token = localStorage.getItem('accessToken');
+                    const response = await fetch('http://localhost:8000/api/export-data/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': token ? `Bearer ${token}` : undefined
+                        },
+                        body: JSON.stringify({
+                            query_type: selectedQuery,
+                            data: queryResults.data
+                        })
+                    });
+                    if (!response.ok) {
+                        setMessage('🚫 Error al exportar PDF.');
+                        return;
+                    }
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${selectedQuery}_reporte.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                    setMessage('✅ PDF exportado correctamente.');
+                } catch (error) {
+                    setMessage('🚫 Error al exportar PDF.');
+                }
             };
     
             return (
@@ -2296,8 +2316,7 @@ const App = () => {
                         </div>
                     )}
             </div>
-        );
-    };
+        )};
 
     // Renderiza el componente de la página actual según el estado.
     const renderPage = () => {

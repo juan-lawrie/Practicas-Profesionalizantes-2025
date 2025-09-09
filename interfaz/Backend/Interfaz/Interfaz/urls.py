@@ -21,7 +21,7 @@ from rest_framework.routers import DefaultRouter
 from api.views import (
     UserViewSet, ProductViewSet, CashMovementViewSet, 
     InventoryChangeViewSet, SaleViewSet, SaleCreate,
-    UserListCreate, UserDestroy, login_view
+    UserListCreate, UserDestroy, login_view, ExportDataView
 )
 from django.shortcuts import redirect
 
@@ -44,4 +44,5 @@ urlpatterns = [
     path('api/users/<int:pk>/delete/', UserDestroy.as_view(), name='user-delete'),
     path('api/sales/create/', SaleCreate.as_view(), name='sale-create'),
     path('api/auth/login/', login_view, name='login'),
+    path('api/export-data/', ExportDataView.as_view(), name='export-data')
 ]
