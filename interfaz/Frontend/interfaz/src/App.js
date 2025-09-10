@@ -445,24 +445,7 @@ const App = () => {
             product.stock < (product.lowStockThreshold || 10)
         );
 
-        // Función para limpiar cache y resetear a estado vacío (solo para Gerente)
-        const handleClearCache = () => {
-            console.log('🔄 RESET: Limpiando cache y reseteando a estado vacío...');
-            
-            // Eliminar TODO el localStorage
-            localStorage.clear();
-            
-            // Reset products a array vacío
-            console.log('📦 Reseteando products a array vacío');
-            setProducts([]);
-            
-            // Reset inventory a array vacío
-            console.log('🎯 Reseteando inventory a array vacío');
-            setInventory([]);
-            
-            alert('✅ RESET completado: Todos los productos eliminados y cache limpiado. La página se recargará.');
-            setTimeout(() => window.location.reload(), 500);
-        };
+
 
         return (
             <div className="dashboard-container">
@@ -480,20 +463,6 @@ const App = () => {
                             </ul>
                         </div>
                     )
-                )}
-                
-                {userRole === 'Gerente' && (
-                    <div className="info-section" style={{ marginBottom: '20px' }}>
-                        <h3>Herramientas de Administración</h3>
-                        <p>Si ves productos eliminados en las listas, usa esta herramienta:</p>
-                        <button 
-                            onClick={handleClearCache}
-                            className="action-button secondary"
-                            style={{ marginTop: '10px' }}
-                        >
-                            🗑️ Limpiar Cache del Sistema
-                        </button>
-                    </div>
                 )}
                 
                 <div className="info-section">
