@@ -207,6 +207,8 @@ class ExportDataView(APIView):
                     story.append(self._generate_purchases_table(query_data))
                 elif query_type == 'pedidos':
                     story.append(self._generate_orders_table(query_data))
+                elif query_type in ['proveedores', 'suppliers']:
+                    story.append(self._generate_suppliers_table(query_data))
                 else:
                     # Tabla genérica para tipos no reconocidos
                     story.append(self._generate_generic_table(query_data))
@@ -341,6 +343,29 @@ class ExportDataView(APIView):
                 item.get('metodoPago', ''),
                 item.get('status', ''),
                 item.get('items', '')
+            ])
+        table = Table(table_data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        return table
+
+    def _generate_suppliers_table(self, data):
+        table_data = [['Nombre', 'CUIT', 'Teléfono', 'Dirección', 'Productos']]
+        for item in data:
+            table_data.append([
+                item.get('name', ''),
+                item.get('cuit', ''),
+                item.get('phone', ''),
+                item.get('address', ''),
+                item.get('products', '')
             ])
         table = Table(table_data)
         table.setStyle(TableStyle([

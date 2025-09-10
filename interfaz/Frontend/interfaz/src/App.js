@@ -75,14 +75,11 @@ const App = () => {
     // Estado para la página current a mostrar.
     const [currentPage, setCurrentPage] = useState('login');
     
-    // Estado para el inventario
-    const [inventory, setInventory] = useState(loadLS(LS_KEYS.inventory, [
-        { id: 1, name: 'Churro', stock: 50, type: 'Producto' },
-        { id: 2, name: 'Café', stock: 120, type: 'Producto' },
-        { id: 3, name: 'Harina', stock: 10, type: 'Insumo' },
-        { id: 4, name: 'Azúcar', stock: 5, type: 'Insumo' },
-        { id: 5, name: 'Combo Familiar', stock: 30, type: 'Producto' },
-    ]));
+    // Estado para el inventario - SIEMPRE basado en products, PERO products SÍ usa localStorage
+    const [inventory, setInventory] = useState(() => {
+        console.log('📋 Inicializando inventario vacío (se generará desde products)');
+        return []; // Empezar vacío - se generará desde products
+    });
     
     // Usuarios
     const [users, setUsers] = useState(loadLS(LS_KEYS.users, [
@@ -140,9 +137,10 @@ const App = () => {
             supplierId: 1, 
             supplierName: 'Distribuidora Central',
             items: [
-                { productName: 'Harina', quantity: 15, currentStock: 10, status: 'Pendiente' },
-                { productName: 'Azúcar', quantity: 8, currentStock: 5, status: 'Pendiente' }
+                { productName: 'Harina', quantity: 15, currentStock: 10, unitPrice: 150.50, total: 2257.50, status: 'Pendiente' },
+                { productName: 'Azúcar', quantity: 8, currentStock: 5, unitPrice: 120.00, total: 960.00, status: 'Pendiente' }
             ],
+            totalAmount: 3217.50,
             status: 'Pendiente',
             notes: 'Reposición de stock bajo'
         },
@@ -152,76 +150,63 @@ const App = () => {
             supplierId: 2, 
             supplierName: 'Proveedor Express',
             items: [
-                { productName: 'Medialunas', quantity: 30, currentStock: 20, status: 'Enviado' },
-                { productName: 'Café', quantity: 5, currentStock: 8, status: 'Enviado' }
+                { productName: 'Medialunas', quantity: 30, currentStock: 20, unitPrice: 25.00, total: 750.00, status: 'Enviado' },
+                { productName: 'Café', quantity: 5, currentStock: 8, unitPrice: 180.00, total: 900.00, status: 'Enviado' }
             ],
+            totalAmount: 1650.00,
             status: 'Enviado',
             notes: 'Pedido semanal'
         }
     ]));
 
-    // Estado para productos con información completa
-    const [products, setProducts] = useState(loadLS(LS_KEYS.products, [
-        { 
-            id: 1, 
-            name: 'Churro Clásico', 
-            price: 10.00, 
-            category: 'Producto', 
-            stock: 50, 
-            description: 'Churro tradicional recién hecho',
-            status: 'Nuevo',
-            hasSales: false
-        },
-        { 
-            id: 2, 
-            name: 'Café Americano', 
-            price: 15.00, 
-            category: 'Producto', 
-            stock: 120, 
-            description: 'Café negro americano',
-            status: 'Nuevo',
-            hasSales: false
-        },
-        { 
-            id: 3, 
-            name: 'Harina de Trigo', 
-            price: 150.50, 
-            category: 'Insumo', 
-            stock: 10, 
-            description: 'Harina de trigo para repostería',
-            status: 'Nuevo',
-            hasSales: false
-        },
-        { 
-            id: 4, 
-            name: 'Azúcar Refinada', 
-            price: 120.00, 
-            category: 'Insumo', 
-            stock: 5, 
-            description: 'Azúcar refinada blanca',
-            status: 'Nuevo',
-            hasSales: false
-        },
-        { 
-            id: 5, 
-            name: 'Combo Familiar', 
-            price: 25.00, 
-            category: 'Producto', 
-            stock: 30, 
-            description: 'Combo familiar con churros y bebidas',
-            status: 'Nuevo',
-            hasSales: false
-        }
-    ]));
+    // Estado para productos con información completa - USA localStorage para persistir cambios
+    const [products, setProducts] = useState(() => {
+        console.log('📦 Inicializando products desde localStorage o vacío si no hay datos');
+        // SÍ usar localStorage para products - para que persistan los cambios cuando el usuario agrega/elimina
+        return loadLS(LS_KEYS.products, []); // Empezar con array VACÍO por defecto
+    });
 
-    // useEffect para guardar en localStorage
-    useEffect(() => { saveLS(LS_KEYS.inventory, inventory); }, [inventory]);
+    // useEffect para guardar en localStorage (inventory NO se guarda, products SÍ se guarda)
+    // useEffect(() => { saveLS(LS_KEYS.inventory, inventory); }, [inventory]); // DESHABILITADO - inventario se regenera desde products
     useEffect(() => { saveLS(LS_KEYS.users, users); }, [users]);
     useEffect(() => { saveLS(LS_KEYS.cashMovements, cashMovements); }, [cashMovements]);
     useEffect(() => { saveLS(LS_KEYS.suppliers, suppliers); }, [suppliers]);
     useEffect(() => { saveLS(LS_KEYS.purchases, purchases); }, [purchases]);
     useEffect(() => { saveLS(LS_KEYS.orders, orders); }, [orders]);
-    useEffect(() => { saveLS(LS_KEYS.products, products); }, [products]);
+    useEffect(() => { saveLS(LS_KEYS.products, products); }, [products]); // HABILITADO - products SÍ se guardan para persistir cambios
+
+    // useEffect para limpiar SOLO localStorage de inventario al inicializar
+    useEffect(() => {
+        console.log('🧹 CLEANUP: Limpiando localStorage de inventario (no products)...');
+        
+        // Solo eliminar inventario - products debe persistir para mantener cambios del usuario
+        localStorage.removeItem(LS_KEYS.inventory);
+        console.log('🗑️ localStorage[inventory] eliminado - products se mantiene');
+        
+        console.log('✅ Cleanup completado - inventario se regenerará desde products');
+    }, []); // Solo ejecutar una vez al montar
+
+    // useEffect para sincronización productos -> inventario
+    useEffect(() => {
+        console.log('🔄 SYNC: Sincronizando inventario desde products');
+        console.log('📦 Products actuales:', products.map(p => `${p.name} (ID: ${p.id})`));
+        
+        // SIEMPRE reconstruir inventario desde products (actual desde localStorage)
+        const newInventory = products.map(product => ({
+            id: product.id,
+            name: product.name,
+            stock: product.stock,
+            type: product.category
+        }));
+        
+        console.log('🎯 Nuevo inventario generado:', newInventory.map(i => `${i.name} (ID: ${i.id})`));
+        
+        // Actualizar inventario
+        setInventory(newInventory);
+        
+        console.log('✅ Sincronización completada');
+        
+    }, [products]); // Ejecutar cada vez que cambie el array products
 
     // Función para validar la política de la contraseña
     const validatePassword = (pwd) => {
@@ -455,24 +440,62 @@ const App = () => {
 
     // Componente del tablero (Dashboard).
     const Dashboard = () => {
-        // Simulación de alerta de bajo stock.
-        const lowStockItems = inventory.filter(item => item.stock < 10);
+        // Obtener productos con stock bajo según su umbral personalizado
+        const lowStockItems = products.filter(product => 
+            product.stock < (product.lowStockThreshold || 10)
+        );
+
+        // Función para limpiar cache y resetear a estado vacío (solo para Gerente)
+        const handleClearCache = () => {
+            console.log('🔄 RESET: Limpiando cache y reseteando a estado vacío...');
+            
+            // Eliminar TODO el localStorage
+            localStorage.clear();
+            
+            // Reset products a array vacío
+            console.log('📦 Reseteando products a array vacío');
+            setProducts([]);
+            
+            // Reset inventory a array vacío
+            console.log('🎯 Reseteando inventory a array vacío');
+            setInventory([]);
+            
+            alert('✅ RESET completado: Todos los productos eliminados y cache limpiado. La página se recargará.');
+            setTimeout(() => window.location.reload(), 500);
+        };
 
         return (
             <div className="dashboard-container">
                 <h2>Dashboard de {userRole}</h2>
-                {['Gerente', 'Encargado', 'Panadero', 'Cajero'].includes(userRole) && lowStockItems.length > 0 && (
-                    <div className="alert-section">
-                        <h3>Alerta de Stock Bajo</h3>
-                        <ul className="alert-list">
-                            {lowStockItems.map(item => (
-                                <li key={item.id} className="alert-item">
-                                    ⚠️ {item.name}: ¡Solo quedan {item.stock} unidades!
-                                </li>
-                            ))}
-                        </ul>
+                {['Gerente', 'Encargado', 'Panadero', 'Cajero'].includes(userRole) && (
+                    lowStockItems.length > 0 && (
+                        <div className="dashboard-alerts">
+                            <h3>⚠️ Alerta de Stock Bajo</h3>
+                            <ul className="alert-list">
+                                {lowStockItems.map(item => (
+                                    <li key={item.id} className="alert-item">
+                                        {item.name}: ¡Solo quedan {item.stock} unidades! (Umbral: {item.lowStockThreshold || 10})
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )
+                )}
+                
+                {userRole === 'Gerente' && (
+                    <div className="info-section" style={{ marginBottom: '20px' }}>
+                        <h3>Herramientas de Administración</h3>
+                        <p>Si ves productos eliminados en las listas, usa esta herramienta:</p>
+                        <button 
+                            onClick={handleClearCache}
+                            className="action-button secondary"
+                            style={{ marginTop: '10px' }}
+                        >
+                            🗑️ Limpiar Cache del Sistema
+                        </button>
                     </div>
                 )}
+                
                 <div className="info-section">
                     <h3>Información General</h3>
                     <p>Bienvenido al sistema de gestión de churrería. Utiliza el menú superior para navegar por las diferentes funcionalidades.</p>
@@ -588,6 +611,17 @@ const App = () => {
                         : p
                 );
                 setInventory(updatedInventory);
+                saveLS(LS_KEYS.inventory, updatedInventory);
+                
+                // También sincronizar con la lista de productos
+                const updatedProducts = products.map(p =>
+                    p.name === productName
+                        ? { ...p, stock: p.stock + quantity }
+                        : p
+                );
+                setProducts(updatedProducts);
+                saveLS(LS_KEYS.products, updatedProducts);
+                
                 setChange({ product: '', quantity: '', reason: '' });
                 setShowChangeForm(false);
             } catch (err) {
@@ -600,15 +634,52 @@ const App = () => {
             <div className="inventory-container">
                 <h2>Inventario</h2>
                 <h3>Consultar Inventario</h3>
-                <ul className="list-container">
-                    {inventory.map(item => (
-                        <li key={item.id} className="list-item">
-                            <span>{item.name}</span>
-                            <span>Stock: {item.stock}</span>
-                            <span>Tipo: {item.type}</span>
-                        </li>
-                    ))}
-                </ul>
+                
+                <div className="inventory-categories">
+                    <h4>Productos</h4>
+                    <ul className="list-container">
+                        {inventory
+                            .filter(item => item.type === 'Producto')
+                            .map(item => {
+                                // Encontrar el producto correspondiente para obtener su umbral personalizado
+                                const productDetails = products.find(p => p.name === item.name);
+                                const threshold = productDetails ? productDetails.lowStockThreshold || 10 : 10;
+                                const isLowStock = item.stock <= threshold;
+                                
+                                return (
+                                    <li key={item.id} className="list-item">
+                                        <span>{item.name}</span>
+                                        <span>Stock: {item.stock}</span>
+                                        <span className={isLowStock ? "stock-alert" : ""}>
+                                            {isLowStock ? `⚠️ Stock Bajo (Umbral: ${threshold})` : ""}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                    </ul>
+                    
+                    <h4>Insumos</h4>
+                    <ul className="list-container">
+                        {inventory
+                            .filter(item => item.type === 'Insumo')
+                            .map(item => {
+                                // Encontrar el insumo correspondiente para obtener su umbral personalizado
+                                const productDetails = products.find(p => p.name === item.name);
+                                const threshold = productDetails ? productDetails.lowStockThreshold || 10 : 10;
+                                const isLowStock = item.stock <= threshold;
+                                
+                                return (
+                                    <li key={item.id} className="list-item">
+                                        <span>{item.name}</span>
+                                        <span>Stock: {item.stock}</span>
+                                        <span className={isLowStock ? "stock-alert" : ""}>
+                                            {isLowStock ? `⚠️ Stock Bajo (Umbral: ${threshold})` : ""}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                    </ul>
+                </div>
                 <hr />
                 {['Gerente', 'Encargado', 'Panadero', 'Cajero'].includes(userRole) && (
                     <div className="inventory-change-section">
@@ -644,8 +715,17 @@ const App = () => {
         const [message, setMessage] = useState('');
         const [activeTab, setActiveTab] = useState('ventas'); // 'ventas' o 'caja'
 
-        // Precios de ejemplo
-        const prices = { 'Churro': 10, 'Café': 20, 'Combo Familiar': 25 };
+        // Función para obtener el precio de un producto desde la lista de products
+        const getProductPrice = (productName) => {
+            const product = products.find(p => p.name === productName);
+            return product ? product.price : 0;
+        };
+
+        // Función para obtener el stock de un producto
+        const getProductStock = (productName) => {
+            const product = products.find(p => p.name === productName);
+            return product ? product.stock : 0;
+        };
 
         // Manejar la selección de productos.
         const handleProductSelect = (productName) => {
@@ -660,19 +740,20 @@ const App = () => {
         };
 
         // Calcular el total de la venta.
-        const calculateTotal = (products) => {
+        const calculateTotal = (selectedProductsState) => {
             let newTotal = 0;
-            for (const name in products) {
-                newTotal += (prices[name] || 0) * products[name];
+            for (const name in selectedProductsState) {
+                newTotal += getProductPrice(name) * selectedProductsState[name];
             }
             setTotal(newTotal);
         };
 
         // Registrar la venta.
         const handleRegisterSale = async () => {
+            // Verificar stock antes de procesar la venta
             const canSell = Object.keys(selectedProducts).every(name => {
-                const item = inventory.find(i => i.name === name);
-                return item && item.stock >= selectedProducts[name];
+                const productStock = getProductStock(name);
+                return productStock >= selectedProducts[name];
             });
 
             if (!canSell) {
@@ -680,7 +761,16 @@ const App = () => {
                 return;
             }
 
-            // 1) Actualizar inventario localmente
+            // 1) Actualizar stock en products (fuente principal)
+            const updatedProducts = products.map(product => {
+                if (selectedProducts[product.name]) {
+                    return { ...product, stock: product.stock - selectedProducts[product.name] };
+                }
+                return product;
+            });
+            setProducts(updatedProducts);
+
+            // 2) Actualizar inventario localmente (se sincronizará automáticamente desde products)
             const updatedInventory = inventory.map(item => {
                 if (selectedProducts[item.name]) {
                     return { ...item, stock: item.stock - selectedProducts[item.name] };
@@ -748,7 +838,10 @@ const App = () => {
             }
         };
 
-        const availableProducts = inventory.filter(item => item.type === 'Producto');
+        // Obtener productos disponibles para la venta (solo productos con stock > 0 y categoría "Producto")
+        const availableProducts = products.filter(product => 
+            product.category === 'Producto' && product.stock > 0
+        );
         const currentBalance = cashMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : -m.amount), 0);
 
         return (
@@ -778,18 +871,27 @@ const App = () => {
                     <div className="tab-content">
                         <div className="product-selection">
                             <h3>Selecciona Productos</h3>
-                            {availableProducts.map(product => (
-                                <button key={product.id} className="product-button" onClick={() => handleProductSelect(product.name)}>
-                                    {product.name} (${prices[product.name] || 0})
-                                </button>
-                            ))}
+                            {availableProducts.length === 0 ? (
+                                <p>No hay productos disponibles para venta (productos con stock mayor a 0)</p>
+                            ) : (
+                                availableProducts.map(product => (
+                                    <button 
+                                        key={product.id} 
+                                        className="product-button" 
+                                        onClick={() => handleProductSelect(product.name)}
+                                        disabled={product.stock === 0}
+                                    >
+                                        {product.name} (${product.price}) - Stock: {product.stock}
+                                    </button>
+                                ))
+                            )}
                         </div>
                         <div className="cart-summary">
                             <h3>Resumen de Venta</h3>
                             <ul className="list-container">
                                 {Object.entries(selectedProducts).map(([name, quantity]) => (
                                     <li key={name} className="list-item">
-                                        {name} x {quantity} = ${quantity * (prices[name] || 0)}
+                                        {name} x {quantity} = ${quantity * getProductPrice(name)}
                                     </li>
                                 ))}
                             </ul>
@@ -932,7 +1034,8 @@ const App = () => {
                 description: '', 
                 price: 0, 
                 stock: 0, 
-                low_stock_threshold: 10 
+                low_stock_threshold: 10,
+                category: 'Producto' // Añadimos la categoría por defecto
             });
             const [message, setMessage] = useState('');
     
@@ -960,10 +1063,12 @@ const App = () => {
                     return;
                 }
     
-                // Validar si el producto ya existe localmente
-                const productExists = inventory.some(p => p.name.toLowerCase() === newProduct.name.toLowerCase());
-                if (productExists) {
-                    setMessage('�� Error: El producto ya existe en el inventario.');
+                // Validar si el producto ya existe completamente (en inventario Y productos)
+                const productExistsInInventory = inventory.some(p => p.name.toLowerCase() === newProduct.name.trim().toLowerCase());
+                const productExistsInProducts = products.some(p => p.name.toLowerCase() === newProduct.name.trim().toLowerCase());
+                
+                if (productExistsInInventory && productExistsInProducts) {
+                    setMessage('⚠️ Error: El producto ya existe completamente en el sistema.');
                     return;
                 }
     
@@ -974,27 +1079,39 @@ const App = () => {
                         description: newProduct.description.trim(),
                         price: parseFloat(newProduct.price),
                         stock: parseInt(newProduct.stock),
-                        low_stock_threshold: parseInt(newProduct.low_stock_threshold)
+                        low_stock_threshold: parseInt(newProduct.low_stock_threshold),
+                        category: newProduct.category
                     });
-    
-                    // Actualizar inventario local
+
+                    // Actualizar la lista de productos (fuente principal de datos)
                     const createdProduct = response.data;
-                    setInventory([...inventory, {
-                        id: createdProduct.id,
-                        name: createdProduct.name,
-                        stock: createdProduct.stock,
-                        type: 'Producto' // Por defecto como producto
-                    }]);
-    
+                    const nextProductId = Math.max(...products.map(p => p.id), 0) + 1;
+                    
+                    const newProductData = {
+                        id: createdProduct.id || nextProductId,
+                        name: newProduct.name.trim(),
+                        price: parseFloat(newProduct.price),
+                        category: newProduct.category,
+                        stock: parseInt(newProduct.stock),
+                        description: newProduct.description.trim(),
+                        status: 'Nuevo',
+                        hasSales: false,
+                        lowStockThreshold: parseInt(newProduct.low_stock_threshold)
+                    };
+                    
+                    const updatedProducts = [...products, newProductData];
+                    setProducts(updatedProducts);
+
                     // Limpiar formulario
                     setNewProduct({ 
                         name: '', 
                         description: '', 
                         price: 0, 
                         stock: 0, 
-                        low_stock_threshold: 10 
+                        low_stock_threshold: 10,
+                        category: 'Producto'
                     });
-                    setMessage('✅ Producto creado exitosamente en el sistema.');
+                    setMessage('✅ Producto creado exitosamente. Ahora aparece en Ventas e Inventario.');
                 } catch (error) {
                     console.error('Error creando producto:', error);
                     if (error.response && error.response.status === 400) {
@@ -1009,6 +1126,8 @@ const App = () => {
                 <div className="creation-container">
                     <h2>Crear Productos Nuevos</h2>
                     {message && <p className="message">{message}</p>}
+                    <p>Crea nuevos productos e insumos. Los productos creados aparecerán automáticamente en la sección "Inventario" y "Editar Productos".</p>
+                    <h3>Agregar nuevo producto</h3>
                     <form className="form-container" onSubmit={handleCreateProduct}>
                         <input 
                             type="text" 
@@ -1023,14 +1142,23 @@ const App = () => {
                             placeholder="Descripción del producto (opcional)"
                             rows="3"
                         />
+                        <p>Categoría</p>
+                        <select
+                            value={newProduct.category}
+                            onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
+                            required
+                        >
+                            <option value="Producto">Producto</option>
+                            <option value="Insumo">Insumo</option>
+                        </select>
                         <p>Precio</p>
                         <input 
                             type="number" 
                             value={newProduct.price} 
                             onChange={e => setNewProduct({ ...newProduct, price: parseFloat(e.target.value) || 0 })} 
                             placeholder="Precio *" 
-                            min="0.01"
-                            step="0.01"
+                           min="0"
+                            //step="0.01"
                             required 
                         />
                         <p>Stock Inicial</p>
@@ -1451,7 +1579,7 @@ const App = () => {
             const [showAddOrder, setShowAddOrder] = useState(false);
             const [newOrder, setNewOrder] = useState({
                 supplierId: '',
-                items: [{ productName: '', quantity: 1, currentStock: 0 }],
+                items: [{ productName: '', quantity: 1, currentStock: 0, unitPrice: 0, total: 0 }],
                 notes: ''
             });
             const [message, setMessage] = useState('');
@@ -1460,7 +1588,7 @@ const App = () => {
             const addItem = () => {
                 setNewOrder({
                     ...newOrder,
-                    items: [...newOrder.items, { productName: '', quantity: 1, currentStock: 0 }]
+                    items: [...newOrder.items, { productName: '', quantity: 1, currentStock: 0, unitPrice: 0, total: 0 }]
                 });
             };
     
@@ -1477,13 +1605,26 @@ const App = () => {
                 const updatedItems = [...newOrder.items];
                 updatedItems[index] = { ...updatedItems[index], [field]: value };
                 
-                // Si se selecciona un producto, obtener su stock actual
+                // Si se cambia el nombre del producto, verificar si existe en inventario (opcional)
                 if (field === 'productName') {
                     const selectedProduct = inventory.find(p => p.name === value);
-                    updatedItems[index].currentStock = selectedProduct ? selectedProduct.stock : 0;
+                    // Si el producto existe en inventario, mostrar su stock actual; si no, mostrar "No disponible"
+                    updatedItems[index].currentStock = selectedProduct ? selectedProduct.stock : 'N/A';
+                }
+                
+                // Recalcular el total del item si se cambia cantidad o precio
+                if (field === 'quantity' || field === 'unitPrice') {
+                    const quantity = field === 'quantity' ? value : updatedItems[index].quantity;
+                    const unitPrice = field === 'unitPrice' ? value : updatedItems[index].unitPrice;
+                    updatedItems[index].total = quantity * unitPrice;
                 }
                 
                 setNewOrder({ ...newOrder, items: updatedItems });
+            };
+
+            // Función para calcular el total del pedido
+            const calculateOrderTotal = () => {
+                return newOrder.items.reduce((sum, item) => sum + (item.total || 0), 0);
             };
     
             const handleAddOrder = (e) => {
@@ -1495,13 +1636,13 @@ const App = () => {
                     return;
                 }
                 
-                // Validar que al menos un producto tenga cantidad mayor a 0
+                // Validar que al menos un producto tenga cantidad mayor a 0 y precio válido
                 const validItems = newOrder.items.filter(item => 
-                    item.productName.trim() && item.quantity > 0
+                    item.productName.trim() && item.quantity > 0 && item.unitPrice > 0
                 );
                 
                 if (validItems.length === 0) {
-                    setMessage('🚫 Error: Debe seleccionar al menos un producto con cantidad mayor a 0.');
+                    setMessage('🚫 Error: Debe seleccionar al menos un producto con cantidad y precio válidos.');
                     return;
                 }
                 
@@ -1512,19 +1653,12 @@ const App = () => {
                     return;
                 }
                 
-                // Verificar que todos los productos existen
-                const invalidProducts = validItems.filter(item => 
-                    !inventory.some(p => p.name === item.productName)
-                );
-                
-                if (invalidProducts.length > 0) {
-                    setMessage('🚫 Error: Algunos productos no existen en la base de datos.');
-                    return;
-                }
+                // Nota: Permitimos productos que no están en inventario para pedidos de nuevos materiales/productos
                 
                 // Crear el nuevo pedido
                 const id = Math.max(...orders.map(o => o.id)) + 1;
                 const today = new Date().toLocaleDateString('es-ES');
+                const totalAmount = calculateOrderTotal();
                 
                 const orderToAdd = {
                     id,
@@ -1535,6 +1669,7 @@ const App = () => {
                         ...item,
                         status: 'Pendiente'
                     })),
+                    totalAmount,
                     status: 'Pendiente',
                     notes: newOrder.notes
                 };
@@ -1542,7 +1677,7 @@ const App = () => {
                 setOrders([...orders, orderToAdd]);
                 setNewOrder({
                     supplierId: '',
-                    items: [{ productName: '', quantity: 1, currentStock: 0 }],
+                    items: [{ productName: '', quantity: 1, currentStock: 0, unitPrice: 0, total: 0 }],
                     notes: ''
                 });
                 setShowAddOrder(false);
@@ -1581,32 +1716,17 @@ const App = () => {
                             </select>
                             
                             <h4>Productos del Pedido</h4>
-                            <div className="stock-info">
-                                <p><strong>Stock Disponible:</strong></p>
-                                <ul>
-                                    {inventory.map(item => (
-                                        <li key={item.id}>
-                                            {item.name}: {item.stock} unidades
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
                             
                             {newOrder.items.map((item, index) => (
                                 <div key={index} className="order-item">
                                     <div className="item-row">
-                                        <select 
+                                        <input 
+                                            type="text" 
                                             value={item.productName} 
                                             onChange={e => updateItem(index, 'productName', e.target.value)} 
+                                            placeholder="Nombre del producto o materia prima" 
                                             required
-                                        >
-                                            <option value="">Seleccionar Producto</option>
-                                            {inventory.map(product => (
-                                                <option key={product.id} value={product.name}>
-                                                    {product.name} (Stock: {product.stock})
-                                                </option>
-                                            ))}
-                                        </select>
+                                        />
                                         <input 
                                             type="number" 
                                             value={item.quantity} 
@@ -1615,8 +1735,18 @@ const App = () => {
                                             min="1"
                                             required 
                                         />
+                                        <input 
+                                            type="number" 
+                                            value={item.unitPrice} 
+                                            onChange={e => updateItem(index, 'unitPrice', parseFloat(e.target.value))} 
+                                            placeholder="Precio Unitario Estimado" 
+                                            min="0.01"
+                                            step="0.01"
+                                            required 
+                                        />
+                                        <span className="item-total">${(item.total || 0).toFixed(2)}</span>
                                         <span className="current-stock">
-                                            Stock actual: {item.currentStock}
+                                            Stock actual: {item.currentStock === 'N/A' ? 'Producto nuevo / No en inventario' : item.currentStock}
                                         </span>
                                         {newOrder.items.length > 1 && (
                                             <button 
@@ -1640,6 +1770,10 @@ const App = () => {
                                 onChange={e => setNewOrder({ ...newOrder, notes: e.target.value })} 
                                 placeholder="Notas adicionales del pedido" 
                             />
+                            
+                            <div className="purchase-total">
+                                <strong>Total Estimado del Pedido: ${calculateOrderTotal().toFixed(2)}</strong>
+                            </div>
                             
                             <div className="button-group">
                                 <button type="submit" className="action-button primary">Registrar Pedido</button>
@@ -1679,7 +1813,8 @@ const App = () => {
                                         {order.items.map((item, index) => (
                                             <li key={index}>
                                                 {item.productName} - {item.quantity} unidades 
-                                                (Stock actual: {item.currentStock})
+                                                {item.unitPrice && ` x $${item.unitPrice.toFixed(2)} = $${(item.total || 0).toFixed(2)}`}
+                                                {item.currentStock && ` (Stock actual: ${item.currentStock})`}
                                                 <span className={`item-status ${item.status.toLowerCase()}`}>
                                                     {item.status}
                                                 </span>
@@ -1687,6 +1822,11 @@ const App = () => {
                                         ))}
                                     </ul>
                                 </div>
+                                {order.totalAmount && (
+                                    <div className="order-total-display">
+                                        <strong>Total Estimado: ${order.totalAmount.toFixed(2)}</strong>
+                                    </div>
+                                )}
                                 {order.notes && (
                                     <div className="order-notes">
                                         <strong>Notas:</strong> {order.notes}
@@ -1699,6 +1839,45 @@ const App = () => {
             );
         };
     
+        // Mapeo de traducción para encabezados de tablas
+        const headerTranslationMap = {
+            'name': 'Nombre',
+            'cuit': 'CUIT',
+            'phone': 'Teléfono',
+            'address': 'Dirección',
+            'products': 'Productos',
+            'id': 'ID',
+            'date': 'Fecha',
+            'email': 'Email',
+            'role': 'Rol',
+            'username': 'Usuario',
+            'type': 'Tipo',
+            'amount': 'Monto',
+            'description': 'Descripción',
+            'price': 'Precio',
+            'stock': 'Stock',
+            'category': 'Categoría',
+            'status': 'Estado',
+            'supplier': 'Proveedor',
+            'total': 'Total',
+            'quantity': 'Cantidad',
+            'product': 'Producto',
+            // Traducciones para el resumen
+            'totalSuppliers': 'Total de Proveedores',
+            'activeSuppliers': 'Proveedores Activos',
+            'totalSales': 'Total de Ventas',
+            'totalRevenue': 'Ingresos Totales',
+            'totalPurchases': 'Total de Compras',
+            'totalAmount': 'Monto Total',
+            'totalOrders': 'Total de Pedidos',
+            'pendingOrders': 'Pedidos Pendientes',
+            'sentOrders': 'Pedidos Enviados',
+            'totalMovements': 'Total de Movimientos',
+            'totalIncome': 'Ingresos Totales',
+            'totalExpenses': 'Gastos Totales',
+            'period': 'Período'
+        };
+
         // Componente de la interfaz de consulta de datos (solo para Gerente).
         const DataConsultation = () => {
             const [selectedQuery, setSelectedQuery] = useState('');
@@ -2038,7 +2217,9 @@ const App = () => {
                             <div className="results-summary">
                                 {Object.entries(queryResults.summary).map(([key, value]) => (
                                     <div key={key} className="summary-item">
-                                        <strong>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</strong> {value}
+                                        <strong>
+                                            {headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+                                        </strong> {value}
                                     </div>
                                 ))}
                             </div>
@@ -2048,7 +2229,9 @@ const App = () => {
                                     <thead>
                                         <tr>
                                             {Object.keys(queryResults.data[0] || {}).map(key => (
-                                                <th key={key}>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>
+                                                <th key={key}>
+                                                    {headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                                                </th>
                                             ))}
                                         </tr>
                                     </thead>
@@ -2077,9 +2260,12 @@ const App = () => {
                 price: 0,
                 category: 'Producto',
                 stock: 0,
-                description: ''
+                description: '',
+                lowStockThreshold: 10
             });
             const [message, setMessage] = useState('');
+            const [confirmDelete, setConfirmDelete] = useState(false);
+            const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
     
             // Función para validar el nombre del producto
             const validateProductName = (name) => {
@@ -2100,12 +2286,17 @@ const App = () => {
             const validateStock = (stock) => {
                 return stock >= 0 && Number.isInteger(stock);
             };
+            
+            // Función para validar el umbral de stock bajo
+            const validateLowStockThreshold = (threshold) => {
+                return threshold >= 0 && Number.isInteger(threshold);
+            };
     
             // Función para seleccionar un producto para editar
             const selectProductForEdit = (product) => {
                 // Verificar que el producto no tenga ventas registradas
                 if (product.hasSales) {
-                    setMessage('�� Error: No se puede editar un producto que ya tiene ventas registradas.');
+                    setMessage('⚠️ Error: No se puede editar un producto que ya tiene ventas registradas.');
                     return;
                 }
     
@@ -2115,7 +2306,8 @@ const App = () => {
                     price: product.price,
                     category: product.category,
                     stock: product.stock,
-                    description: product.description || ''
+                    description: product.description || '',
+                    lowStockThreshold: product.lowStockThreshold || 10
                 });
                 setMessage('');
             };
@@ -2144,14 +2336,17 @@ const App = () => {
                     setMessage('🚫 Error: El stock inicial debe ser un número entero positivo o cero.');
                     return;
                 }
-    
+                
+                if (!validateLowStockThreshold(editingProduct.lowStockThreshold)) {
+                    setMessage('🚫 Error: El umbral de stock bajo debe ser un número entero positivo o cero.');
+                    return;
+                }
+
                 // Verificar que no se eliminen datos obligatorios
                 if (!editingProduct.name.trim() || editingProduct.price <= 0 || !editingProduct.category) {
                     setMessage('🚫 Error: No se pueden eliminar datos obligatorios (nombre, precio, categoría).');
                     return;
-                }
-    
-                // Actualizar el producto
+                }                // Actualizar el producto en la lista principal
                 const updatedProducts = products.map(product => 
                     product.id === selectedProduct.id 
                         ? { 
@@ -2160,11 +2355,12 @@ const App = () => {
                             price: editingProduct.price,
                             category: editingProduct.category,
                             stock: editingProduct.stock,
-                            description: editingProduct.description
+                            description: editingProduct.description,
+                            lowStockThreshold: editingProduct.lowStockThreshold
                         }
                         : product
                 );
-    
+                
                 setProducts(updatedProducts);
                 setSelectedProduct(null);
                 setEditingProduct({
@@ -2172,9 +2368,10 @@ const App = () => {
                     price: 0,
                     category: 'Producto',
                     stock: 0,
-                    description: ''
+                    description: '',
+                    lowStockThreshold: 10
                 });
-                setMessage('✅ Producto actualizado correctamente con los nuevos datos.');
+                setMessage('✅ Producto actualizado correctamente. Los cambios se reflejan en Ventas e Inventario.');
             };
     
             // Función para cancelar la edición
@@ -2185,9 +2382,61 @@ const App = () => {
                     price: 0,
                     category: 'Producto',
                     stock: 0,
-                    description: ''
+                    description: '',
+                    lowStockThreshold: 10
                 });
                 setMessage('');
+                setConfirmDelete(false);
+            };
+            
+            // Función para eliminar un producto
+            const handleDeleteProduct = () => {
+                if (!selectedProduct) return;
+                
+                // Si el producto tiene ventas, no se puede eliminar
+                if (selectedProduct.hasSales) {
+                    setMessage('⚠️ Error: No se puede eliminar un producto que ya tiene ventas registradas.');
+                    setConfirmDelete(false);
+                    return;
+                }
+                
+                if (!confirmDelete) {
+                    setConfirmDelete(true);
+                    setMessage('⚠️ ¿Estás seguro de que deseas eliminar este producto? Esta acción no se puede deshacer.');
+                    return;
+                }
+                
+                // Eliminar el producto de la lista principal
+                const updatedProducts = products.filter(product => product.id !== selectedProduct.id);
+                
+                setProducts(updatedProducts);
+                setSelectedProduct(null);
+                setEditingProduct({
+                    name: '',
+                    price: 0,
+                    category: 'Producto',
+                    stock: 0,
+                    description: '',
+                    lowStockThreshold: 10
+                });
+                setConfirmDelete(false);
+                setMessage('✅ Producto eliminado correctamente de todas las secciones.');
+            };
+            
+            // Función para eliminar todos los productos
+            const handleDeleteAllProducts = () => {
+                if (!deleteAllConfirm) {
+                    setDeleteAllConfirm(true);
+                    setMessage('⚠️ ¿Estás seguro de que deseas eliminar TODOS los productos sin ventas? Esta acción no se puede deshacer.');
+                    return;
+                }
+                
+                // Filtrar productos con ventas (solo mantener estos)
+                const productsWithSales = products.filter(product => product.hasSales);
+                
+                setProducts(productsWithSales);
+                setDeleteAllConfirm(false);
+                setMessage('✅ Todos los productos sin ventas han sido eliminados correctamente de todas las secciones.');
             };
     
             // Obtener solo productos nuevos (sin ventas registradas)
@@ -2215,6 +2464,7 @@ const App = () => {
                                             <span className="product-price">${product.price}</span>
                                             <span className="product-category">{product.category}</span>
                                             <span className="product-stock">Stock: {product.stock}</span>
+                                            <span className="product-threshold">Umbral Stock Bajo: {product.lowStockThreshold || 10}</span>
                                             {product.description && (
                                                 <span className="product-description">{product.description}</span>
                                             )}
@@ -2296,6 +2546,21 @@ const App = () => {
                                     />
                                 </div>
                                 
+                                <div className="form-group">
+                                    <label>Umbral de Stock Bajo *</label>
+                                    <input 
+                                        type="number" 
+                                        value={editingProduct.lowStockThreshold} 
+                                        onChange={e => setEditingProduct({...editingProduct, lowStockThreshold: parseInt(e.target.value)})} 
+                                        placeholder="Nivel de stock para mostrar alertas (0 o mayor)"
+                                        min="0"
+                                        required 
+                                    />
+                                    <small className="form-helper-text">
+                                        Cantidad mínima de stock antes de mostrar alertas en el Dashboard
+                                    </small>
+                                </div>
+                                
                                 <div className="button-group">
                                     <button type="submit" className="action-button primary">
                                         Guardar Cambios
@@ -2307,10 +2572,27 @@ const App = () => {
                                     >
                                         Cancelar
                                     </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleDeleteProduct}
+                                        className="action-button delete"
+                                    >
+                                        {confirmDelete ? "Confirmar Eliminación" : "Eliminar Producto"}
+                                    </button>
                                 </div>
                             </form>
                         </div>
                     )}
+                    
+                    <div className="manage-all-products">
+                        <button 
+                            onClick={handleDeleteAllProducts}
+                            className="action-button delete-all"
+                            disabled={newProducts.length === 0}
+                        >
+                            {deleteAllConfirm ? "Confirmar Eliminación de Todos" : "Eliminar Todos los Productos Sin Ventas"}
+                        </button>
+                    </div>
             </div>
         )};
 
