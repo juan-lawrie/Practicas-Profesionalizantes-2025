@@ -33,9 +33,61 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 
-# Agregar configuración adicional de CORS
+# Configuración exhaustiva de CORS específica para Safari y compatibilidad cross-browser
 CORS_ALLOW_ALL_ORIGINS = True  # Solo para desarrollo
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = False  # CRUCIAL: False para Safari
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'cache-control',
+    'pragma',
+    'if-modified-since',
+    'access-control-allow-origin',
+    'access-control-allow-headers',
+    'access-control-allow-methods',
+    'access-control-request-method',
+    'access-control-request-headers',
+    'vary',
+    # Headers adicionales específicos para Safari
+    'accept-language',
+    'accept-charset',
+    'connection',
+    'referer',
+    'sec-fetch-dest',
+    'sec-fetch-mode',
+    'sec-fetch-site',
+]
+CORS_ALLOWED_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+    'HEAD',
+]
+CORS_PREFLIGHT_MAX_AGE = 86400  # 24 horas para mejorar performance
+CORS_EXPOSE_HEADERS = [
+    'content-type',
+    'authorization',
+    'cache-control',
+    'expires',
+    'last-modified',
+    'pragma',
+    'vary',
+    'content-length',
+    'content-encoding',
+]
+# Configuración adicional específica para Safari
+CORS_ALLOW_PRIVATE_NETWORK = True
+CORS_ALLOW_ALL_ORIGINS = True
 
 # Application definition
 
@@ -54,9 +106,9 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = 'api.User' 
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # CORS primero para Safari
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',  # Middleware de CORS
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -94,19 +146,11 @@ DATABASES = {
         'NAME': os.environ.get('POSTGRES_DB', 'DBpracticas'),
         'USER': os.environ.get('POSTGRES_USER', 'practicas2025'),
         'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'practicas2025'),
-        # Si Django corre fuera de Docker usa 'localhost'; si corre en otro contenedor usa 'postgres'
         'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
         'OPTIONS': {'connect_timeout': 5},
     }
 }
-
-"""DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}"""
 
 
 # Password validation
@@ -169,3 +213,14 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': True,
 }
+
+# Configuraciones adicionales específicas para Safari
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
+SECURE_REFERRER_POLICY = None
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
+# Configuración para desarrollo - permitir localhost en Safari
+if DEBUG:
+    ALLOWED_HOSTS.extend(['localhost', '127.0.0.1', '0.0.0.0', '::1'])
+    SECURE_SSL_REDIRECT = False
+    SECURE_BROWSER_XSS_FILTER = False

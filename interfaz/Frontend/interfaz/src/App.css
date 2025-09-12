@@ -789,6 +789,35 @@ h2 {
   box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.5);
 }
 
+/* Estilos específicos para pedidos de clientes */
+.order-customer {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.order-payment {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  color: #2b6cb0;
+  font-weight: 600;
+}
+
+.order-status.preparación,
+.order-status.en.preparación {
+  background-color: #fef3c7;
+  color: #d69e2e;
+}
+
+.order-status.listo {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.order-status.entregado {
+  background-color: #e6fffa;
+  color: #2f855a;
+}
+
 /* Estilos específicos para consultas */
 .query-form {
   background-color: #f7fafc;

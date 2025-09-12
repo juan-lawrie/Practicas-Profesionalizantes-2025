@@ -1,7 +1,89 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import './App.css';
-import api from './services/api';
+import api, { safeStorage } from './services/api';
+
+// Función segura para logging que evita errores en Safari
+const safeLog = (message, data) => {
+  try {
+    // Verificar si estamos en un entorno donde console existe
+    if (typeof window === 'undefined' || typeof console === 'undefined') {
+      return;
+    }
+    
+    // Verificar funciones específicas de console
+    if (!console.log || typeof console.log !== 'function') {
+      return;
+    }
+    
+    // Verificar si estamos en Safari para manejar diferente
+    const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    
+    if (data !== undefined) {
+      if (isSafariBrowser) {
+        // En Safari, ser muy conservador con los objetos
+        if (typeof data === 'object' && data !== null) {
+          try {
+            const safeData = JSON.stringify(data, null, 2);
+            console.log(`${message}: ${safeData}`);
+          } catch (jsonError) {
+            console.log(`${message}: [Objeto no serializable]`);
+          }
+        } else {
+          console.log(`${message}: ${String(data)}`);
+        }
+      } else {
+        // Otros navegadores - comportamiento normal
+        console.log(message, data);
+      }
+    } else {
+      console.log(message);
+    }
+  } catch (error) {
+    // Si falla todo logging, no hacer nada para evitar romper la aplicación
+    // No intentar loggear el error para evitar recursión infinita
+  }
+};
+
+// Función segura para errores que evita problemas en Safari
+const safeError = (message, error) => {
+  try {
+    // Verificar si estamos en un entorno donde console existe
+    if (typeof window === 'undefined' || typeof console === 'undefined') {
+      return;
+    }
+    
+    // Verificar funciones específicas de console
+    if (!console.error || typeof console.error !== 'function') {
+      // Fallback a console.log si error no está disponible
+      if (console.log && typeof console.log === 'function') {
+        console.log(`ERROR: ${message}`);
+      }
+      return;
+    }
+    
+    // Verificar si estamos en Safari
+    const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    
+    if (isSafariBrowser) {
+      // En Safari, convertir todo a string para evitar problemas con objetos
+      const errorMsg = error && typeof error === 'object' ? 
+        (error.message || JSON.stringify(error, Object.getOwnPropertyNames(error))) : 
+        String(error);
+      console.log(`🚨 ERROR: ${message} - ${errorMsg}`);
+    } else {
+      console.error(message, error);
+    }
+  } catch (err) {
+    // Si falla todo, intentar un último log básico
+    try {
+      if (console && console.log) {
+        console.log('ERROR DE LOGGING:', message);
+      }
+    } catch (finalErr) {
+      // Si incluso esto falla, no hacer nada
+    }
+  }
+};
 
 const LS_KEYS = {
   inventory: 'inventory',
@@ -15,17 +97,33 @@ const LS_KEYS = {
 
 const loadLS = (key, fallback) => {
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
+    const raw = safeStorage.getItem(key);
+    if (raw === null) {
+      return fallback;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed;
+  } catch (error) {
+    safeLog(`⚠️ Error al cargar ${key} desde almacenamiento:`, error.message);
     return fallback;
   }
 };
 
 const saveLS = (key, value) => {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+    const serialized = JSON.stringify(value);
+    safeStorage.setItem(key, serialized);
+  } catch (error) {
+    safeLog(`⚠️ Error al guardar ${key} en almacenamiento:`, error.message);
+  }
+};
+
+const removeLS = (key) => {
+  try {
+    safeStorage.removeItem(key);
+  } catch (error) {
+    safeError(`Error al eliminar ${key}:`, error);
+  }
 };
 
 const getProductIdByName = (inventory, name) => {
@@ -33,9 +131,135 @@ const getProductIdByName = (inventory, name) => {
   return p ? p.id : null;
 };
 
+// Detectar Safari para aplicar fixes específicos
+const isSafari = () => {
+  try {
+    return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  } catch (error) {
+    return false;
+  }
+};
+
+// Función de diagnóstico específica para Safari
+const safariDiagnostic = () => {
+  if (!isSafari()) {
+    alert('🦁 Diagnóstico Safari: No estás usando Safari');
+    return;
+  }
+  
+  let resultados = ['🦁 DIAGNÓSTICO SAFARI:'];
+  
+  // Verificar almacenamiento
+  try {
+    resultados.push(`\n📁 Almacenamiento disponible: ${!safeStorage.isInPrivateMode()}`);
+    resultados.push(`📁 Modo privado Safari: ${safeStorage.isInPrivateMode()}`);
+    
+    // Test básico de almacenamiento
+    try {
+      safeStorage.setItem('__safari_test__', 'test');
+      const testValue = safeStorage.getItem('__safari_test__');
+      safeStorage.removeItem('__safari_test__');
+      resultados.push(`📁 Almacenamiento funcional: ${testValue === 'test'}`);
+    } catch (storageError) {
+      resultados.push(`❌ Almacenamiento NO funcional: ${storageError.message}`);
+    }
+    
+    // Verificar token
+    const token = safeStorage.getItem('accessToken');
+    resultados.push(`\n🔑 Token existe: ${!!token}`);
+    if (token) {
+      resultados.push(`🔑 Token longitud: ${token.length}`);
+      resultados.push(`🔑 Token inicia con: ${token.substring(0, 20)}...`);
+      
+      // Verificar formato JWT
+      try {
+        const parts = token.split('.');
+        resultados.push(`🔑 Token partes JWT: ${parts.length}`);
+        resultados.push(`🔑 Token formato válido: ${parts.length === 3}`);
+      } catch (e) {
+        resultados.push(`❌ Error verificando JWT: ${e.message}`);
+      }
+    }
+    
+    // Verificar conectividad
+    resultados.push(`\n🌐 navigator.onLine: ${navigator.onLine}`);
+    resultados.push(`🌐 User Agent: Safari detectado`);
+    
+    // Mostrar resultados en alert
+    alert(resultados.join('\n'));
+    
+    // También hacer log para consola
+    safeLog('🦁 Diagnóstico completo:', resultados.join(' | '));
+    
+  } catch (error) {
+    alert(`❌ Error en diagnóstico Safari: ${error.message}`);
+    safeError('🦁 Error en diagnóstico Safari:', error);
+  }
+};
+
+// Función de test de conectividad específica para Safari
+const safariConnectivityTest = async () => {
+  if (!isSafari()) {
+    alert('🦁 Test conectividad: No estás usando Safari');
+    return;
+  }
+  
+  safeLog('🦁 Iniciando test de conectividad Safari...');
+  
+  try {
+    // Test básico de conectividad al backend - usando endpoint público
+    safeLog('🦁 Probando conectividad con endpoint público...');
+    
+    const publicResponse = await fetch('http://localhost:8000/api/auth/login/', {
+      method: 'OPTIONS',  // OPTIONS no requiere autenticación
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+    });
+    
+    safeLog('🦁 Test conectividad OPTIONS - Status:', publicResponse.status);
+    safeLog('🦁 Test conectividad OPTIONS - OK:', publicResponse.ok);
+    
+    // Test del endpoint principal (se espera 401 sin token, pero eso significa que la conexión funciona)
+    safeLog('🦁 Probando endpoint principal (se espera 401)...');
+    
+    const mainResponse = await fetch('http://localhost:8000/api/', {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+    });
+    
+    safeLog('🦁 Test endpoint principal - Status:', mainResponse.status);
+    
+    // 401 es esperado sin token, significa que el servidor está funcionando
+    if (mainResponse.status === 401) {
+      safeLog('✅ Conectividad OK: Server responde correctamente (401 sin token es normal)');
+      alert('✅ 🦁 CONECTIVIDAD SAFARI OK\n\nEl servidor responde correctamente.\nStatus 401 sin token es normal.');
+    } else if (mainResponse.ok) {
+      safeLog('✅ Conectividad OK: Server responde OK');
+      alert('✅ 🦁 CONECTIVIDAD SAFARI OK\n\nEl servidor responde correctamente.');
+    } else {
+      safeLog('⚠️ Conectividad: Status inesperado:', mainResponse.status);
+      alert(`⚠️ 🦁 CONECTIVIDAD SAFARI\n\nStatus inesperado: ${mainResponse.status}`);
+    }
+
+  } catch (error) {
+    safeError('🦁 Error en test de conectividad Safari:', error);
+    safeLog('🦁 Tipo de error:', error.name);
+    safeLog('🦁 Mensaje de error:', error.message);
+    
+    alert(`❌ 🦁 ERROR DE CONECTIVIDAD SAFARI:\n\n${error.message}\n\nVerifica que el servidor Django esté ejecutándose.`);
+  }
+};
+
 // Simulación de la base de datos de usuarios con roles y credenciales
 const mockUsers = [
-  { email: 'gerente@example.com', password: 'Password123', role: 'Gerente' },
+  { email: 'jlawrie@icop.edu.ar', password: 'jualla2003', role: 'Gerente' },
   { email: 'encargado@example.com', password: 'Password456', role: 'Encargado' },
   { email: 'panadero@example.com', password: 'Password789', role: 'Panadero' },
   { email: 'cajero@example.com', password: 'Password012', role: 'Cajero' },
@@ -57,6 +281,12 @@ const rolePermissions = {
 
 // Componente principal de la aplicación.
 const App = () => {
+    // Limpiar almacenamiento de productos al cargar la aplicación
+    React.useEffect(() => {
+        safeStorage.removeItem(LS_KEYS.products);
+        safeLog('🧹 Almacenamiento de productos limpiado al iniciar');
+    }, []);
+
     // Definimos los roles de usuario disponibles.
     const roles = ['Gerente', 'Panadero', 'Encargado', 'Cajero'];
      
@@ -77,7 +307,7 @@ const App = () => {
     
     // Estado para el inventario - SIEMPRE basado en products, PERO products SÍ usa localStorage
     const [inventory, setInventory] = useState(() => {
-        console.log('📋 Inicializando inventario vacío (se generará desde products)');
+        safeLog('📋 Inicializando inventario vacío (se generará desde products)');
         return []; // Empezar vacío - se generará desde products
     });
     
@@ -129,41 +359,41 @@ const App = () => {
         }
     ]));
     
-    // Pedidos
+    // Pedidos de clientes
     const [orders, setOrders] = useState(loadLS(LS_KEYS.orders, [
         { 
             id: 1, 
-            date: '27/10/2023', 
-            supplierId: 1, 
-            supplierName: 'Distribuidora Central',
+            date: '2023-10-27', 
+            customerName: 'María González',
+            paymentMethod: 'efectivo',
             items: [
-                { productName: 'Harina', quantity: 15, currentStock: 10, unitPrice: 150.50, total: 2257.50, status: 'Pendiente' },
-                { productName: 'Azúcar', quantity: 8, currentStock: 5, unitPrice: 120.00, total: 960.00, status: 'Pendiente' }
+                { productName: 'Churros Rellenos', quantity: 12, unitPrice: 25.00, total: 300.00 },
+                { productName: 'Café con Leche', quantity: 2, unitPrice: 80.00, total: 160.00 }
             ],
-            totalAmount: 3217.50,
-            status: 'Pendiente',
-            notes: 'Reposición de stock bajo'
+            totalAmount: 460.00,
+            status: 'Entregado',
+            notes: 'Cliente habitual'
         },
         { 
             id: 2, 
-            date: '26/10/2023', 
-            supplierId: 2, 
-            supplierName: 'Proveedor Express',
+            date: '2023-10-26', 
+            customerName: 'Carlos Pérez',
+            paymentMethod: 'debito',
             items: [
-                { productName: 'Medialunas', quantity: 30, currentStock: 20, unitPrice: 25.00, total: 750.00, status: 'Enviado' },
-                { productName: 'Café', quantity: 5, currentStock: 8, unitPrice: 180.00, total: 900.00, status: 'Enviado' }
+                { productName: 'Medialunas', quantity: 6, unitPrice: 45.00, total: 270.00 },
+                { productName: 'Café Cortado', quantity: 1, unitPrice: 70.00, total: 70.00 }
             ],
-            totalAmount: 1650.00,
-            status: 'Enviado',
-            notes: 'Pedido semanal'
+            totalAmount: 340.00,
+            status: 'Listo',
+            notes: 'Para llevar'
         }
     ]));
 
-    // Estado para productos con información completa - USA localStorage para persistir cambios
+    // Estado para productos con información completa - COMPLETAMENTE basado en API del backend
     const [products, setProducts] = useState(() => {
-        console.log('📦 Inicializando products desde localStorage o vacío si no hay datos');
-        // SÍ usar localStorage para products - para que persistan los cambios cuando el usuario agrega/elimina
-        return loadLS(LS_KEYS.products, []); // Empezar con array VACÍO por defecto
+        safeLog('🎯 Inicializando products - siempre vacío, se carga desde servidor');
+        // NUNCA usar localStorage para productos - siempre empezar vacío
+        return [];
     });
 
     // useEffect para guardar en localStorage (inventory NO se guarda, products SÍ se guarda)
@@ -173,25 +403,20 @@ const App = () => {
     useEffect(() => { saveLS(LS_KEYS.suppliers, suppliers); }, [suppliers]);
     useEffect(() => { saveLS(LS_KEYS.purchases, purchases); }, [purchases]);
     useEffect(() => { saveLS(LS_KEYS.orders, orders); }, [orders]);
-    useEffect(() => { saveLS(LS_KEYS.products, products); }, [products]); // HABILITADO - products SÍ se guardan para persistir cambios
-
-    // useEffect para limpiar SOLO localStorage de inventario al inicializar
-    useEffect(() => {
-        console.log('🧹 CLEANUP: Limpiando localStorage de inventario (no products)...');
-        
-        // Solo eliminar inventario - products debe persistir para mantener cambios del usuario
-        localStorage.removeItem(LS_KEYS.inventory);
-        console.log('🗑️ localStorage[inventory] eliminado - products se mantiene');
-        
-        console.log('✅ Cleanup completado - inventario se regenerará desde products');
-    }, []); // Solo ejecutar una vez al montar
+    // useEffect(() => { saveLS(LS_KEYS.products, products); }, [products]); // DESHABILITADO - products YA NO se guardan automáticamente en localStorage
 
     // useEffect para sincronización productos -> inventario
     useEffect(() => {
-        console.log('🔄 SYNC: Sincronizando inventario desde products');
-        console.log('📦 Products actuales:', products.map(p => `${p.name} (ID: ${p.id})`));
+        safeLog('🔄 SYNC: Sincronizando inventario desde products');
         
-        // SIEMPRE reconstruir inventario desde products (actual desde localStorage)
+        // Verificar que products sea un array válido antes de usar map
+        if (!Array.isArray(products)) {
+            safeLog('⚠️ products no es un array válido, usando array vacío');
+            setInventory([]);
+            return;
+        }
+        
+        // SIEMPRE reconstruir inventario desde products (actual desde API)
         const newInventory = products.map(product => ({
             id: product.id,
             name: product.name,
@@ -199,12 +424,12 @@ const App = () => {
             type: product.category
         }));
         
-        console.log('🎯 Nuevo inventario generado:', newInventory.map(i => `${i.name} (ID: ${i.id})`));
+        safeLog('🎯 Inventario sincronizado:', newInventory?.length ? `${newInventory.length} productos` : 'Array vacío');
         
         // Actualizar inventario
         setInventory(newInventory);
         
-        console.log('✅ Sincronización completada');
+        safeLog('✅ Sincronización completada');
         
     }, [products]); // Ejecutar cada vez que cambie el array products
 
@@ -234,25 +459,114 @@ const App = () => {
       const passwordToUse = credentials ? credentials.password : password;
       
       try {
+        // Verificación específica para Safari antes del login
+        if (isSafari()) {
+          safeLog('🦁 Safari: Iniciando proceso de login');
+          safeLog('🦁 Safari: Email:', emailToUse);
+          safeLog('🦁 Safari: Modo privado:', safeStorage.isInPrivateMode());
+          
+          // Aviso especial para modo privado
+          if (safeStorage.isInPrivateMode()) {
+            alert('⚠️ Safari en modo privado detectado.\nLa aplicación funcionará pero algunos datos se almacenarán temporalmente en memoria.');
+          }
+        }
+        
         const response = await api.post('/auth/login/', {
           email: emailToUse,
           password: passwordToUse
         });
         
+        if (isSafari()) {
+          safeLog('🦁 Safari: Respuesta recibida:', response.status);
+          safeLog('🦁 Safari: Datos de respuesta:', !!response.data);
+        }
+        
         if (response.data.success) {
-          setIsLoggedIn(true);
+          if (isSafari()) {
+            safeLog('🦁 Safari: Login exitoso, guardando token');
+          }
+          
+          // PRIMERO guardar el token para futuras peticiones
+          safeStorage.setItem('accessToken', response.data.tokens.access);
+          
+          // Verificar que el token se guardó correctamente
+          const tokenVerification = safeStorage.getItem('accessToken');
+          if (!tokenVerification) {
+            throw new Error('Error guardando token - posible problema de almacenamiento');
+          }
+          
+          if (isSafari()) {
+            safeLog('🦁 Safari: Token guardado correctamente, longitud:', tokenVerification.length);
+            safeLog('🦁 Safari: Modo privado:', safeStorage.isInPrivateMode());
+          }
+          
+          // Configurar estados de usuario
           setUserRole(response.data.user.role);
           setCurrentPage('dashboard');
           
-          // Guardar el token para futuras peticiones
-          localStorage.setItem('accessToken', response.data.tokens.access);
+          // En Safari, esperar un tick antes de setIsLoggedIn para asegurar que el token está disponible
+          if (isSafari()) {
+            setTimeout(() => {
+              setIsLoggedIn(true);
+              safeLog('🦁 Safari: Login completado con delay');
+            }, 100);
+          } else {
+            setIsLoggedIn(true);
+          }
+          
+          // Limpiar productos viejos del almacenamiento
+          safeStorage.removeItem(LS_KEYS.products);
+          safeLog('🧹 Almacenamiento de productos limpiado');
+          
+          // NO cargar productos automáticamente - dejar que el usuario decida cuándo sincronizar
+          safeLog('✅ Login exitoso - productos NO cargados automáticamente');
           
           // Resetear contadores de error
           setFailedAttempts(0);
           setLoginError('');
         }
       } catch (error) {
-        console.error('Error de login:', error);
+        safeError('Error de login:', error);
+        
+        // Logging específico para Safari con alerts visibles
+        if (isSafari()) {
+          safeLog('🦁 Safari: Error en login detectado');
+          safeLog('🦁 Safari: Tipo de error:', error.name);
+          safeLog('🦁 Safari: Mensaje de error:', error.message);
+          
+          let errorInfo = ['🦁 ERROR DE LOGIN SAFARI:'];
+          errorInfo.push(`❌ Tipo: ${error.name || 'Desconocido'}`);
+          errorInfo.push(`❌ Mensaje: ${error.message || 'Sin mensaje'}`);
+          
+          if (error.response) {
+            safeLog('🦁 Safari: Status de respuesta:', error.response.status);
+            safeLog('🦁 Safari: Datos de error:', error.response.data);
+            
+            errorInfo.push(`🌐 Status HTTP: ${error.response.status}`);
+            if (error.response.data) {
+              if (typeof error.response.data === 'object') {
+                errorInfo.push(`📄 Datos: ${JSON.stringify(error.response.data)}`);
+              } else {
+                errorInfo.push(`📄 Datos: ${error.response.data}`);
+              }
+            }
+          } else if (error.request) {
+            safeLog('🦁 Safari: Error de request sin respuesta');
+            safeLog('🦁 Safari: Request details:', !!error.request);
+            errorInfo.push(`🌐 Error de conexión - Sin respuesta del servidor`);
+          } else {
+            safeLog('🦁 Safari: Error de configuración');
+            errorInfo.push(`⚙️ Error de configuración`);
+          }
+          
+          // Mostrar error en alert para Safari
+          alert(errorInfo.join('\n'));
+          
+          // Verificar almacenamiento en Safari después del error
+          if (safeStorage.isInPrivateMode()) {
+            safeLog('🦁 Safari: Modo privado detectado después de error de login');
+          }
+        }
         
         // Incrementar intentos fallidos
         const newFailedAttempts = failedAttempts + 1;
@@ -264,11 +578,19 @@ const App = () => {
           setShowModal(true);
           setLoginError('Cuenta bloqueada por demasiados intentos fallidos');
         } else {
-          // Mostrar mensaje de error específico
+          // Mostrar mensaje de error específico para Safari
           if (error.response && error.response.status === 400) {
-            setLoginError('Credenciales inválidas. Intento ' + newFailedAttempts + ' de ' + maxAttempts);
+            const baseMessage = 'Credenciales inválidas. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
+            setLoginError(isSafari() ? baseMessage + ' (Safari)' : baseMessage);
+          } else if (error.response && error.response.status === 401) {
+            const baseMessage = 'No autorizado. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
+            setLoginError(isSafari() ? baseMessage + ' (Safari)' : baseMessage);
+          } else if (error.code === 'NETWORK_ERROR' || error.message === 'Network Error') {
+            const baseMessage = 'Error de red. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
+            setLoginError(isSafari() ? baseMessage + ' (Safari CORS)' : baseMessage);
           } else {
-            setLoginError('Error de conexión. Intento ' + newFailedAttempts + ' de ' + maxAttempts);
+            const baseMessage = 'Error de conexión. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
+            setLoginError(isSafari() ? baseMessage + ' (Safari)' : baseMessage);
           }
         }
       }
@@ -285,7 +607,7 @@ const App = () => {
         setFailedAttempts(0);  // Resetear intentos fallidos
         setIsLocked(false);    // Desbloquear cuenta
         setShowModal(false);   // Cerrar modal
-        localStorage.removeItem('accessToken'); // quitar solo el token
+        removeLS('accessToken'); // quitar solo el token
     };
 
     // Función para manejar la navegación.
@@ -329,7 +651,7 @@ const App = () => {
         setInventory(response.data);
         saveLS(LS_KEYS.inventory, response.data);
       } catch (error) {
-        console.error('Error cargando inventario:', error);
+        safeError('Error cargando inventario:', error);
       }
     };
 
@@ -339,7 +661,49 @@ const App = () => {
         setUsers(response.data);
         saveLS(LS_KEYS.users, response.data);
       } catch (error) {
-        console.error('Error cargando usuarios:', error);
+        safeError('Error cargando usuarios:', error);
+      }
+    };
+
+    const loadProducts = async () => {
+      try {
+        safeLog('🔄 Cargando productos del servidor...');
+        const response = await api.get('/products/');
+        const serverProducts = response.data;
+        
+        // Convertir productos del servidor al formato local
+        const formattedProducts = serverProducts.map(product => ({
+          id: product.id,
+          name: product.name,
+          price: product.price,
+          category: product.category || 'Producto',
+          stock: product.stock,
+          description: product.description || '',
+          status: 'Sincronizado',
+          hasSales: false,
+          lowStockThreshold: product.low_stock_threshold || 10
+        }));
+        
+        setProducts(formattedProducts);
+        safeLog('✅ Productos sincronizados:', `${formattedProducts.length} productos del servidor`);
+      } catch (error) {
+        safeLog('❌ Error cargando productos del servidor:', error.message);
+        
+        // Manejo específico para Safari y otros navegadores
+        if (error.response) {
+          if (error.response.status === 401) {
+            safeLog('🔒 Error de autenticación - reloguear necesario');
+          } else {
+            safeLog(`🚫 Error del servidor: ${error.response.status}`);
+          }
+        } else if (error.request) {
+          safeLog('🌐 Error de conexión con el servidor');
+        } else {
+          safeLog('⚠️ Error de configuración:', error.message);
+        }
+        
+        // Asegurar que products sea siempre un array válido en caso de error
+        setProducts([]);
       }
     };
 
@@ -356,6 +720,7 @@ const App = () => {
       return (
         <div className="login-container">
           <h1>Iniciar Sesión</h1>
+          
           <form onSubmit={onSubmit}>
             <div className="input-group">
               <label htmlFor="email">Correo Electrónico</label>
@@ -410,6 +775,43 @@ const App = () => {
             >
               {isLocked ? 'Cuenta Bloqueada' : 'Iniciar Sesión'}
             </button>
+            
+            {/* Botón de test específico para Safari */}
+            {isSafari() && (
+              <div style={{ marginTop: '20px' }}>
+                <button 
+                  type="button" 
+                  className="action-button secondary" 
+                  onClick={safariDiagnostic}
+                  style={{ width: '100%', marginBottom: '10px' }}
+                >
+                  🦁 Diagnóstico Safari
+                </button>
+                <button 
+                  type="button" 
+                  className="action-button secondary" 
+                  onClick={safariConnectivityTest}
+                  style={{ width: '100%', marginBottom: '10px' }}
+                >
+                  🦁 Test Conectividad Safari
+                </button>
+                <button 
+                  type="button" 
+                  className="action-button primary" 
+                  onClick={() => {
+                    safeLog('🦁 Safari: Intentando login de prueba con credenciales existentes');
+                    handleLogin({ preventDefault: () => {} }, { 
+                      email: 'jlawrie@icop.edu.ar', 
+                      password: 'jualla2003' 
+                    });
+                  }}
+                  style={{ width: '100%' }}
+                  disabled={isLocked}
+                >
+                  🦁 Login Test Safari (Gerente)
+                </button>
+              </div>
+            )}
           </form>
         </div>
       );
@@ -594,7 +996,7 @@ const App = () => {
                 setChange({ product: '', quantity: '', reason: '' });
                 setShowChangeForm(false);
             } catch (err) {
-                console.error('Error registrando cambio de inventario:', err);
+                safeError('Error registrando cambio de inventario:', err);
                 alert('No se pudo registrar el cambio de inventario.');
             }
         };
@@ -771,7 +1173,7 @@ const App = () => {
                 setTotal(0);
                 setMessage('✅ Venta registrada con éxito, stock actualizado y entrada de caja registrada.');
             } catch (err) {
-                console.error('Error registrando venta:', err);
+                safeError('Error registrando venta:', err);
                 setMessage('La venta se aplicó localmente, pero no se pudo persistir en el servidor.');
             }
         };
@@ -802,7 +1204,7 @@ const App = () => {
                 setShowMovementForm(false);
                 setMessage('✅ Movimiento registrado exitosamente.');
             } catch (err) {
-                console.error('Error registrando movimiento de caja:', err);
+                safeError('Error registrando movimiento de caja:', err);
                 setMessage('No se pudo registrar el movimiento de caja.');
             }
         };
@@ -954,7 +1356,7 @@ const App = () => {
                 setShowMovementForm(false);
                 setMessage('✅ Movimiento registrado exitosamente.');
             } catch (err) {
-                console.error('Error registrando movimiento de caja:', err);
+                safeError('Error registrando movimiento de caja:', err);
                 setMessage('No se pudo registrar el movimiento.');
             }
         };
@@ -1042,6 +1444,32 @@ const App = () => {
                 }
     
                 try {
+                    // Verificación específica para Safari antes de crear el producto
+                    const token = safeStorage.getItem('accessToken');
+                    if (!token) {
+                        setMessage('🚫 Error: No hay token de autenticación. Por favor, vuelve a iniciar sesión.');
+                        if (isSafari()) {
+                            safeLog('🦁 Safari: No hay token disponible para crear producto');
+                        }
+                        return;
+                    }
+                    
+                    // Verificar formato del token JWT
+                    try {
+                        const parts = token.split('.');
+                        if (parts.length !== 3) {
+                            setMessage('🚫 Error: Token de autenticación inválido. Por favor, vuelve a iniciar sesión.');
+                            return;
+                        }
+                    } catch (tokenError) {
+                        setMessage('🚫 Error: Token de autenticación malformado. Por favor, vuelve a iniciar sesión.');
+                        return;
+                    }
+                    
+                    if (isSafari()) {
+                        safeLog('🦁 Safari: Iniciando creación de producto con token válido');
+                    }
+                    
                     // Crear producto en el backend
                     const response = await api.post('/products/', {
                         name: newProduct.name.trim(),
@@ -1052,23 +1480,21 @@ const App = () => {
                         category: newProduct.category
                     });
 
-                    // Actualizar la lista de productos (fuente principal de datos)
+                    // Usar directamente los datos del servidor
                     const createdProduct = response.data;
-                    const nextProductId = Math.max(...products.map(p => p.id), 0) + 1;
                     
-                    const newProductData = {
-                        id: createdProduct.id || nextProductId,
-                        name: newProduct.name.trim(),
-                        price: parseFloat(newProduct.price),
-                        category: newProduct.category,
-                        stock: parseInt(newProduct.stock),
-                        description: newProduct.description.trim(),
+                    // Agregar el producto a la lista local usando los datos del servidor
+                    const updatedProducts = [...products, {
+                        id: createdProduct.id,
+                        name: createdProduct.name,
+                        price: createdProduct.price,
+                        category: createdProduct.category || 'Producto',
+                        stock: createdProduct.stock,
+                        description: createdProduct.description,
                         status: 'Nuevo',
                         hasSales: false,
-                        lowStockThreshold: parseInt(newProduct.low_stock_threshold)
-                    };
-                    
-                    const updatedProducts = [...products, newProductData];
+                        lowStockThreshold: createdProduct.low_stock_threshold
+                    }];
                     setProducts(updatedProducts);
 
                     // Limpiar formulario
@@ -1082,11 +1508,36 @@ const App = () => {
                     });
                     setMessage('✅ Producto creado exitosamente. Ahora aparece en Ventas e Inventario.');
                 } catch (error) {
-                    console.error('Error creando producto:', error);
-                    if (error.response && error.response.status === 400) {
-                        setMessage('🚫 Error: ' + (error.response.data.detail || 'Datos inválidos.'));
+                    safeLog('❌ Error creando producto:', error);
+                    
+                    // Manejo específico de errores para Safari
+                    if (error.response) {
+                        // Error con respuesta del servidor
+                        if (error.response.status === 400) {
+                            setMessage('🚫 Error: ' + (error.response.data.detail || 'Datos inválidos.'));
+                        } else if (error.response.status === 401) {
+                            setMessage('🚫 Error: No tienes autorización. Inicia sesión nuevamente.');
+                            if (isSafari()) {
+                                safeLog('🦁 Safari: Error 401 - verificar token en almacenamiento');
+                                const tokenCheck = safeStorage.getItem('accessToken');
+                                safeLog('🦁 Safari: Token en almacenamiento:', tokenCheck ? 'Existe' : 'No existe');
+                            }
+                        } else if (error.response.status === 403) {
+                            setMessage('🚫 Error: No tienes permisos para realizar esta acción.');
+                        } else {
+                            setMessage(`🚫 Error del servidor: ${error.response.status}`);
+                        }
+                    } else if (error.request) {
+                        // Error de red o CORS
+                        if (isSafari()) {
+                            setMessage('🚫 Error: Problema de conectividad en Safari. Verifica que el servidor esté corriendo.');
+                            safeLog('🦁 Safari: Error de request sin respuesta - posible CORS');
+                        } else {
+                            setMessage('🚫 Error: No se pudo conectar con el servidor. Verifica tu conexión.');
+                        }
                     } else {
-                        setMessage('🚫 Error: No se pudo crear el producto. Intenta nuevamente.');
+                        // Error de configuración o Safari específico
+                        setMessage('🚫 Error: ' + (error.message || 'Error desconocido al crear el producto.'));
                     }
                 }
             };
@@ -1096,6 +1547,29 @@ const App = () => {
                     <h2>Crear Productos Nuevos</h2>
                     {message && <p className="message">{message}</p>}
                     <p>Crea nuevos productos e insumos. Los productos creados aparecerán automáticamente en la sección "Inventario" y "Editar Productos".</p>
+                    
+                    {/* Detectar Safari y mostrar mensaje específico */}
+                    {(() => {
+                        try {
+                            const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+                            if (isSafariBrowser) {
+                                return (
+                                    <p style={{fontSize: '14px', color: '#d4691a', background: '#fff8dc', padding: '10px', borderRadius: '5px', marginBottom: '15px', border: '1px solid #deb887'}}>
+                                        🦁 <strong>Usuario de Safari:</strong> Para mejor compatibilidad, usa el botón "Sincronizar" manualmente para ver productos de otros navegadores. 
+                                        Los productos se sincronizan automáticamente pero Safari puede necesitar sincronización manual ocasionalmente.
+                                    </p>
+                                );
+                            }
+                        } catch (e) {
+                            return null;
+                        }
+                        return null;
+                    })()}
+                    
+                    <p style={{fontSize: '14px', color: '#666', background: '#f0f8ff', padding: '10px', borderRadius: '5px', marginBottom: '15px'}}>
+                        💡 <strong>Sincronización manual:</strong> Los productos NO se cargan automáticamente al iniciar sesión. 
+                        Usa el botón "Sincronizar" para cargar productos existentes cuando lo necesites.
+                    </p>
                     <h3>Agregar nuevo producto</h3>
                     <form className="form-container" onSubmit={handleCreateProduct}>
                         <input 
@@ -1148,6 +1622,18 @@ const App = () => {
                             min="0"
                         />
                         <button type="submit" className="main-button">Crear Producto</button>
+                        
+                        {/* Botón de diagnóstico específico para Safari */}
+                        {isSafari() && (
+                            <button 
+                                type="button" 
+                                className="action-button secondary" 
+                                onClick={safariDiagnostic}
+                                style={{ marginTop: '10px', width: '100%' }}
+                            >
+                                🦁 Diagnóstico Safari
+                            </button>
+                        )}
                     </form>
                 </div>
             );
@@ -1543,12 +2029,14 @@ const App = () => {
             );
         };
     
-        // Componente de la interfaz de gestión de pedidos de mercadería (solo para Gerente).
+        // Componente de la interfaz de gestión de pedidos de clientes (solo para Gerente).
         const OrderManagement = () => {
             const [showAddOrder, setShowAddOrder] = useState(false);
             const [newOrder, setNewOrder] = useState({
-                supplierId: '',
-                items: [{ productName: '', quantity: 1, currentStock: 0, unitPrice: 0, total: 0 }],
+                customerName: '',
+                date: new Date().toISOString().split('T')[0], // Fecha actual por defecto
+                paymentMethod: '',
+                items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }],
                 notes: ''
             });
             const [message, setMessage] = useState('');
@@ -1557,7 +2045,7 @@ const App = () => {
             const addItem = () => {
                 setNewOrder({
                     ...newOrder,
-                    items: [...newOrder.items, { productName: '', quantity: 1, currentStock: 0, unitPrice: 0, total: 0 }]
+                    items: [...newOrder.items, { productName: '', quantity: 1, unitPrice: 0, total: 0 }]
                 });
             };
     
@@ -1574,11 +2062,13 @@ const App = () => {
                 const updatedItems = [...newOrder.items];
                 updatedItems[index] = { ...updatedItems[index], [field]: value };
                 
-                // Si se cambia el nombre del producto, verificar si existe en inventario (opcional)
+                // Si se cambia el nombre del producto, buscar su precio en la lista de productos
                 if (field === 'productName') {
-                    const selectedProduct = inventory.find(p => p.name === value);
-                    // Si el producto existe en inventario, mostrar su stock actual; si no, mostrar "No disponible"
-                    updatedItems[index].currentStock = selectedProduct ? selectedProduct.stock : 'N/A';
+                    const selectedProduct = products.find(p => p.name === value);
+                    if (selectedProduct) {
+                        updatedItems[index].unitPrice = selectedProduct.price;
+                        updatedItems[index].total = updatedItems[index].quantity * selectedProduct.price;
+                    }
                 }
                 
                 // Recalcular el total del item si se cambia cantidad o precio
@@ -1599,9 +2089,14 @@ const App = () => {
             const handleAddOrder = (e) => {
                 e.preventDefault();
                 
-                // Validaciones según la especificación
-                if (!newOrder.supplierId) {
-                    setMessage('🚫 Error: Debe seleccionar un proveedor.');
+                // Validaciones
+                if (!newOrder.customerName.trim()) {
+                    setMessage('🚫 Error: Debe ingresar el nombre del cliente.');
+                    return;
+                }
+                
+                if (!newOrder.paymentMethod) {
+                    setMessage('🚫 Error: Debe seleccionar un método de pago.');
                     return;
                 }
                 
@@ -1615,29 +2110,16 @@ const App = () => {
                     return;
                 }
                 
-                // Verificar que el proveedor existe
-                const selectedSupplier = suppliers.find(s => s.id === parseInt(newOrder.supplierId));
-                if (!selectedSupplier) {
-                    setMessage('🚫 Error: El proveedor seleccionado no existe.');
-                    return;
-                }
-                
-                // Nota: Permitimos productos que no están en inventario para pedidos de nuevos materiales/productos
-                
-                // Crear el nuevo pedido
-                const id = Math.max(...orders.map(o => o.id)) + 1;
-                const today = new Date().toLocaleDateString('es-ES');
+                // Crear el nuevo pedido de cliente
+                const id = Math.max(...orders.map(o => o.id), 0) + 1;
                 const totalAmount = calculateOrderTotal();
                 
                 const orderToAdd = {
                     id,
-                    date: today,
-                    supplierId: parseInt(newOrder.supplierId),
-                    supplierName: selectedSupplier.name,
-                    items: validItems.map(item => ({
-                        ...item,
-                        status: 'Pendiente'
-                    })),
+                    date: newOrder.date,
+                    customerName: newOrder.customerName,
+                    paymentMethod: newOrder.paymentMethod,
+                    items: validItems,
                     totalAmount,
                     status: 'Pendiente',
                     notes: newOrder.notes
@@ -1645,12 +2127,14 @@ const App = () => {
                 
                 setOrders([...orders, orderToAdd]);
                 setNewOrder({
-                    supplierId: '',
-                    items: [{ productName: '', quantity: 1, currentStock: 0, unitPrice: 0, total: 0 }],
+                    customerName: '',
+                    date: new Date().toISOString().split('T')[0],
+                    paymentMethod: '',
+                    items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }],
                     notes: ''
                 });
                 setShowAddOrder(false);
-                setMessage('✅ Pedido registrado exitosamente y listo para envío al proveedor.');
+                setMessage('✅ Pedido de cliente registrado exitosamente.');
             };
     
             const handleUpdateOrderStatus = (orderId, newStatus) => {
@@ -1663,25 +2147,39 @@ const App = () => {
     
             return (
                 <div className="management-container">
-                    <h2>Gestión de Pedidos de Mercadería</h2>
+                    <h2>Gestión de Pedidos de Clientes</h2>
                     {message && <p className="message">{message}</p>}
                     {!showAddOrder ? (
-                        <button className="main-button" onClick={() => setShowAddOrder(true)}>Registrar Nuevo Pedido</button>
+                        <button className="main-button" onClick={() => setShowAddOrder(true)}>Registrar Nuevo Pedido de Cliente</button>
                     ) : (
                         <form className="form-container" onSubmit={handleAddOrder}>
-                            <h3>Registrar Pedido de Mercadería</h3>
+                            <h3>Registrar Pedido de Cliente</h3>
+                            
+                            <input 
+                                type="text" 
+                                value={newOrder.customerName} 
+                                onChange={e => setNewOrder({ ...newOrder, customerName: e.target.value })} 
+                                placeholder="Nombre del cliente" 
+                                required
+                            />
+                            
+                            <input 
+                                type="date" 
+                                value={newOrder.date} 
+                                onChange={e => setNewOrder({ ...newOrder, date: e.target.value })} 
+                                required
+                            />
                             
                             <select 
-                                value={newOrder.supplierId} 
-                                onChange={e => setNewOrder({ ...newOrder, supplierId: e.target.value })} 
+                                value={newOrder.paymentMethod} 
+                                onChange={e => setNewOrder({ ...newOrder, paymentMethod: e.target.value })} 
                                 required
                             >
-                                <option value="">Seleccionar Proveedor</option>
-                                {suppliers.map(supplier => (
-                                    <option key={supplier.id} value={supplier.id}>
-                                        {supplier.name} - {supplier.cuit}
-                                    </option>
-                                ))}
+                                <option value="">Seleccionar método de pago</option>
+                                <option value="efectivo">Efectivo</option>
+                                <option value="debito">Débito</option>
+                                <option value="credito">Crédito</option>
+                                <option value="transferencia">Transferencia</option>
                             </select>
                             
                             <h4>Productos del Pedido</h4>
@@ -1693,14 +2191,20 @@ const App = () => {
                                             type="text" 
                                             value={item.productName} 
                                             onChange={e => updateItem(index, 'productName', e.target.value)} 
-                                            placeholder="Nombre del producto o materia prima" 
+                                            placeholder="Nombre del producto" 
+                                            list="products-list"
                                             required
                                         />
+                                        <datalist id="products-list">
+                                            {products.map((product, idx) => (
+                                                <option key={idx} value={product.name} />
+                                            ))}
+                                        </datalist>
                                         <input 
                                             type="number" 
                                             value={item.quantity} 
                                             onChange={e => updateItem(index, 'quantity', parseInt(e.target.value))} 
-                                            placeholder="Cantidad a pedir" 
+                                            placeholder="Cantidad" 
                                             min="1"
                                             required 
                                         />
@@ -1708,15 +2212,12 @@ const App = () => {
                                             type="number" 
                                             value={item.unitPrice} 
                                             onChange={e => updateItem(index, 'unitPrice', parseFloat(e.target.value))} 
-                                            placeholder="Precio Unitario Estimado" 
+                                            placeholder="Precio Unitario" 
                                             min="0.01"
                                             step="0.01"
                                             required 
                                         />
                                         <span className="item-total">${(item.total || 0).toFixed(2)}</span>
-                                        <span className="current-stock">
-                                            Stock actual: {item.currentStock === 'N/A' ? 'Producto nuevo / No en inventario' : item.currentStock}
-                                        </span>
                                         {newOrder.items.length > 1 && (
                                             <button 
                                                 type="button" 
@@ -1741,7 +2242,7 @@ const App = () => {
                             />
                             
                             <div className="purchase-total">
-                                <strong>Total Estimado del Pedido: ${calculateOrderTotal().toFixed(2)}</strong>
+                                <strong>Total del Pedido: ${calculateOrderTotal().toFixed(2)}</strong>
                             </div>
                             
                             <div className="button-group">
@@ -1751,7 +2252,7 @@ const App = () => {
                         </form>
                     )}
     
-                    <h3>Historial de Pedidos</h3>
+                    <h3>Historial de Pedidos de Clientes</h3>
                     <ul className="list-container">
                         {orders.map(order => (
                             <li key={order.id} className="order-list-item">
@@ -1767,14 +2268,18 @@ const App = () => {
                                             className="status-select"
                                         >
                                             <option value="Pendiente">Pendiente</option>
-                                            <option value="Enviado">Enviado</option>
-                                            <option value="Recibido">Recibido</option>
+                                            <option value="En Preparación">En Preparación</option>
+                                            <option value="Listo">Listo</option>
+                                            <option value="Entregado">Entregado</option>
                                             <option value="Cancelado">Cancelado</option>
                                         </select>
                                     </div>
                                 </div>
-                                <div className="order-supplier">
-                                    <strong>Proveedor:</strong> {order.supplierName}
+                                <div className="order-customer">
+                                    <strong>Cliente:</strong> {order.customerName}
+                                </div>
+                                <div className="order-payment">
+                                    <strong>Método de Pago:</strong> {order.paymentMethod}
                                 </div>
                                 <div className="order-items">
                                     <strong>Productos solicitados:</strong>
@@ -1782,20 +2287,14 @@ const App = () => {
                                         {order.items.map((item, index) => (
                                             <li key={index}>
                                                 {item.productName} - {item.quantity} unidades 
-                                                {item.unitPrice && ` x $${item.unitPrice.toFixed(2)} = $${(item.total || 0).toFixed(2)}`}
-                                                {item.currentStock && ` (Stock actual: ${item.currentStock})`}
-                                                <span className={`item-status ${item.status.toLowerCase()}`}>
-                                                    {item.status}
-                                                </span>
+                                                x ${item.unitPrice.toFixed(2)} = ${(item.total || 0).toFixed(2)}
                                             </li>
                                         ))}
                                     </ul>
                                 </div>
-                                {order.totalAmount && (
-                                    <div className="order-total-display">
-                                        <strong>Total Estimado: ${order.totalAmount.toFixed(2)}</strong>
-                                    </div>
-                                )}
+                                <div className="order-total-display">
+                                    <strong>Total: ${order.totalAmount.toFixed(2)}</strong>
+                                </div>
                                 {order.notes && (
                                     <div className="order-notes">
                                         <strong>Notas:</strong> {order.notes}
@@ -2095,7 +2594,7 @@ const App = () => {
                     return;
                 }
                 try {
-                    const token = localStorage.getItem('accessToken');
+                    const token = safeStorage.getItem('accessToken');
                     const response = await fetch('http://localhost:8000/api/export-data/', {
                         method: 'POST',
                         headers: {
@@ -2359,7 +2858,7 @@ const App = () => {
             };
             
             // Función para eliminar un producto
-            const handleDeleteProduct = () => {
+            const handleDeleteProduct = async () => {
                 if (!selectedProduct) return;
                 
                 // Si el producto tiene ventas, no se puede eliminar
@@ -2375,37 +2874,62 @@ const App = () => {
                     return;
                 }
                 
-                // Eliminar el producto de la lista principal
-                const updatedProducts = products.filter(product => product.id !== selectedProduct.id);
-                
-                setProducts(updatedProducts);
-                setSelectedProduct(null);
-                setEditingProduct({
-                    name: '',
-                    price: 0,
-                    category: 'Producto',
-                    stock: 0,
-                    description: '',
-                    lowStockThreshold: 10
-                });
-                setConfirmDelete(false);
-                setMessage('✅ Producto eliminado correctamente de todas las secciones.');
+                try {
+                    // Eliminar del backend primero
+                    await api.delete(`/products/${selectedProduct.id}/`);
+                    
+                    // Si se elimina correctamente del backend, eliminar del estado local
+                    const updatedProducts = products.filter(product => product.id !== selectedProduct.id);
+                    
+                    setProducts(updatedProducts);
+                    setSelectedProduct(null);
+                    setEditingProduct({
+                        name: '',
+                        price: 0,
+                        category: 'Producto',
+                        stock: 0,
+                        description: '',
+                        lowStockThreshold: 10
+                    });
+                    setConfirmDelete(false);
+                    setMessage('✅ Producto eliminado correctamente del servidor y todas las secciones.');
+                } catch (error) {
+                    safeError('Error eliminando producto del servidor:', error);
+                    setMessage('❌ Error: No se pudo eliminar el producto del servidor. El producto permanece en el sistema.');
+                    setConfirmDelete(false);
+                }
             };
             
             // Función para eliminar todos los productos
-            const handleDeleteAllProducts = () => {
+            const handleDeleteAllProducts = async () => {
                 if (!deleteAllConfirm) {
                     setDeleteAllConfirm(true);
                     setMessage('⚠️ ¿Estás seguro de que deseas eliminar TODOS los productos sin ventas? Esta acción no se puede deshacer.');
                     return;
                 }
                 
-                // Filtrar productos con ventas (solo mantener estos)
-                const productsWithSales = products.filter(product => product.hasSales);
-                
-                setProducts(productsWithSales);
-                setDeleteAllConfirm(false);
-                setMessage('✅ Todos los productos sin ventas han sido eliminados correctamente de todas las secciones.');
+                try {
+                    // Obtener productos sin ventas que se pueden eliminar
+                    const productsToDelete = products.filter(product => !product.hasSales);
+                    
+                    // Eliminar cada producto del backend
+                    const deletePromises = productsToDelete.map(product => 
+                        api.delete(`/products/${product.id}/`)
+                    );
+                    
+                    await Promise.all(deletePromises);
+                    
+                    // Si se eliminan correctamente del backend, actualizar estado local
+                    const productsWithSales = products.filter(product => product.hasSales);
+                    
+                    setProducts(productsWithSales);
+                    setDeleteAllConfirm(false);
+                    setMessage(`✅ ${productsToDelete.length} productos eliminados correctamente del servidor y todas las secciones.`);
+                } catch (error) {
+                    safeError('Error eliminando productos del servidor:', error);
+                    setMessage('❌ Error: No se pudieron eliminar todos los productos del servidor.');
+                    setDeleteAllConfirm(false);
+                }
             };
     
             // Obtener solo productos nuevos (sin ventas registradas)
@@ -2598,10 +3122,26 @@ const App = () => {
 
     useEffect(() => {
       if (isLoggedIn) {
-        // Cargar inventario real
-        loadInventory();
-        // Cargar usuarios reales
+        // Verificación especial para Safari - asegurar que el token esté disponible
+        const token = safeStorage.getItem('accessToken');
+        if (!token) {
+          safeLog('⚠️ No hay token disponible, esperando...');
+          // Reintentar en 200ms para Safari
+          setTimeout(() => {
+            const retryToken = safeStorage.getItem('accessToken');
+            if (retryToken && isLoggedIn) {
+              loadUsers();
+              loadProducts();
+              safeLog('🔐 Usuario logueado - cargando usuarios y productos del servidor (retry)');
+            }
+          }, 200);
+          return;
+        }
+        
+        // Cargar datos del servidor
         loadUsers();
+        loadProducts();
+        safeLog('🔐 Usuario logueado - cargando usuarios y productos del servidor');
       }
     }, [isLoggedIn]);
 

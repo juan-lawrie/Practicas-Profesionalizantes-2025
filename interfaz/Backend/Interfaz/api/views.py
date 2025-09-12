@@ -27,37 +27,52 @@ User = get_user_model()
 def login_view(request):
     email = request.data.get('email')
     password = request.data.get('password')
+    
+    if not email or not password:
+        return Response({
+            'success': False,
+            'error': 'Email y contraseña son requeridos'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
     try:
         user = User.objects.get(email=email)
         if user.check_password(password):
             refresh = RefreshToken.for_user(user)
+            
+            # Obtener el nombre del rol como string
+            role_name = user.role.name if user.role else None
+            
             return Response({
                 'success': True,
                 'user': {
                     'id': user.id,
                     'email': user.email,
-                    'role': user.role
+                    'username': user.username,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': role_name
                 },
                 'tokens': {
-                    'refresh': str(refresh),
                     'access': str(refresh.access_token),
+                    'refresh': str(refresh)
                 }
-            })
+            }, status=status.HTTP_200_OK)
         else:
             return Response({
                 'success': False,
-                'error': 'Contraseña incorrecta'
-            }, status=400)
+                'error': 'Credenciales inválidas'
+            }, status=status.HTTP_401_UNAUTHORIZED)
     except User.DoesNotExist:
         return Response({
             'success': False,
             'error': 'Usuario no encontrado'
-        }, status=400)
+        }, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         return Response({
             'success': False,
-            'error': f'Error interno: {str(e)}'
-        }, status=500)
+            'error': f'Error interno del servidor: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 # ViewSet para la gestión de usuarios
 

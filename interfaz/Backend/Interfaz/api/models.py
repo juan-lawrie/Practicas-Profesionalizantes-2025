@@ -19,7 +19,7 @@ class User(AbstractUser):
         ('Cajero', 'Cajero'),
     )
     # Quitar default='Cajero' para que sea obligatorio
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True)
     # Añadimos la columna `is_active` por defecto
     is_active = models.BooleanField(default=True)
     
@@ -33,6 +33,7 @@ class Product(models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2)
     stock = models.IntegerField(default=0)
     low_stock_threshold = models.IntegerField(default=10) # Umbral para la alerta de stock
+    category = models.CharField(max_length=50, default='Producto') # Categoría del producto
 
     def __str__(self):
         return self.name
