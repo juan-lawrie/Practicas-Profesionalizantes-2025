@@ -2,89 +2,6 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 import api, { safeStorage } from './services/api';
 
-// Función segura para logging que evita errores en Safari
-const safeLog = (message, data) => {
-  try {
-    // Verificar si estamos en un entorno donde console existe
-    if (typeof window === 'undefined' || typeof console === 'undefined') {
-      return;
-    }
-    
-    // Verificar funciones específicas de console
-    if (!console.log || typeof console.log !== 'function') {
-      return;
-    }
-    
-    // Verificar si estamos en Safari para manejar diferente
-    const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    
-    if (data !== undefined) {
-      if (isSafariBrowser) {
-        // En Safari, ser muy conservador con los objetos
-        if (typeof data === 'object' && data !== null) {
-          try {
-            const safeData = JSON.stringify(data, null, 2);
-            console.log(`${message}: ${safeData}`);
-          } catch (jsonError) {
-            console.log(`${message}: [Objeto no serializable]`);
-          }
-        } else {
-          console.log(`${message}: ${String(data)}`);
-        }
-      } else {
-        // Otros navegadores - comportamiento normal
-        console.log(message, data);
-      }
-    } else {
-      console.log(message);
-    }
-  } catch (error) {
-    // Si falla todo logging, no hacer nada para evitar romper la aplicación
-    // No intentar loggear el error para evitar recursión infinita
-  }
-};
-
-// Función segura para errores que evita problemas en Safari
-const safeError = (message, error) => {
-  try {
-    // Verificar si estamos en un entorno donde console existe
-    if (typeof window === 'undefined' || typeof console === 'undefined') {
-      return;
-    }
-    
-    // Verificar funciones específicas de console
-    if (!console.error || typeof console.error !== 'function') {
-      // Fallback a console.log si error no está disponible
-      if (console.log && typeof console.log === 'function') {
-        console.log(`ERROR: ${message}`);
-      }
-      return;
-    }
-    
-    // Verificar si estamos en Safari
-    const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    
-    if (isSafariBrowser) {
-      // En Safari, convertir todo a string para evitar problemas con objetos
-      const errorMsg = error && typeof error === 'object' ? 
-        (error.message || JSON.stringify(error, Object.getOwnPropertyNames(error))) : 
-        String(error);
-      console.log(`🚨 ERROR: ${message} - ${errorMsg}`);
-    } else {
-      console.error(message, error);
-    }
-  } catch (err) {
-    // Si falla todo, intentar un último log básico
-    try {
-      if (console && console.log) {
-        console.log('ERROR DE LOGGING:', message);
-      }
-    } catch (finalErr) {
-      // Si incluso esto falla, no hacer nada
-    }
-  }
-};
-
 const LS_KEYS = {
   inventory: 'inventory',
   users: 'users',
@@ -97,32 +14,112 @@ const LS_KEYS = {
 
 const loadLS = (key, fallback) => {
   try {
+    // Verificar que safeStorage esté disponible
+    if (typeof safeStorage === 'undefined' || !safeStorage) {
+      console.warn('safeStorage no está disponible, usando fallback');
+      return fallback;
+    }
+    
     const raw = safeStorage.getItem(key);
-    if (raw === null) {
+    if (raw === null || raw === undefined) {
       return fallback;
     }
     const parsed = JSON.parse(raw);
     return parsed;
   } catch (error) {
-    safeLog(`⚠️ Error al cargar ${key} desde almacenamiento:`, error.message);
+    console.log(`⚠️ Error al cargar ${key} desde almacenamiento:`, error.message);
     return fallback;
   }
 };
 
 const saveLS = (key, value) => {
   try {
+    // Verificar que safeStorage esté disponible
+    if (typeof safeStorage === 'undefined' || !safeStorage) {
+      console.warn('safeStorage no está disponible, no se puede guardar');
+      return true; // Devolver true para no bloquear la funcionalidad
+    }
+    
     const serialized = JSON.stringify(value);
-    safeStorage.setItem(key, serialized);
+    return safeStorage.setItem(key, serialized);
   } catch (error) {
-    safeLog(`⚠️ Error al guardar ${key} en almacenamiento:`, error.message);
+    console.log(`⚠️ Error al guardar ${key} en almacenamiento:`, error.message);
+    return true; // Devolver true para no bloquear la funcionalidad
   }
 };
 
 const removeLS = (key) => {
   try {
-    safeStorage.removeItem(key);
+    // Verificar que safeStorage esté disponible
+    if (typeof safeStorage === 'undefined' || !safeStorage) {
+      console.warn('safeStorage no está disponible, no se puede eliminar');
+      return true; // Devolver true para no bloquear la funcionalidad
+    }
+    
+    return safeStorage.removeItem(key);
   } catch (error) {
-    safeError(`Error al eliminar ${key}:`, error);
+    console.error(`Error al eliminar ${key}:`, error);
+    return true; // Devolver true para no bloquear la funcionalidad
+  }
+};
+
+// Función helper para obtener token de forma segura
+const getAccessToken = () => {
+  try {
+    if (typeof safeStorage === 'undefined' || !safeStorage) {
+      console.warn('safeStorage no disponible para obtener token');
+      return null;
+    }
+    return safeStorage.getItem('accessToken');
+  } catch (error) {
+    console.warn('Error obteniendo token:', error);
+    return null;
+  }
+};
+
+// Función helper para guardar token de forma segura (sin JSON.stringify)
+const saveAccessToken = (token) => {
+  try {
+    if (typeof safeStorage === 'undefined' || !safeStorage) {
+      console.warn('safeStorage no disponible para guardar token, usando memoria');
+      // Aún así devolver true para no bloquear el login
+      return true;
+    }
+    
+    // Intentar guardar el token
+    const result = safeStorage.setItem('accessToken', token);
+    
+    // Para Safari, hacer una verificación adicional
+    if (result) {
+      // Pequeña pausa y verificación para asegurar que se guardó
+      setTimeout(() => {
+        const verification = safeStorage.getItem('accessToken');
+        if (verification === token) {
+          console.log('✅ Token guardado y verificado correctamente');
+        } else {
+          console.log('📝 Token guardado en memoria (localStorage no disponible)');
+        }
+      }, 10);
+    }
+    
+    return true; // Siempre devolver true para no bloquear el login
+  } catch (error) {
+    console.warn('Error guardando token, continuando:', error);
+    return true; // Devolver true para no bloquear el login
+  }
+};
+
+// Función helper para eliminar token de forma segura
+const removeAccessToken = () => {
+  try {
+    if (typeof safeStorage === 'undefined' || !safeStorage) {
+      console.warn('safeStorage no disponible para eliminar token');
+      return true; // Devolver true para no bloquear el logout
+    }
+    return safeStorage.removeItem('accessToken');
+  } catch (error) {
+    console.warn('Error eliminando token:', error);
+    return true; // Devolver true para no bloquear el logout
   }
 };
 
@@ -131,135 +128,9 @@ const getProductIdByName = (inventory, name) => {
   return p ? p.id : null;
 };
 
-// Detectar Safari para aplicar fixes específicos
-const isSafari = () => {
-  try {
-    return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-  } catch (error) {
-    return false;
-  }
-};
-
-// Función de diagnóstico específica para Safari
-const safariDiagnostic = () => {
-  if (!isSafari()) {
-    alert('🦁 Diagnóstico Safari: No estás usando Safari');
-    return;
-  }
-  
-  let resultados = ['🦁 DIAGNÓSTICO SAFARI:'];
-  
-  // Verificar almacenamiento
-  try {
-    resultados.push(`\n📁 Almacenamiento disponible: ${!safeStorage.isInPrivateMode()}`);
-    resultados.push(`📁 Modo privado Safari: ${safeStorage.isInPrivateMode()}`);
-    
-    // Test básico de almacenamiento
-    try {
-      safeStorage.setItem('__safari_test__', 'test');
-      const testValue = safeStorage.getItem('__safari_test__');
-      safeStorage.removeItem('__safari_test__');
-      resultados.push(`📁 Almacenamiento funcional: ${testValue === 'test'}`);
-    } catch (storageError) {
-      resultados.push(`❌ Almacenamiento NO funcional: ${storageError.message}`);
-    }
-    
-    // Verificar token
-    const token = safeStorage.getItem('accessToken');
-    resultados.push(`\n🔑 Token existe: ${!!token}`);
-    if (token) {
-      resultados.push(`🔑 Token longitud: ${token.length}`);
-      resultados.push(`🔑 Token inicia con: ${token.substring(0, 20)}...`);
-      
-      // Verificar formato JWT
-      try {
-        const parts = token.split('.');
-        resultados.push(`🔑 Token partes JWT: ${parts.length}`);
-        resultados.push(`🔑 Token formato válido: ${parts.length === 3}`);
-      } catch (e) {
-        resultados.push(`❌ Error verificando JWT: ${e.message}`);
-      }
-    }
-    
-    // Verificar conectividad
-    resultados.push(`\n🌐 navigator.onLine: ${navigator.onLine}`);
-    resultados.push(`🌐 User Agent: Safari detectado`);
-    
-    // Mostrar resultados en alert
-    alert(resultados.join('\n'));
-    
-    // También hacer log para consola
-    safeLog('🦁 Diagnóstico completo:', resultados.join(' | '));
-    
-  } catch (error) {
-    alert(`❌ Error en diagnóstico Safari: ${error.message}`);
-    safeError('🦁 Error en diagnóstico Safari:', error);
-  }
-};
-
-// Función de test de conectividad específica para Safari
-const safariConnectivityTest = async () => {
-  if (!isSafari()) {
-    alert('🦁 Test conectividad: No estás usando Safari');
-    return;
-  }
-  
-  safeLog('🦁 Iniciando test de conectividad Safari...');
-  
-  try {
-    // Test básico de conectividad al backend - usando endpoint público
-    safeLog('🦁 Probando conectividad con endpoint público...');
-    
-    const publicResponse = await fetch('http://localhost:8000/api/auth/login/', {
-      method: 'OPTIONS',  // OPTIONS no requiere autenticación
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      mode: 'cors',
-    });
-    
-    safeLog('🦁 Test conectividad OPTIONS - Status:', publicResponse.status);
-    safeLog('🦁 Test conectividad OPTIONS - OK:', publicResponse.ok);
-    
-    // Test del endpoint principal (se espera 401 sin token, pero eso significa que la conexión funciona)
-    safeLog('🦁 Probando endpoint principal (se espera 401)...');
-    
-    const mainResponse = await fetch('http://localhost:8000/api/', {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      mode: 'cors',
-    });
-    
-    safeLog('🦁 Test endpoint principal - Status:', mainResponse.status);
-    
-    // 401 es esperado sin token, significa que el servidor está funcionando
-    if (mainResponse.status === 401) {
-      safeLog('✅ Conectividad OK: Server responde correctamente (401 sin token es normal)');
-      alert('✅ 🦁 CONECTIVIDAD SAFARI OK\n\nEl servidor responde correctamente.\nStatus 401 sin token es normal.');
-    } else if (mainResponse.ok) {
-      safeLog('✅ Conectividad OK: Server responde OK');
-      alert('✅ 🦁 CONECTIVIDAD SAFARI OK\n\nEl servidor responde correctamente.');
-    } else {
-      safeLog('⚠️ Conectividad: Status inesperado:', mainResponse.status);
-      alert(`⚠️ 🦁 CONECTIVIDAD SAFARI\n\nStatus inesperado: ${mainResponse.status}`);
-    }
-
-  } catch (error) {
-    safeError('🦁 Error en test de conectividad Safari:', error);
-    safeLog('🦁 Tipo de error:', error.name);
-    safeLog('🦁 Mensaje de error:', error.message);
-    
-    alert(`❌ 🦁 ERROR DE CONECTIVIDAD SAFARI:\n\n${error.message}\n\nVerifica que el servidor Django esté ejecutándose.`);
-  }
-};
-
 // Simulación de la base de datos de usuarios con roles y credenciales
 const mockUsers = [
-  { email: 'jlawrie@icop.edu.ar', password: 'jualla2003', role: 'Gerente' },
+  { email: 'gerente@example.com', password: 'Password123', role: 'Gerente' },
   { email: 'encargado@example.com', password: 'Password456', role: 'Encargado' },
   { email: 'panadero@example.com', password: 'Password789', role: 'Panadero' },
   { email: 'cajero@example.com', password: 'Password012', role: 'Cajero' },
@@ -283,8 +154,12 @@ const rolePermissions = {
 const App = () => {
     // Limpiar almacenamiento de productos al cargar la aplicación
     React.useEffect(() => {
-        safeStorage.removeItem(LS_KEYS.products);
-        safeLog('🧹 Almacenamiento de productos limpiado al iniciar');
+        try {
+            const removed = removeLS(LS_KEYS.products);
+            console.log('🧹 Almacenamiento de productos limpiado al iniciar:', removed ? 'Éxito' : 'Con warnings');
+        } catch (error) {
+            console.warn('Error al limpiar almacenamiento de productos:', error);
+        }
     }, []);
 
     // Definimos los roles de usuario disponibles.
@@ -307,17 +182,12 @@ const App = () => {
     
     // Estado para el inventario - SIEMPRE basado en products, PERO products SÍ usa localStorage
     const [inventory, setInventory] = useState(() => {
-        safeLog('📋 Inicializando inventario vacío (se generará desde products)');
+        console.log('📋 Inicializando inventario vacío (se generará desde products)');
         return []; // Empezar vacío - se generará desde products
     });
     
-    // Usuarios
-    const [users, setUsers] = useState(loadLS(LS_KEYS.users, [
-        { id: 1, name: 'Juan Perez', email: 'juan.perez@empresa.com', role: 'Gerente' },
-        { id: 2, name: 'Ana Gomez', email: 'ana.gomez@empresa.com', role: 'Panadero' },
-        { id: 3, name: 'Carlos Lopez', email: 'carlos.lopez@empresa.com', role: 'Cajero' },
-        { id: 4, name: 'Marta Diaz', email: 'marta.diaz@empresa.com', role: 'Encargado' },
-    ]));
+    // Usuarios - cargar desde backend, mantener persistencia
+    const [users, setUsers] = useState([]);
     
     // Movimientos de caja
     const [cashMovements, setCashMovements] = useState(loadLS(LS_KEYS.cashMovements, [
@@ -391,27 +261,59 @@ const App = () => {
 
     // Estado para productos con información completa - COMPLETAMENTE basado en API del backend
     const [products, setProducts] = useState(() => {
-        safeLog('🎯 Inicializando products - siempre vacío, se carga desde servidor');
+        console.log('🎯 Inicializando products - siempre vacío, se carga desde servidor');
         // NUNCA usar localStorage para productos - siempre empezar vacío
         return [];
     });
 
+    // Estado para indicar cuando se están sincronizando productos
+    const [isSyncing, setIsSyncing] = useState(false);
+
     // useEffect para guardar en localStorage (inventory NO se guarda, products SÍ se guarda)
     // useEffect(() => { saveLS(LS_KEYS.inventory, inventory); }, [inventory]); // DESHABILITADO - inventario se regenera desde products
-    useEffect(() => { saveLS(LS_KEYS.users, users); }, [users]);
     useEffect(() => { saveLS(LS_KEYS.cashMovements, cashMovements); }, [cashMovements]);
     useEffect(() => { saveLS(LS_KEYS.suppliers, suppliers); }, [suppliers]);
+    
+    // Función para cargar usuarios desde el backend
+    const loadUsersFromBackend = async () => {
+        try {
+            const response = await api.get('/users/');
+            if (response.data) {
+                // Transformar datos del backend para compatibilidad local
+                const backendUsers = response.data.map(user => ({
+                    id: user.id,
+                    name: user.username,
+                    email: user.email,
+                    role: user.role ? user.role.name : 'Cajero', // Extraer nombre del rol
+                    hashedPassword: 'backend-managed' // Password manejado por backend
+                }));
+                setUsers(backendUsers);
+                console.log('✅ Usuarios cargados desde backend:', backendUsers.length);
+            }
+        } catch (error) {
+            console.error('Error cargando usuarios desde backend:', error);
+            // Mantener usuarios existentes si hay error
+        }
+    };
+    
+    // Cargar usuarios al inicializar la aplicación (solo si hay token)
+    useEffect(() => {
+        const token = getAccessToken();
+        if (token && isLoggedIn) {
+            loadUsersFromBackend();
+        }
+    }, [isLoggedIn]);
     useEffect(() => { saveLS(LS_KEYS.purchases, purchases); }, [purchases]);
     useEffect(() => { saveLS(LS_KEYS.orders, orders); }, [orders]);
     // useEffect(() => { saveLS(LS_KEYS.products, products); }, [products]); // DESHABILITADO - products YA NO se guardan automáticamente en localStorage
 
     // useEffect para sincronización productos -> inventario
     useEffect(() => {
-        safeLog('🔄 SYNC: Sincronizando inventario desde products');
+        console.log('🔄 SYNC: Sincronizando inventario desde products');
         
         // Verificar que products sea un array válido antes de usar map
         if (!Array.isArray(products)) {
-            safeLog('⚠️ products no es un array válido, usando array vacío');
+            console.log('⚠️ products no es un array válido, usando array vacío');
             setInventory([]);
             return;
         }
@@ -424,12 +326,12 @@ const App = () => {
             type: product.category
         }));
         
-        safeLog('🎯 Inventario sincronizado:', newInventory?.length ? `${newInventory.length} productos` : 'Array vacío');
+        console.log('🎯 Inventario sincronizado:', newInventory?.length ? `${newInventory.length} productos` : 'Array vacío');
         
         // Actualizar inventario
         setInventory(newInventory);
         
-        safeLog('✅ Sincronización completada');
+        console.log('✅ Sincronización completada');
         
     }, [products]); // Ejecutar cada vez que cambie el array products
 
@@ -459,114 +361,38 @@ const App = () => {
       const passwordToUse = credentials ? credentials.password : password;
       
       try {
-        // Verificación específica para Safari antes del login
-        if (isSafari()) {
-          safeLog('🦁 Safari: Iniciando proceso de login');
-          safeLog('🦁 Safari: Email:', emailToUse);
-          safeLog('🦁 Safari: Modo privado:', safeStorage.isInPrivateMode());
-          
-          // Aviso especial para modo privado
-          if (safeStorage.isInPrivateMode()) {
-            alert('⚠️ Safari en modo privado detectado.\nLa aplicación funcionará pero algunos datos se almacenarán temporalmente en memoria.');
-          }
-        }
-        
+        // Primero intentar autenticar con el backend
         const response = await api.post('/auth/login/', {
           email: emailToUse,
           password: passwordToUse
         });
         
-        if (isSafari()) {
-          safeLog('🦁 Safari: Respuesta recibida:', response.status);
-          safeLog('🦁 Safari: Datos de respuesta:', !!response.data);
-        }
-        
         if (response.data.success) {
-          if (isSafari()) {
-            safeLog('🦁 Safari: Login exitoso, guardando token');
-          }
-          
           // PRIMERO guardar el token para futuras peticiones
-          safeStorage.setItem('accessToken', response.data.tokens.access);
+          const tokenSaved = saveAccessToken(response.data.tokens.access);
+          console.log('🔐 Token guardado:', tokenSaved ? 'Éxito' : 'Con warnings');
           
-          // Verificar que el token se guardó correctamente
-          const tokenVerification = safeStorage.getItem('accessToken');
-          if (!tokenVerification) {
-            throw new Error('Error guardando token - posible problema de almacenamiento');
-          }
-          
-          if (isSafari()) {
-            safeLog('🦁 Safari: Token guardado correctamente, longitud:', tokenVerification.length);
-            safeLog('🦁 Safari: Modo privado:', safeStorage.isInPrivateMode());
-          }
-          
-          // Configurar estados de usuario
+          // Configurar estados de usuario inmediatamente (no esperar verificaciones)
           setUserRole(response.data.user.role);
           setCurrentPage('dashboard');
+          setIsLoggedIn(true);
           
-          // En Safari, esperar un tick antes de setIsLoggedIn para asegurar que el token está disponible
-          if (isSafari()) {
-            setTimeout(() => {
-              setIsLoggedIn(true);
-              safeLog('🦁 Safari: Login completado con delay');
-            }, 100);
-          } else {
-            setIsLoggedIn(true);
-          }
+          // Limpiar productos viejos del almacenamiento (tolerante a errores)
+          removeLS(LS_KEYS.products);
+          console.log('🧹 Almacenamiento de productos limpiado');
           
-          // Limpiar productos viejos del almacenamiento
-          safeStorage.removeItem(LS_KEYS.products);
-          safeLog('🧹 Almacenamiento de productos limpiado');
-          
-          // NO cargar productos automáticamente - dejar que el usuario decida cuándo sincronizar
-          safeLog('✅ Login exitoso - productos NO cargados automáticamente');
+          // Cargar usuarios desde backend después del login exitoso
+          setTimeout(() => loadUsersFromBackend(), 100);
           
           // Resetear contadores de error
           setFailedAttempts(0);
           setLoginError('');
+          
+          console.log('✅ Login exitoso, redirigiendo al dashboard');
+          return; // Salir si el login del backend fue exitoso
         }
       } catch (error) {
-        safeError('Error de login:', error);
-        
-        // Logging específico para Safari con alerts visibles
-        if (isSafari()) {
-          safeLog('🦁 Safari: Error en login detectado');
-          safeLog('🦁 Safari: Tipo de error:', error.name);
-          safeLog('🦁 Safari: Mensaje de error:', error.message);
-          
-          let errorInfo = ['🦁 ERROR DE LOGIN SAFARI:'];
-          errorInfo.push(`❌ Tipo: ${error.name || 'Desconocido'}`);
-          errorInfo.push(`❌ Mensaje: ${error.message || 'Sin mensaje'}`);
-          
-          if (error.response) {
-            safeLog('🦁 Safari: Status de respuesta:', error.response.status);
-            safeLog('🦁 Safari: Datos de error:', error.response.data);
-            
-            errorInfo.push(`🌐 Status HTTP: ${error.response.status}`);
-            if (error.response.data) {
-              if (typeof error.response.data === 'object') {
-                errorInfo.push(`📄 Datos: ${JSON.stringify(error.response.data)}`);
-              } else {
-                errorInfo.push(`📄 Datos: ${error.response.data}`);
-              }
-            }
-          } else if (error.request) {
-            safeLog('🦁 Safari: Error de request sin respuesta');
-            safeLog('🦁 Safari: Request details:', !!error.request);
-            errorInfo.push(`🌐 Error de conexión - Sin respuesta del servidor`);
-          } else {
-            safeLog('🦁 Safari: Error de configuración');
-            errorInfo.push(`⚙️ Error de configuración`);
-          }
-          
-          // Mostrar error en alert para Safari
-          alert(errorInfo.join('\n'));
-          
-          // Verificar almacenamiento en Safari después del error
-          if (safeStorage.isInPrivateMode()) {
-            safeLog('🦁 Safari: Modo privado detectado después de error de login');
-          }
-        }
+        console.error('Error de login con backend:', error);
         
         // Incrementar intentos fallidos
         const newFailedAttempts = failedAttempts + 1;
@@ -578,19 +404,15 @@ const App = () => {
           setShowModal(true);
           setLoginError('Cuenta bloqueada por demasiados intentos fallidos');
         } else {
-          // Mostrar mensaje de error específico para Safari
+          // Mostrar mensaje de error específico
           if (error.response && error.response.status === 400) {
-            const baseMessage = 'Credenciales inválidas. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
-            setLoginError(isSafari() ? baseMessage + ' (Safari)' : baseMessage);
+            setLoginError(`Credenciales inválidas. Intento ${newFailedAttempts} de ${maxAttempts}`);
           } else if (error.response && error.response.status === 401) {
-            const baseMessage = 'No autorizado. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
-            setLoginError(isSafari() ? baseMessage + ' (Safari)' : baseMessage);
+            setLoginError(`No autorizado. Intento ${newFailedAttempts} de ${maxAttempts}`);
           } else if (error.code === 'NETWORK_ERROR' || error.message === 'Network Error') {
-            const baseMessage = 'Error de red. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
-            setLoginError(isSafari() ? baseMessage + ' (Safari CORS)' : baseMessage);
+            setLoginError(`Error de red. Intento ${newFailedAttempts} de ${maxAttempts}`);
           } else {
-            const baseMessage = 'Error de conexión. Intento ' + newFailedAttempts + ' de ' + maxAttempts;
-            setLoginError(isSafari() ? baseMessage + ' (Safari)' : baseMessage);
+            setLoginError(`Credenciales incorrectas. Intento ${newFailedAttempts} de ${maxAttempts}`);
           }
         }
       }
@@ -607,7 +429,7 @@ const App = () => {
         setFailedAttempts(0);  // Resetear intentos fallidos
         setIsLocked(false);    // Desbloquear cuenta
         setShowModal(false);   // Cerrar modal
-        removeLS('accessToken'); // quitar solo el token
+        removeAccessToken(); // quitar solo el token
     };
 
     // Función para manejar la navegación.
@@ -651,7 +473,7 @@ const App = () => {
         setInventory(response.data);
         saveLS(LS_KEYS.inventory, response.data);
       } catch (error) {
-        safeError('Error cargando inventario:', error);
+        console.error('Error cargando inventario:', error);
       }
     };
 
@@ -661,13 +483,14 @@ const App = () => {
         setUsers(response.data);
         saveLS(LS_KEYS.users, response.data);
       } catch (error) {
-        safeError('Error cargando usuarios:', error);
+        console.error('Error cargando usuarios:', error);
       }
     };
 
     const loadProducts = async () => {
       try {
-        safeLog('🔄 Cargando productos del servidor...');
+        setIsSyncing(true);
+        console.log('🔄 Cargando productos del servidor...');
         const response = await api.get('/products/');
         const serverProducts = response.data;
         
@@ -684,26 +507,36 @@ const App = () => {
           lowStockThreshold: product.low_stock_threshold || 10
         }));
         
-        setProducts(formattedProducts);
-        safeLog('✅ Productos sincronizados:', `${formattedProducts.length} productos del servidor`);
+        // Solo actualizar si hay diferencias para evitar re-renders innecesarios
+        setProducts(prevProducts => {
+          if (JSON.stringify(prevProducts) !== JSON.stringify(formattedProducts)) {
+            console.log('✅ Productos actualizados:', `${formattedProducts.length} productos del servidor`);
+            return formattedProducts;
+          } else {
+            console.log('📋 Productos sin cambios - no se actualiza el estado');
+            return prevProducts;
+          }
+        });
       } catch (error) {
-        safeLog('❌ Error cargando productos del servidor:', error.message);
+        console.log('❌ Error cargando productos del servidor:', error.message);
         
         // Manejo específico para Safari y otros navegadores
         if (error.response) {
           if (error.response.status === 401) {
-            safeLog('🔒 Error de autenticación - reloguear necesario');
+            console.log('🔒 Error de autenticación - reloguear necesario');
           } else {
-            safeLog(`🚫 Error del servidor: ${error.response.status}`);
+            console.log(`🚫 Error del servidor: ${error.response.status}`);
           }
         } else if (error.request) {
-          safeLog('🌐 Error de conexión con el servidor');
+          console.log('🌐 Error de conexión con el servidor');
         } else {
-          safeLog('⚠️ Error de configuración:', error.message);
+          console.log('⚠️ Error de configuración:', error.message);
         }
         
-        // Asegurar que products sea siempre un array válido en caso de error
-        setProducts([]);
+        // Solo actualizar a array vacío si no había productos antes
+        setProducts(prevProducts => prevProducts.length > 0 ? prevProducts : []);
+      } finally {
+        setIsSyncing(false);
       }
     };
 
@@ -768,6 +601,7 @@ const App = () => {
               </p>
             )}
             
+            {/* Formulario de login - sin funciones de test en producción */}
             <button 
               type="submit" 
               className="login-button" 
@@ -775,43 +609,6 @@ const App = () => {
             >
               {isLocked ? 'Cuenta Bloqueada' : 'Iniciar Sesión'}
             </button>
-            
-            {/* Botón de test específico para Safari */}
-            {isSafari() && (
-              <div style={{ marginTop: '20px' }}>
-                <button 
-                  type="button" 
-                  className="action-button secondary" 
-                  onClick={safariDiagnostic}
-                  style={{ width: '100%', marginBottom: '10px' }}
-                >
-                  🦁 Diagnóstico Safari
-                </button>
-                <button 
-                  type="button" 
-                  className="action-button secondary" 
-                  onClick={safariConnectivityTest}
-                  style={{ width: '100%', marginBottom: '10px' }}
-                >
-                  🦁 Test Conectividad Safari
-                </button>
-                <button 
-                  type="button" 
-                  className="action-button primary" 
-                  onClick={() => {
-                    safeLog('🦁 Safari: Intentando login de prueba con credenciales existentes');
-                    handleLogin({ preventDefault: () => {} }, { 
-                      email: 'jlawrie@icop.edu.ar', 
-                      password: 'jualla2003' 
-                    });
-                  }}
-                  style={{ width: '100%' }}
-                  disabled={isLocked}
-                >
-                  🦁 Login Test Safari (Gerente)
-                </button>
-              </div>
-            )}
           </form>
         </div>
       );
@@ -878,23 +675,60 @@ const App = () => {
     // Componente de la interfaz de gestión de usuarios (solo para Gerente).
     const UserManagement = () => {
         const [showAddUser, setShowAddUser] = useState(false);
-        const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Cajero' });
+        const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Cajero', password: '' });
         const [message, setMessage] = useState('');
 
-        const handleAddUser = (e) => {
+        const handleAddUser = async (e) => {
             e.preventDefault();
-            // Validar si el usuario ya existe por email.
+            
+            // Validar campos obligatorios
+            if (!newUser.name || !newUser.email || !newUser.password) {
+                setMessage('Error: Todos los campos son obligatorios.');
+                return;
+            }
+            
+            // Validar formato de contraseña
+            const passwordError = validatePassword(newUser.password);
+            if (passwordError) {
+                setMessage(`Error de contraseña: ${passwordError}`);
+                return;
+            }
+            
+            // Validar si el usuario ya existe por email en la lista local
             const userExists = users.some(u => u.email === newUser.email);
             if (userExists) {
                 setMessage('Error: El email ya está registrado.');
                 return;
             }
-            // Agregar el nuevo usuario.
-            const id = Math.max(...users.map(u => u.id)) + 1;
-            setUsers([...users, { ...newUser, id }]);
-            setNewUser({ name: '', email: '', role: 'Cajero' });
-            setShowAddUser(false);
-            setMessage('✅ Usuario creado exitosamente.');
+
+            try {
+                // Crear usuario en el backend
+                const response = await api.post('/users/create/', {
+                    username: newUser.name,
+                    email: newUser.email,
+                    password: newUser.password,
+                    role_name: newUser.role
+                });
+
+                if (response.data) {
+                    // Recargar usuarios desde el backend para obtener datos actualizados
+                    await loadUsersFromBackend();
+                    
+                    // Limpiar formulario
+                    setNewUser({ name: '', email: '', role: 'Cajero', password: '' });
+                    setShowAddUser(false);
+                    setMessage('✅ Usuario creado exitosamente en el sistema.');
+                    
+                    console.log('Usuario creado exitosamente:', response.data);
+                }
+            } catch (error) {
+                console.error('Error creando usuario:', error);
+                if (error.response && error.response.status === 400) {
+                    setMessage('Error: El usuario ya existe en el sistema.');
+                } else {
+                    setMessage('Error: No se pudo crear el usuario. Revisa la conexión.');
+                }
+            }
         };
 
         const handleDeleteUser = (userId) => {
@@ -919,8 +753,27 @@ const App = () => {
                 ) : (
                     <form className="form-container" onSubmit={handleAddUser}>
                         <h3>Registrar Usuario con Roles</h3>
-                        <input type="text" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} placeholder="Nombre Completo" required />
-                        <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="Email" required />
+                        <input 
+                            type="text" 
+                            value={newUser.name} 
+                            onChange={e => setNewUser({ ...newUser, name: e.target.value })} 
+                            placeholder="Nombre Completo" 
+                            required 
+                        />
+                        <input 
+                            type="email" 
+                            value={newUser.email} 
+                            onChange={e => setNewUser({ ...newUser, email: e.target.value })} 
+                            placeholder="Email" 
+                            required 
+                        />
+                        <input 
+                            type="password" 
+                            value={newUser.password} 
+                            onChange={e => setNewUser({ ...newUser, password: e.target.value })} 
+                            placeholder="Contraseña (mín. 8 caracteres, mayúscula, minúscula, número)" 
+                            required 
+                        />
                         <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}>
                             {roles.filter(r => r !== 'Gerente').map(r => <option key={r} value={r}>{r}</option>)}
                         </select>
@@ -931,11 +784,14 @@ const App = () => {
                     </form>
                 )}
 
-                <h3>Usuarios Existentes</h3>
+                <h3>Usuarios Existentes ({users.length})</h3>
                 <ul className="list-container">
                     {users.map(user => (
                         <li key={user.id} className="list-item">
-                            <span>{user.name} ({user.role})</span>
+                            <div className="user-info-container">
+                                <div><strong>{user.name}</strong> ({user.role})</div>
+                                <div className="user-email">{user.email}</div>
+                            </div>
                             <button onClick={() => handleDeleteUser(user.id)} className="delete-button">Eliminar</button>
                         </li>
                     ))}
@@ -996,7 +852,7 @@ const App = () => {
                 setChange({ product: '', quantity: '', reason: '' });
                 setShowChangeForm(false);
             } catch (err) {
-                safeError('Error registrando cambio de inventario:', err);
+                console.error('Error registrando cambio de inventario:', err);
                 alert('No se pudo registrar el cambio de inventario.');
             }
         };
@@ -1173,7 +1029,7 @@ const App = () => {
                 setTotal(0);
                 setMessage('✅ Venta registrada con éxito, stock actualizado y entrada de caja registrada.');
             } catch (err) {
-                safeError('Error registrando venta:', err);
+                console.error('Error registrando venta:', err);
                 setMessage('La venta se aplicó localmente, pero no se pudo persistir en el servidor.');
             }
         };
@@ -1204,7 +1060,7 @@ const App = () => {
                 setShowMovementForm(false);
                 setMessage('✅ Movimiento registrado exitosamente.');
             } catch (err) {
-                safeError('Error registrando movimiento de caja:', err);
+                console.error('Error registrando movimiento de caja:', err);
                 setMessage('No se pudo registrar el movimiento de caja.');
             }
         };
@@ -1356,7 +1212,7 @@ const App = () => {
                 setShowMovementForm(false);
                 setMessage('✅ Movimiento registrado exitosamente.');
             } catch (err) {
-                safeError('Error registrando movimiento de caja:', err);
+                console.error('Error registrando movimiento de caja:', err);
                 setMessage('No se pudo registrar el movimiento.');
             }
         };
@@ -1445,12 +1301,9 @@ const App = () => {
     
                 try {
                     // Verificación específica para Safari antes de crear el producto
-                    const token = safeStorage.getItem('accessToken');
+                    const token = getAccessToken();
                     if (!token) {
                         setMessage('🚫 Error: No hay token de autenticación. Por favor, vuelve a iniciar sesión.');
-                        if (isSafari()) {
-                            safeLog('🦁 Safari: No hay token disponible para crear producto');
-                        }
                         return;
                     }
                     
@@ -1466,9 +1319,6 @@ const App = () => {
                         return;
                     }
                     
-                    if (isSafari()) {
-                        safeLog('🦁 Safari: Iniciando creación de producto con token válido');
-                    }
                     
                     // Crear producto en el backend
                     const response = await api.post('/products/', {
@@ -1508,7 +1358,7 @@ const App = () => {
                     });
                     setMessage('✅ Producto creado exitosamente. Ahora aparece en Ventas e Inventario.');
                 } catch (error) {
-                    safeLog('❌ Error creando producto:', error);
+                    console.log('❌ Error creando producto:', error);
                     
                     // Manejo específico de errores para Safari
                     if (error.response) {
@@ -1517,11 +1367,6 @@ const App = () => {
                             setMessage('🚫 Error: ' + (error.response.data.detail || 'Datos inválidos.'));
                         } else if (error.response.status === 401) {
                             setMessage('🚫 Error: No tienes autorización. Inicia sesión nuevamente.');
-                            if (isSafari()) {
-                                safeLog('🦁 Safari: Error 401 - verificar token en almacenamiento');
-                                const tokenCheck = safeStorage.getItem('accessToken');
-                                safeLog('🦁 Safari: Token en almacenamiento:', tokenCheck ? 'Existe' : 'No existe');
-                            }
                         } else if (error.response.status === 403) {
                             setMessage('🚫 Error: No tienes permisos para realizar esta acción.');
                         } else {
@@ -1529,14 +1374,9 @@ const App = () => {
                         }
                     } else if (error.request) {
                         // Error de red o CORS
-                        if (isSafari()) {
-                            setMessage('🚫 Error: Problema de conectividad en Safari. Verifica que el servidor esté corriendo.');
-                            safeLog('🦁 Safari: Error de request sin respuesta - posible CORS');
-                        } else {
-                            setMessage('🚫 Error: No se pudo conectar con el servidor. Verifica tu conexión.');
-                        }
+                        setMessage('🚫 Error: No se pudo conectar con el servidor. Verifica tu conexión.');
                     } else {
-                        // Error de configuración o Safari específico
+                        // Error de configuración
                         setMessage('🚫 Error: ' + (error.message || 'Error desconocido al crear el producto.'));
                     }
                 }
@@ -1544,32 +1384,12 @@ const App = () => {
     
             return (
                 <div className="creation-container">
-                    <h2>Crear Productos Nuevos</h2>
+                    <div style={{marginBottom: '10px'}}>
+                        <h2>Crear Productos Nuevos</h2>
+                    </div>
                     {message && <p className="message">{message}</p>}
                     <p>Crea nuevos productos e insumos. Los productos creados aparecerán automáticamente en la sección "Inventario" y "Editar Productos".</p>
                     
-                    {/* Detectar Safari y mostrar mensaje específico */}
-                    {(() => {
-                        try {
-                            const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-                            if (isSafariBrowser) {
-                                return (
-                                    <p style={{fontSize: '14px', color: '#d4691a', background: '#fff8dc', padding: '10px', borderRadius: '5px', marginBottom: '15px', border: '1px solid #deb887'}}>
-                                        🦁 <strong>Usuario de Safari:</strong> Para mejor compatibilidad, usa el botón "Sincronizar" manualmente para ver productos de otros navegadores. 
-                                        Los productos se sincronizan automáticamente pero Safari puede necesitar sincronización manual ocasionalmente.
-                                    </p>
-                                );
-                            }
-                        } catch (e) {
-                            return null;
-                        }
-                        return null;
-                    })()}
-                    
-                    <p style={{fontSize: '14px', color: '#666', background: '#f0f8ff', padding: '10px', borderRadius: '5px', marginBottom: '15px'}}>
-                        💡 <strong>Sincronización manual:</strong> Los productos NO se cargan automáticamente al iniciar sesión. 
-                        Usa el botón "Sincronizar" para cargar productos existentes cuando lo necesites.
-                    </p>
                     <h3>Agregar nuevo producto</h3>
                     <form className="form-container" onSubmit={handleCreateProduct}>
                         <input 
@@ -1622,18 +1442,6 @@ const App = () => {
                             min="0"
                         />
                         <button type="submit" className="main-button">Crear Producto</button>
-                        
-                        {/* Botón de diagnóstico específico para Safari */}
-                        {isSafari() && (
-                            <button 
-                                type="button" 
-                                className="action-button secondary" 
-                                onClick={safariDiagnostic}
-                                style={{ marginTop: '10px', width: '100%' }}
-                            >
-                                🦁 Diagnóstico Safari
-                            </button>
-                        )}
                     </form>
                 </div>
             );
@@ -2594,7 +2402,7 @@ const App = () => {
                     return;
                 }
                 try {
-                    const token = safeStorage.getItem('accessToken');
+                    const token = getAccessToken();
                     const response = await fetch('http://localhost:8000/api/export-data/', {
                         method: 'POST',
                         headers: {
@@ -2894,7 +2702,7 @@ const App = () => {
                     setConfirmDelete(false);
                     setMessage('✅ Producto eliminado correctamente del servidor y todas las secciones.');
                 } catch (error) {
-                    safeError('Error eliminando producto del servidor:', error);
+                    console.error('Error eliminando producto del servidor:', error);
                     setMessage('❌ Error: No se pudo eliminar el producto del servidor. El producto permanece en el sistema.');
                     setConfirmDelete(false);
                 }
@@ -2926,7 +2734,7 @@ const App = () => {
                     setDeleteAllConfirm(false);
                     setMessage(`✅ ${productsToDelete.length} productos eliminados correctamente del servidor y todas las secciones.`);
                 } catch (error) {
-                    safeError('Error eliminando productos del servidor:', error);
+                    console.error('Error eliminando productos del servidor:', error);
                     setMessage('❌ Error: No se pudieron eliminar todos los productos del servidor.');
                     setDeleteAllConfirm(false);
                 }
@@ -2937,7 +2745,9 @@ const App = () => {
     
             return (
                 <div className="management-container">
-                    <h2>Editar Productos Nuevos</h2>
+                    <div style={{marginBottom: '10px'}}>
+                        <h2>Editar Productos Nuevos</h2>
+                    </div>
                     {message && <p className="message">{message}</p>}
                     
                     <div className="products-list">
@@ -3123,16 +2933,16 @@ const App = () => {
     useEffect(() => {
       if (isLoggedIn) {
         // Verificación especial para Safari - asegurar que el token esté disponible
-        const token = safeStorage.getItem('accessToken');
+        const token = getAccessToken();
         if (!token) {
-          safeLog('⚠️ No hay token disponible, esperando...');
+          console.log('⚠️ No hay token disponible, esperando...');
           // Reintentar en 200ms para Safari
           setTimeout(() => {
-            const retryToken = safeStorage.getItem('accessToken');
+            const retryToken = getAccessToken();
             if (retryToken && isLoggedIn) {
               loadUsers();
               loadProducts();
-              safeLog('🔐 Usuario logueado - cargando usuarios y productos del servidor (retry)');
+              console.log('🔐 Usuario logueado - cargando usuarios y productos del servidor (retry)');
             }
           }, 200);
           return;
@@ -3141,8 +2951,62 @@ const App = () => {
         // Cargar datos del servidor
         loadUsers();
         loadProducts();
-        safeLog('🔐 Usuario logueado - cargando usuarios y productos del servidor');
+        console.log('🔐 Usuario logueado - cargando usuarios y productos del servidor');
       }
+    }, [isLoggedIn]);
+
+    // Sincronización periódica de productos (cada 5 minutos para reducir interrupciones)
+    useEffect(() => {
+      let interval = null;
+      if (isLoggedIn) {
+        interval = setInterval(() => {
+          // Solo sincronizar si no hay inputs activos para evitar interrumpir al usuario
+          const activeElement = document.activeElement;
+          const isTyping = activeElement && (
+            activeElement.tagName === 'INPUT' || 
+            activeElement.tagName === 'TEXTAREA' || 
+            activeElement.contentEditable === 'true'
+          );
+          
+          if (!isTyping) {
+            loadProducts();
+            console.log('🔄 Sincronización automática de productos');
+          } else {
+            console.log('⏸️ Sincronización pausada - usuario escribiendo');
+          }
+        }, 300000); // 5 minutos en lugar de 30 segundos
+      }
+      
+      return () => {
+        if (interval) {
+          clearInterval(interval);
+        }
+      };
+    }, [isLoggedIn]);
+
+    // Sincronización cuando la ventana recupera el foco
+    useEffect(() => {
+      const handleFocus = () => {
+        if (isLoggedIn) {
+          loadProducts();
+          console.log('👁️ Ventana enfocada - sincronizando productos');
+        }
+      };
+
+      const handleVisibilityChange = () => {
+        if (!document.hidden && isLoggedIn) {
+          loadProducts();
+          console.log('👁️ Pestaña visible - sincronizando productos');
+        }
+      };
+
+      window.addEventListener('focus', handleFocus);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        window.removeEventListener('focus', handleFocus);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
     }, [isLoggedIn]);
 
     return (

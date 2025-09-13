@@ -242,3 +242,43 @@ h1 {
   font-weight: 500;
 }
 
+/* Estilos para credenciales de prueba en login */
+.demo-credentials {
+  background-color: #e8f4f8;
+  border: 2px solid #17a2b8;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.demo-credentials h3 {
+  color: #0c5460;
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+.credentials-list {
+  margin: 10px 0;
+}
+
+.credentials-list div {
+  padding: 5px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  color: #495057;
+}
+
+.credentials-list strong {
+  color: #0c5460;
+  font-weight: bold;
+}
+
+.demo-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6c757d;
+  font-style: italic;
+}
+

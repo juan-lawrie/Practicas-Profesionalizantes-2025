@@ -12,6 +12,8 @@ class RoleSerializer(serializers.ModelSerializer):
 
 # Serializer para el modelo de usuario (usando el modelo extendido)
 class UserSerializer(serializers.ModelSerializer):
+    role = RoleSerializer(read_only=True)
+    
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'role', 'is_active')
@@ -19,17 +21,24 @@ class UserSerializer(serializers.ModelSerializer):
 
 # Serializer para crear usuarios (incluye el campo de contraseña)
 class UserCreateSerializer(serializers.ModelSerializer):
+    role_name = serializers.CharField(write_only=True)
+    
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'role')
+        fields = ('username', 'email', 'password', 'role_name')
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
+        role_name = validated_data.pop('role_name', 'Cajero')
+        
+        # Buscar o crear el rol
+        role, created = Role.objects.get_or_create(name=role_name)
+        
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
             password=validated_data['password'],
-            role=validated_data.get('role', 'Cajero')
+            role=role
         )
         return user
 

@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-gm^=mohp%0_5ou(l_x!2%zf@f6(4=z6g&@h6@5diigi-7=p%nw'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
 
@@ -34,8 +34,8 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # Configuración exhaustiva de CORS específica para Safari y compatibilidad cross-browser
-CORS_ALLOW_ALL_ORIGINS = True  # Solo para desarrollo
-CORS_ALLOW_CREDENTIALS = False  # CRUCIAL: False para Safari
+CORS_ALLOW_ALL_ORIGINS = False  # ❌ Cambiar esto
+CORS_ALLOW_CREDENTIALS = False  # ✅ Mantener False para JWT
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -208,12 +208,10 @@ REST_FRAMEWORK = {
 # Configuración de JWT
 from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-    'ROTATE_REFRESH_TOKENS': False,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),  # Más corto
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),     # Más corto 
+    'ROTATE_REFRESH_TOKENS': True,                   # ✅ Activar
 }
-
 # Configuraciones adicionales específicas para Safari
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 SECURE_REFERRER_POLICY = None

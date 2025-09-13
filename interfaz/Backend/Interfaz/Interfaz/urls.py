@@ -39,10 +39,12 @@ def root_redirect(request):
 urlpatterns = [
     path('', root_redirect),
     path('admin/', admin.site.urls),
-    path('api/', include(router.urls)),
+    # URLs específicas primero para evitar conflictos
     path('api/users/create/', UserListCreate.as_view(), name='user-list-create'),
     path('api/users/<int:pk>/delete/', UserDestroy.as_view(), name='user-delete'),
     path('api/sales/create/', SaleCreate.as_view(), name='sale-create'),
     path('api/auth/login/', login_view, name='login'),
-    path('api/export-data/', ExportDataView.as_view(), name='export-data')
+    path('api/export-data/', ExportDataView.as_view(), name='export-data'),
+    # Router general después
+    path('api/', include(router.urls)),
 ]

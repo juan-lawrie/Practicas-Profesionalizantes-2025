@@ -21,58 +21,91 @@ import json
 
 User = get_user_model()
 
-# Vista de login
+# Vista de login mejorada
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
+    """
+    Endpoint de autenticación.
+    Espera JSON: {"email": "...", "password": "..."}
+    Respuestas:
+      200 OK   -> { success: true, user: {...}, tokens: {access, refresh} }
+      400 Error de credenciales / datos faltantes
+      403 Usuario inactivo
+      500 Error interno inesperado
+    """
     email = request.data.get('email')
     password = request.data.get('password')
-    
+
+    # Validación campos obligatorios
     if not email or not password:
         return Response({
             'success': False,
-            'error': 'Email y contraseña son requeridos'
+            'error': {
+                'code': 'missing_fields',
+                'message': 'Email y password son requeridos.'
+            }
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
+    # Normalizamos email para búsqueda (case-insensitive)
+    email_normalizado = email.strip().lower()
+
     try:
-        user = User.objects.get(email=email)
-        if user.check_password(password):
-            refresh = RefreshToken.for_user(user)
-            
-            # Obtener el nombre del rol como string
-            role_name = user.role.name if user.role else None
-            
-            return Response({
-                'success': True,
-                'user': {
-                    'id': user.id,
-                    'email': user.email,
-                    'username': user.username,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'role': role_name
-                },
-                'tokens': {
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh)
-                }
-            }, status=status.HTTP_200_OK)
-        else:
+        user = User.objects.filter(email__iexact=email_normalizado).first()
+        if not user:
             return Response({
                 'success': False,
-                'error': 'Credenciales inválidas'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-    except User.DoesNotExist:
-        return Response({
-            'success': False,
-            'error': 'Usuario no encontrado'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': f'Error interno del servidor: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                'error': {
+                    'code': 'user_not_found',
+                    'message': 'Usuario no encontrado.'
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
 
+        if not user.is_active:
+            return Response({
+                'success': False,
+                'error': {
+                    'code': 'inactive',
+                    'message': 'La cuenta está inactiva.'
+                }
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if not user.check_password(password):
+            return Response({
+                'success': False,
+                'error': {
+                    'code': 'invalid_credentials',
+                    'message': 'Credenciales inválidas.'
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Credenciales correctas -> generar tokens
+        refresh = RefreshToken.for_user(user)
+        role_name = user.role.name if getattr(user, 'role', None) else None
+
+        return Response({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'username': user.username,
+                'role': role_name
+            },
+            'tokens': {
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+            }
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        # Log simple para depuración (evitar exponer detalles sensibles)
+        print(f"[login_view] Error inesperado: {e}")
+        return Response({
+            'success': False,
+            'error': {
+                'code': 'internal_error',
+                'message': 'Error interno del servidor.'
+            }
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # ViewSet para la gestión de usuarios
 
@@ -86,7 +119,12 @@ class ProductListCreate(generics.ListCreateAPIView):
 
 class UserListCreate(generics.ListCreateAPIView):
     queryset = User.objects.all()
-    serializer_class = UserSerializer
+    permission_classes = [AllowAny]  # Permitir creación sin autenticación por ahora
+    
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return UserCreateSerializer
+        return UserSerializer
     
 class UserDestroy(generics.DestroyAPIView):
     queryset = User.objects.all()
