@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-gm^=mohp%0_5ou(l_x!2%zf@f6(4=z6g&@h6@5diigi-7=p%nw'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
 
@@ -35,7 +35,7 @@ CORS_ALLOWED_ORIGINS = [
 
 # Configuración exhaustiva de CORS específica para Safari y compatibilidad cross-browser
 CORS_ALLOW_ALL_ORIGINS = False  # ❌ Cambiar esto
-CORS_ALLOW_CREDENTIALS = False  # ✅ Mantener False para JWT
+CORS_ALLOW_CREDENTIALS = True  # Necesario para enviar cookies de refresh entre frontend y backend
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -87,7 +87,7 @@ CORS_EXPOSE_HEADERS = [
 ]
 # Configuración adicional específica para Safari
 CORS_ALLOW_PRIVATE_NETWORK = True
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False
 
 # Application definition
 
@@ -188,7 +188,23 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Media files (user uploaded content)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Additional static files directories
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
+# Static files finders
+STATICFILES_FINDERS = [
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

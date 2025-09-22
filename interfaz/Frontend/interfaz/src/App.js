@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
-import api, { safeStorage } from './services/api';
+import api, { safeStorage, backendLogin, backendLogout } from './services/api';
 
 const LS_KEYS = {
   inventory: 'inventory',
@@ -15,19 +15,16 @@ const LS_KEYS = {
 const loadLS = (key, fallback) => {
   try {
     // Verificar que safeStorage esté disponible
-    if (typeof safeStorage === 'undefined' || !safeStorage) {
-      console.warn('safeStorage no está disponible, usando fallback');
-      return fallback;
-    }
-    
-    const raw = safeStorage.getItem(key);
-    if (raw === null || raw === undefined) {
-      return fallback;
-    }
-    const parsed = JSON.parse(raw);
-    return parsed;
+        if (typeof safeStorage === 'undefined' || !safeStorage || !safeStorage.isAvailable()) {
+            // Si safeStorage no está disponible, retornamos fallback silenciosamente.
+            return fallback;
+        }
+
+        const raw = safeStorage.getItem(key);
+        if (raw === null || raw === undefined) return fallback;
+        try { return JSON.parse(raw); } catch (e) { return fallback; }
   } catch (error) {
-    console.log(`⚠️ Error al cargar ${key} desde almacenamiento:`, error.message);
+        console.debug && console.debug(`Error al cargar ${key} desde almacenamiento:`, error && error.message);
     return fallback;
   }
 };
@@ -35,15 +32,15 @@ const loadLS = (key, fallback) => {
 const saveLS = (key, value) => {
   try {
     // Verificar que safeStorage esté disponible
-    if (typeof safeStorage === 'undefined' || !safeStorage) {
-      console.warn('safeStorage no está disponible, no se puede guardar');
-      return true; // Devolver true para no bloquear la funcionalidad
-    }
-    
-    const serialized = JSON.stringify(value);
-    return safeStorage.setItem(key, serialized);
+        if (typeof safeStorage === 'undefined' || !safeStorage || !safeStorage.isAvailable()) {
+            // Silencioso: no intentar guardar si no hay storage confiable
+            return true;
+        }
+
+        const serialized = JSON.stringify(value);
+        return safeStorage.setItem(key, serialized);
   } catch (error) {
-    console.log(`⚠️ Error al guardar ${key} en almacenamiento:`, error.message);
+        console.debug && console.debug(`Error al guardar ${key} en almacenamiento:`, error && error.message);
     return true; // Devolver true para no bloquear la funcionalidad
   }
 };
@@ -51,76 +48,74 @@ const saveLS = (key, value) => {
 const removeLS = (key) => {
   try {
     // Verificar que safeStorage esté disponible
-    if (typeof safeStorage === 'undefined' || !safeStorage) {
-      console.warn('safeStorage no está disponible, no se puede eliminar');
-      return true; // Devolver true para no bloquear la funcionalidad
-    }
-    
-    return safeStorage.removeItem(key);
+        if (typeof safeStorage === 'undefined' || !safeStorage || !safeStorage.isAvailable()) {
+            return true;
+        }
+
+        return safeStorage.removeItem(key);
   } catch (error) {
-    console.error(`Error al eliminar ${key}:`, error);
+        console.debug && console.debug(`Error al eliminar ${key}:`, error && error.message);
     return true; // Devolver true para no bloquear la funcionalidad
   }
 };
 
 // Función helper para obtener token de forma segura
 const getAccessToken = () => {
-  try {
-    if (typeof safeStorage === 'undefined' || !safeStorage) {
-      console.warn('safeStorage no disponible para obtener token');
-      return null;
+    try {
+        if (typeof safeStorage !== 'undefined' && safeStorage && safeStorage.isAvailable && safeStorage.isAvailable()) {
+            return safeStorage.getItem('accessToken');
+        }
+
+        // Intentar localStorage como último recurso pero sin loguear repetidamente
+        try {
+            if (typeof localStorage !== 'undefined') return localStorage.getItem('accessToken');
+        } catch (e) {
+            // Silencioso: el warning principal ya lo hace safeStorage al inicializarse
+        }
+
+        return null;
+    } catch (error) {
+        console.debug && console.debug('Error obteniendo token:', error && error.message);
+        return null;
     }
-    return safeStorage.getItem('accessToken');
-  } catch (error) {
-    console.warn('Error obteniendo token:', error);
-    return null;
-  }
 };
 
 // Función helper para guardar token de forma segura (sin JSON.stringify)
 const saveAccessToken = (token) => {
-  try {
-    if (typeof safeStorage === 'undefined' || !safeStorage) {
-      console.warn('safeStorage no disponible para guardar token, usando memoria');
-      // Aún así devolver true para no bloquear el login
-      return true;
-    }
-    
-    // Intentar guardar el token
-    const result = safeStorage.setItem('accessToken', token);
-    
-    // Para Safari, hacer una verificación adicional
-    if (result) {
-      // Pequeña pausa y verificación para asegurar que se guardó
-      setTimeout(() => {
-        const verification = safeStorage.getItem('accessToken');
-        if (verification === token) {
-          console.log('✅ Token guardado y verificado correctamente');
-        } else {
-          console.log('📝 Token guardado en memoria (localStorage no disponible)');
+    try {
+        // Preferir safeStorage (maneja fallback internamente)
+        if (typeof safeStorage !== 'undefined' && safeStorage && safeStorage.isAvailable && safeStorage.isAvailable()) {
+            return safeStorage.setItem('accessToken', token);
         }
-      }, 10);
+
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('accessToken', token);
+                return true;
+            }
+        } catch (e) { /* silently ignore */ }
+
+        return false;
+    } catch (error) {
+        console.debug && console.debug('Error guardando token:', error && error.message);
+        return false;
     }
-    
-    return true; // Siempre devolver true para no bloquear el login
-  } catch (error) {
-    console.warn('Error guardando token, continuando:', error);
-    return true; // Devolver true para no bloquear el login
-  }
 };
 
 // Función helper para eliminar token de forma segura
 const removeAccessToken = () => {
-  try {
-    if (typeof safeStorage === 'undefined' || !safeStorage) {
-      console.warn('safeStorage no disponible para eliminar token');
-      return true; // Devolver true para no bloquear el logout
+    try {
+        if (typeof safeStorage !== 'undefined' && safeStorage && safeStorage.isAvailable && safeStorage.isAvailable()) {
+            return safeStorage.removeItem('accessToken');
+        }
+
+        try { if (typeof localStorage !== 'undefined') { localStorage.removeItem('accessToken'); return true; } } catch (e) { /* ignore */ }
+
+        return true;
+    } catch (error) {
+        console.debug && console.debug('Error eliminando token:', error && error.message);
+        return true; // Devolver true para no bloquear el logout
     }
-    return safeStorage.removeItem('accessToken');
-  } catch (error) {
-    console.warn('Error eliminando token:', error);
-    return true; // Devolver true para no bloquear el logout
-  }
 };
 
 // Función helper para convertir valores a números de forma segura antes de usar toFixed
@@ -128,6 +123,9 @@ const safeToFixed = (value, decimals = 2) => {
   const num = parseFloat(value);
   return isNaN(num) ? (0).toFixed(decimals) : num.toFixed(decimals);
 };
+
+// NOTE: validatePassword and handleLogin are defined inside the App component
+// because they need access to React state setters (setLoginError, setIsLoggedIn, ...).
 
 const getProductIdByName = (inventory, name) => {
   const p = inventory.find(i => i.name === name);
@@ -158,13 +156,17 @@ const rolePermissions = {
 
 // Componente principal de la aplicación.
 const App = () => {
-    // Limpiar almacenamiento de productos al cargar la aplicación
+    // Limpiar almacenamiento de productos y movimientos de caja al cargar la aplicación
     React.useEffect(() => {
         try {
-            const removed = removeLS(LS_KEYS.products);
-            console.log('🧹 Almacenamiento de productos limpiado al iniciar:', removed ? 'Éxito' : 'Con warnings');
+            const removedProducts = removeLS(LS_KEYS.products);
+            const removedCash = removeLS(LS_KEYS.cashMovements);
+            console.log('🧹 Almacenamiento limpiado al iniciar:');
+            console.log('- Productos:', removedProducts ? 'Éxito' : 'Con warnings');
+            console.log('- Movimientos de caja:', removedCash ? 'Éxito' : 'Con warnings');
+            console.log('✅ Datos se cargarán desde PostgreSQL');
         } catch (error) {
-            console.warn('Error al limpiar almacenamiento de productos:', error);
+            console.warn('Error al limpiar almacenamiento:', error);
         }
     }, []);
 
@@ -175,6 +177,8 @@ const App = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLoggedIn, setIsLoggedIn] = useState(false);
+    // Indica si ya intentamos restaurar sesión al montar (para evitar parpadeos)
+    const [sessionChecked, setSessionChecked] = useState(false);
     const [loginError, setLoginError] = useState('');
     const [failedAttempts, setFailedAttempts] = useState(0);
     const [isLocked, setIsLocked] = useState(false);
@@ -185,6 +189,93 @@ const App = () => {
     const [userRole, setUserRole] = useState(null);
     // Estado para la página current a mostrar.
     const [currentPage, setCurrentPage] = useState('login');
+
+        // Validación de contraseña mínima (se usa en creación de usuarios)
+        const validatePassword = (pwd) => {
+            if (!pwd || typeof pwd !== 'string') return 'La contraseña es obligatoria';
+            if (pwd.length < (passwordPolicy?.minLength || 8)) return `La contraseña debe tener al menos ${(passwordPolicy?.minLength || 8)} caracteres`;
+            if (passwordPolicy?.hasUpperCase && !/[A-Z]/.test(pwd)) return 'La contraseña debe contener al menos una mayúscula';
+            if (passwordPolicy?.hasLowerCase && !/[a-z]/.test(pwd)) return 'La contraseña debe contener al menos una minúscula';
+            if (passwordPolicy?.hasNumber && !/[0-9]/.test(pwd)) return 'La contraseña debe contener al menos un número';
+            return null; // sin errores
+        };
+
+        // Manejo de login: realiza petición al backend, guarda token y actualiza estado
+        const handleLogin = async (e, { email: userEmail, password: userPassword }) => {
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            try {
+                setLoginError('');
+                // Validaciones mínimas
+                if (!userEmail || !userPassword) {
+                    setLoginError('Debes ingresar email y contraseña');
+                    setFailedAttempts(prev => prev + 1);
+                    return;
+                }
+
+                // Petición de login al backend
+                // El view `TokenObtainPairView` espera `username` y `password` (no `email`).
+                // En algunos entornos el proyecto también expone `api/auth/login/` que acepta `email`.
+                let resp;
+                const looksLikeEmail = typeof userEmail === 'string' && userEmail.includes('@');
+                try {
+                    if (looksLikeEmail) {
+                        // Si el usuario ingresó un email, preferimos el endpoint que acepta email
+                        resp = await api.post('/auth/login/', { email: userEmail, password: userPassword });
+                    } else {
+                        // Si no parece email, asumir username y usar endpoint JWT estándar
+                        resp = await api.post('/token/', { username: userEmail, password: userPassword });
+                    }
+                } catch (innerErr) {
+                    const status = innerErr?.response?.status;
+                    // Si la llamada preferida falló con 404/400/401 intentamos el otro endpoint como fallback
+                    if (status === 404 || status === 400 || status === 401) {
+                        if (looksLikeEmail) {
+                            console.warn(`/api/auth/login/ responded with ${status}, intentando /api/token/ como fallback`);
+                            resp = await api.post('/token/', { username: userEmail, password: userPassword });
+                        } else {
+                            console.warn(`/api/token/ responded with ${status}, intentando /api/auth/login/ como fallback`);
+                            resp = await api.post('/auth/login/', { email: userEmail, password: userPassword });
+                        }
+                    } else {
+                        // Re-lanzar para que el catch exterior lo maneje
+                        throw innerErr;
+                    }
+                }
+                // Normalizar distintos formatos de respuesta de token
+                const access = resp?.data?.access
+                    || resp?.data?.accessToken
+                    || resp?.data?.token
+                    || resp?.data?.tokens?.access
+                    || resp?.data?.tokens?.access_token
+                    || resp?.data?.tokens?.token;
+
+                if (!access) {
+                    console.error('Respuesta de login sin token esperado:', resp?.data);
+                    setLoginError('No se recibió token del servidor');
+                    return;
+                }
+
+                // Guardar token usando helper (refresh está en cookie HttpOnly)
+                try { saveAccessToken(access); } catch (err) { console.warn('No se pudo guardar token:', err); }
+
+                setIsLoggedIn(true);
+                // Obtener rol desde distintas posibles posiciones
+                const roleFromResp = resp?.data?.user?.role || resp?.data?.role || (resp?.data?.user && resp.data.user.role) || 'Gerente';
+                setUserRole(roleFromResp);
+                setCurrentPage('dashboard');
+
+                // Cargar datos iniciales directamente desde backend
+                if (typeof loadUsersFromBackend === 'function') await loadUsersFromBackend();
+                if (typeof loadProducts === 'function') await loadProducts();
+                if (typeof loadSales === 'function') await loadSales();
+                console.log('🔐 Login completo y datos iniciales cargados');
+            } catch (error) {
+                console.error('Error de login con backend:', error?.response?.data || error?.message || error);
+                setFailedAttempts(prev => prev + 1);
+                if (error.response && error.response.status === 401) setLoginError('Credenciales inválidas');
+                else setLoginError('Error iniciando sesión. Revisa la consola.');
+            }
+        };
     
     // Estado para el inventario - SIEMPRE basado en products, PERO products SÍ usa localStorage
     const [inventory, setInventory] = useState(() => {
@@ -195,11 +286,11 @@ const App = () => {
     // Usuarios - cargar desde backend, mantener persistencia
     const [users, setUsers] = useState([]);
     
-    // Movimientos de caja
-    const [cashMovements, setCashMovements] = useState(loadLS(LS_KEYS.cashMovements, [
-        { id: 1, date: '2023-10-26', type: 'Entrada', amount: 1500, description: 'Ventas del día' },
-        { id: 2, date: '2023-10-25', type: 'Salida', amount: 500, description: 'Pago a proveedor' },
-    ]));
+    // Movimientos de caja - SIEMPRE cargar desde backend, NO usar localStorage
+    const [cashMovements, setCashMovements] = useState(() => {
+        console.log('💰 Inicializando movimientos de caja vacíos (se cargarán desde PostgreSQL)');
+        return []; // Empezar vacío - se cargarán desde PostgreSQL
+    });
     
     // Proveedores
     const [suppliers, setSuppliers] = useState(loadLS(LS_KEYS.suppliers, [
@@ -208,64 +299,154 @@ const App = () => {
     ]));
     
     // Compras
-    const [purchases, setPurchases] = useState(loadLS(LS_KEYS.purchases, [
-        { 
-            id: 1, 
-            date: '26/10/2023', 
-            supplierId: 1, 
-            supplierName: 'Distribuidora Central',
-            items: [
-                { productName: 'Harina', quantity: 10, unitPrice: 150.50, total: 1505.00 },
-                { productName: 'Azúcar', quantity: 5, unitPrice: 120.00, total: 600.00 }
-            ],
-            totalAmount: 2105.00,
-            status: 'Completada'
-        },
-        { 
-            id: 2, 
-            date: '25/10/2023', 
-            supplierId: 2, 
-            supplierName: 'Proveedor Express',
-            items: [
-                { productName: 'Medialunas', quantity: 50, unitPrice: 25.00, total: 1250.00 },
-                { productName: 'Café', quantity: 10, unitPrice: 180.00, total: 1800.00 }
-            ],
-            totalAmount: 3050.00,
-            status: 'Completada'
-        }
-    ]));
+    const [purchases, setPurchases] = useState([]);
+
+    // Ventas (traídas desde backend)
+    const [sales, setSales] = useState([]);
+
+        // Normalize purchase object returned by server to frontend-friendly shape
+        const normalizePurchaseFromServer = (p) => {
+            if (!p) return p;
+            const totalAmount = p.total_amount ?? p.totalAmount ?? 0;
+            const supplierName = p.supplier_name ?? p.supplierName ?? p.supplier ?? '';
+            const items = Array.isArray(p.items) ? p.items.map(item => ({
+                ...item,
+                total: item.total ?? item.totalAmount ?? (item.quantity && item.unitPrice ? item.quantity * item.unitPrice : 0)
+            })) : [];
+            return { ...p, totalAmount, supplierName, items };
+        };
     
     // Pedidos de clientes
-    const [orders, setOrders] = useState(loadLS(LS_KEYS.orders, [
-        { 
-            id: 1, 
-            date: '2023-10-27', 
-            customerName: 'María González',
-            paymentMethod: 'efectivo',
-            items: [
-                { productName: 'Churros Rellenos', quantity: 12, unitPrice: 25.00, total: 300.00 },
-                { productName: 'Café con Leche', quantity: 2, unitPrice: 80.00, total: 160.00 }
-            ],
-            totalAmount: 460.00,
-            status: 'Entregado',
-            notes: 'Cliente habitual'
-        },
-        { 
-            id: 2, 
-            date: '2023-10-26', 
-            customerName: 'Carlos Pérez',
-            paymentMethod: 'debito',
-            items: [
-                { productName: 'Medialunas', quantity: 6, unitPrice: 45.00, total: 270.00 },
-                { productName: 'Café Cortado', quantity: 1, unitPrice: 70.00, total: 70.00 }
-            ],
-            totalAmount: 340.00,
-            status: 'Listo',
-            notes: 'Para llevar'
-        }
-    ]));
+    const [orders, setOrders] = useState([]);
 
     // Estado para productos con información completa - COMPLETAMENTE basado en API del backend
+    // Cargar historial de compras desde el backend al iniciar sesión
+    useEffect(() => {
+        const fetchPurchases = async () => {
+            try {
+                const response = await api.get('/purchases/');
+                // Normalizar cada compra para asegurar campos frontend-friendly
+                const normalized = Array.isArray(response.data) ? response.data.map(normalizePurchaseFromServer) : [];
+                setPurchases(normalized);
+            } catch (error) {
+                console.error('Error al cargar compras desde el backend:', error);
+            }
+        };
+        if (isLoggedIn) {
+            fetchPurchases();
+        }
+    }, [isLoggedIn]);
+    // Cargar pedidos desde backend al iniciar sesión (persistencia cross-browser)
+    useEffect(() => {
+        const fetchOrders = async () => {
+            try {
+                const token = getAccessToken();
+                if (!token) return;
+                const res = await api.get('/orders/');
+                if (res && res.data) {
+                    // Normalizar items y campos si es necesario
+                    const backendOrders = res.data.map(o => ({
+                        id: o.id,
+                        date: o.date,
+                        customerName: o.customer_name || o.customerName || o.customer_name || '',
+                        paymentMethod: o.payment_method || o.paymentMethod || '',
+                        items: Array.isArray(o.items) ? o.items.map(it => ({
+                            productName: it.product_name || it.productName || '',
+                            quantity: it.quantity,
+                            unitPrice: it.unit_price || it.unitPrice || 0,
+                            total: it.total || 0
+                        })) : [],
+                        totalAmount: o.total_amount || o.totalAmount || 0,
+                        status: o.status || 'Pendiente',
+                        notes: o.notes || ''
+                    }));
+                    setOrders(backendOrders);
+                }
+            } catch (error) {
+                console.warn('Error cargando pedidos desde backend:', error && error.message);
+            }
+        };
+
+        if (isLoggedIn) fetchOrders();
+    }, [isLoggedIn]);
+    // Intento de refresh silencioso al montar para restablecer sesión si existe la cookie HttpOnly
+    useEffect(() => {
+        const trySilentRefresh = async () => {
+            try {
+                console.debug('🔁 Intentando refresh silencioso al montar');
+                // Si existía un access token almacenado localmente, limpiarlo antes de intentar
+                // restaurar sesión desde la cookie HttpOnly. Esto evita usar un token stale
+                // que pueda provocar que la UI muestre pantalla de cajero aun cuando el
+                // usuario fue borrado en el backend.
+                try {
+                    const prev = getAccessToken();
+                    if (prev) {
+                        console.debug('💾 Token previo detectado en storage — limpiando antes del refresh');
+                        try { removeAccessToken(); } catch (e) { console.debug('⚠️ No se pudo eliminar token previo:', e && e.message); }
+                    }
+                } catch (e) { /* silent */ }
+
+                const resp = await fetch('/api/refresh-cookie/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    // Backend puede devolver { access: null } si el usuario fue borrado/inactivo
+                    if (!data || !data.access) {
+                        console.debug('🔐 Refresh silencioso: no hay access (usuario ausente o inactivo). Limpiando sesión.');
+                        try { removeAccessToken(); } catch (e) {}
+                        try { setIsLoggedIn(false); setCurrentPage('login'); } catch (e) {}
+                    } else if (data && data.access) {
+                        try { saveAccessToken(data.access); } catch (e) { console.debug('⚠️ No se pudo guardar access tras refresh silencioso:', e && e.message); }
+                        setIsLoggedIn(true);
+                        try { setCurrentPage('dashboard'); } catch (e) { console.debug('⚠️ No se pudo setear currentPage tras refresh silencioso:', e && e.message); }
+                        // Asignar el rol devuelto por el backend si existe
+                        if (data.role) {
+                            setUserRole(data.role);
+                        } else {
+                            // Si no viene el rol, usar el anterior o el default
+                            try { if (!userRole) setUserRole('Cajero'); } catch (e) { /* silent */ }
+                        }
+                        console.debug('✅ Refresh silencioso OK — sesión restablecida');
+                    }
+                    // Indicamos que ya fue chequeda la sesión
+                    try { setSessionChecked(true); } catch (e) { /* silent */ }
+                } else {
+                    console.debug('ℹ️ Refresh silencioso no devolvió OK:', resp.status);
+                    try { setSessionChecked(true); } catch (e) { /* silent */ }
+                }
+            } catch (e) {
+                console.debug('⚠️ Error en refresh silencioso:', e && e.message);
+                // Si el backend no está disponible (proxy error / ECONNRESET), asegurarnos de
+                // limpiar token y mostrar la pantalla de login en vez de mantener UI de cajero.
+                try {
+                    console.warn('❌ Refresh silencioso falló — probablemente el backend no está accesible. Forzando logout temporalmente. Asegúrate de ejecutar `python manage.py runserver` en el backend.');
+                } catch (ee) { /* ignore */ }
+                try { removeAccessToken(); } catch (err) { /* silent */ }
+                try { setIsLoggedIn(false); setCurrentPage('login'); } catch (err) { /* silent */ }
+                try { setSessionChecked(true); } catch (e) { /* silent */ }
+            }
+        };
+        trySilentRefresh();
+    }, []);
+
+    // Cuando el estado de autenticación cambia a logged in, cargar movimientos de caja y demás datos dependientes
+    useEffect(() => {
+        if (!isLoggedIn) return;
+        (async () => {
+            try {
+                console.debug('🔔 isLoggedIn=true — cargando movimientos de caja desde backend');
+                await loadCashMovements();
+            } catch (e) {
+                console.warn('⚠️ No se pudo cargar movimientos al autenticar:', e && e.message);
+                // Si la razón fue que el backend no está accesible, forzar logout para evitar mostrar UI inconsistente
+                if (e && (e.message && (e.message.includes('NetworkError') || e.message.includes('Failed to fetch') || e.message.includes('ECONNRESET')))) {
+                    try { console.warn('❌ Fallo de red al cargar movimientos — backend inaccesible. Forzando logout.'); } catch (ee) {}
+                    try { removeAccessToken(); } catch (err) {}
+                    try { setIsLoggedIn(false); setCurrentPage('login'); } catch (err) {}
+                }
+            }
+        })();
+    }, [isLoggedIn]);
+
     const [products, setProducts] = useState(() => {
         console.log('🎯 Inicializando products - siempre vacío, se carga desde servidor');
         // NUNCA usar localStorage para productos - siempre empezar vacío
@@ -277,7 +458,7 @@ const App = () => {
 
     // useEffect para guardar en localStorage (inventory NO se guarda, products SÍ se guarda)
     // useEffect(() => { saveLS(LS_KEYS.inventory, inventory); }, [inventory]); // DESHABILITADO - inventario se regenera desde products
-    useEffect(() => { saveLS(LS_KEYS.cashMovements, cashMovements); }, [cashMovements]);
+    // useEffect(() => { saveLS(LS_KEYS.cashMovements, cashMovements); }, [cashMovements]); // DESHABILITADO - cashMovements se cargan desde PostgreSQL
     useEffect(() => { saveLS(LS_KEYS.suppliers, suppliers); }, [suppliers]);
     
     // Función para cargar usuarios desde el backend
@@ -309,126 +490,33 @@ const App = () => {
             loadUsersFromBackend();
         }
     }, [isLoggedIn]);
-    useEffect(() => { saveLS(LS_KEYS.purchases, purchases); }, [purchases]);
-    useEffect(() => { saveLS(LS_KEYS.orders, orders); }, [orders]);
+    // NOTA: Ya no guardamos `orders` en localStorage para evitar inconsistencias
+    // useEffect(() => { saveLS(LS_KEYS.orders, orders); }, [orders]);
     // useEffect(() => { saveLS(LS_KEYS.products, products); }, [products]); // DESHABILITADO - products YA NO se guardan automáticamente en localStorage
 
-    // useEffect para sincronización productos -> inventario
-    useEffect(() => {
-        console.log('🔄 SYNC: Sincronizando inventario desde products');
-        
-        // Verificar que products sea un array válido antes de usar map
-        if (!Array.isArray(products)) {
-            console.log('⚠️ products no es un array válido, usando array vacío');
-            setInventory([]);
-            return;
-        }
-        
-        // SIEMPRE reconstruir inventario desde products (actual desde API)
-        const newInventory = products.map(product => ({
-            id: product.id,
-            name: product.name,
-            stock: product.stock,
-            type: product.category
-        }));
-        
-        console.log('🎯 Inventario sincronizado:', newInventory?.length ? `${newInventory.length} productos` : 'Array vacío');
-        
-        // Actualizar inventario
-        setInventory(newInventory);
-        
-        console.log('✅ Sincronización completada');
-        
-    }, [products]); // Ejecutar cada vez que cambie el array products
+        // useEffect para sincronización productos -> inventario
+        useEffect(() => {
+                console.log('🔄 SYNC: Sincronizando inventario desde products');
 
-    // Función para validar la política de la contraseña
-    const validatePassword = (pwd) => {
-        if (pwd.length < passwordPolicy.minLength) {
-            return 'La contraseña debe tener al menos 8 caracteres.';
-        }
-        if (passwordPolicy.hasUpperCase && !/[A-Z]/.test(pwd)) {
-            return 'La contraseña debe contener al menos una letra mayúscula.';
-        }
-        if (passwordPolicy.hasLowerCase && !/[a-z]/.test(pwd)) {
-            return 'La contraseña debe contener al menos una letra minúscula.';
-        }
-        if (passwordPolicy.hasNumber && !/[0-9]/.test(pwd)) {
-            return 'La contraseña debe contener al menos un número.';
-        }
-        return '';
-    };
+                // Verificar que products sea un array válido antes de usar map
+                if (!Array.isArray(products)) {
+                        console.log('⚠️ products no es un array válido, usando array vacío');
+                        setInventory([]);
+                        return;
+                }
 
-    // Función para manejar el inicio de sesión with credenciales
-    const handleLogin = async (e, credentials = null) => {
-      e.preventDefault();
-      
-      // Usar las credenciales pasadas como parámetro o las del estado
-      const emailToUse = credentials ? credentials.email : email;
-      const passwordToUse = credentials ? credentials.password : password;
-      
-      try {
-        // Primero intentar autenticar con el backend
-        const response = await api.post('/auth/login/', {
-          email: emailToUse,
-          password: passwordToUse
-        });
-        
-        if (response.data.success) {
-          // PRIMERO guardar el token para futuras peticiones
-          const tokenSaved = saveAccessToken(response.data.tokens.access);
-          console.log('🔐 Token guardado:', tokenSaved ? 'Éxito' : 'Con warnings');
-          
-          // Configurar estados de usuario inmediatamente (no esperar verificaciones)
-          setUserRole(response.data.user.role);
-          setCurrentPage('dashboard');
-          setIsLoggedIn(true);
-          
-          // Limpiar productos viejos del almacenamiento (tolerante a errores)
-          removeLS(LS_KEYS.products);
-          console.log('🧹 Almacenamiento de productos limpiado');
-          
-          // Cargar TODOS los datos desde backend después del login exitoso
-          setTimeout(() => {
-            loadUsersFromBackend();
-            loadProducts(); // ← Cargar productos reales de PostgreSQL
-            loadCashMovements(); // ← Cargar movimientos de caja reales de PostgreSQL
-            loadSales(); // ← Cargar ventas reales de PostgreSQL
-            loadInventoryChanges(); // ← Cargar cambios de inventario reales de PostgreSQL
-          }, 100);
-          
-          // Resetear contadores de error
-          setFailedAttempts(0);
-          setLoginError('');
-          
-          console.log('✅ Login exitoso, redirigiendo al dashboard');
-          return; // Salir si el login del backend fue exitoso
-        }
-      } catch (error) {
-        console.error('Error de login con backend:', error);
-        
-        // Incrementar intentos fallidos
-        const newFailedAttempts = failedAttempts + 1;
-        setFailedAttempts(newFailedAttempts);
-        
-        // Verificar si se alcanzó el límite
-        if (newFailedAttempts >= maxAttempts) {
-          setIsLocked(true);
-          setShowModal(true);
-          setLoginError('Cuenta bloqueada por demasiados intentos fallidos');
-        } else {
-          // Mostrar mensaje de error específico
-          if (error.response && error.response.status === 400) {
-            setLoginError(`Credenciales inválidas. Intento ${newFailedAttempts} de ${maxAttempts}`);
-          } else if (error.response && error.response.status === 401) {
-            setLoginError(`No autorizado. Intento ${newFailedAttempts} de ${maxAttempts}`);
-          } else if (error.code === 'NETWORK_ERROR' || error.message === 'Network Error') {
-            setLoginError(`Error de red. Intento ${newFailedAttempts} de ${maxAttempts}`);
-          } else {
-            setLoginError(`Credenciales incorrectas. Intento ${newFailedAttempts} de ${maxAttempts}`);
-          }
-        }
-      }
-    };
+                // Reconstruir inventario desde products (actual desde API)
+                const newInventory = products.map(product => ({
+                        id: product.id,
+                        name: product.name,
+                        stock: product.stock,
+                        type: product.category || 'Producto'
+                }));
+
+                console.log('🎯 Inventario sincronizado:', newInventory?.length ? `${newInventory.length} productos` : 'Array vacío');
+
+                setInventory(newInventory);
+        }, [products]);
 
     // Función para cerrar la sesión.
     const handleLogout = () => {
@@ -489,15 +577,27 @@ const App = () => {
       }
     };
 
-    const loadUsers = async () => {
-      try {
-        const response = await api.get('/users/');
-        setUsers(response.data);
-        saveLS(LS_KEYS.users, response.data);
-      } catch (error) {
-        console.error('Error cargando usuarios:', error);
-      }
-    };
+        const loadUsers = async () => {
+            try {
+                const response = await api.get('/users/');
+                if (response.data && Array.isArray(response.data)) {
+                    const normalized = response.data.map(u => ({
+                        id: u.id,
+                        name: u.username ?? u.name ?? (typeof u === 'string' ? u : ''),
+                        email: u.email ?? '',
+                        role: (u.role && typeof u.role === 'object') ? (u.role.name ?? String(u.role)) : (u.role ?? 'Cajero'),
+                        hashedPassword: 'backend-managed'
+                    }));
+                    setUsers(normalized);
+                    saveLS(LS_KEYS.users, normalized);
+                } else {
+                    setUsers(response.data);
+                    saveLS(LS_KEYS.users, response.data);
+                }
+            } catch (error) {
+                console.error('Error cargando usuarios:', error);
+            }
+        };
 
     const loadProducts = async () => {
       try {
@@ -553,42 +653,75 @@ const App = () => {
     };
 
     // Función para cargar movimientos de caja desde el backend
-    const loadCashMovements = async () => {
-      try {
-        console.log('💰 Cargando movimientos de caja del servidor...');
-        const response = await api.get('/cash-movements/');
-        const serverMovements = response.data;
+        const loadCashMovements = async () => {
+            try {
+                console.debug('🔎 loadCashMovements invoked');
+                // Intentar refresh explícito para asegurarnos de tener access antes de pedir movimientos
+                try {
+                    console.debug('🔁 Intentando refresh explícito antes de cargar movimientos');
+                    await fetch('/api/refresh-cookie/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
+                } catch (e) {
+                    console.debug('⚠️ Refresh explícito falló o no devolvió nuevo access (silent):', e && e.message);
+                }
+
+                console.log('💰 Cargando movimientos de caja del servidor...');
+                const response = await api.get('/cash-movements/');
+                const serverMovements = response.data || [];
         
-        // Convertir movimientos del servidor al formato local
-        const formattedMovements = serverMovements.map(movement => ({
-          id: movement.id,
-          type: movement.type,
-          amount: movement.amount,
-          description: movement.description || '',
-          date: movement.created_at || new Date().toISOString(),
-          user: movement.user || 'Sistema'
-        }));
+                console.debug('🔍 Datos recibidos del servidor:', serverMovements.length, 'movimientos');
         
-        setCashMovements(formattedMovements);
-        console.log('✅ Movimientos de caja cargados:', `${formattedMovements.length} movimientos del servidor`);
-      } catch (error) {
-        console.log('❌ Error cargando movimientos de caja:', error.message);
-        // Mantener los movimientos anteriores si falla la carga
-        setCashMovements(prevMovements => prevMovements.length > 0 ? prevMovements : []);
-      }
-    };
+                // Convertir movimientos del servidor al formato local
+                const formattedMovements = serverMovements.map(movement => ({
+                    id: movement.id,
+                    type: movement.type,
+                    amount: parseFloat(movement.amount), // Asegurar que sea número
+                    description: movement.description || '',
+                    date: movement.timestamp || movement.created_at || new Date().toISOString(),
+                    user: movement.user || 'Sistema'
+                }));
+        
+                // Debug: Mostrar algunos movimientos para verificar
+                console.debug('📋 Primeros 3 movimientos formateados:', formattedMovements.slice(0, 3));
+        
+                // Calcular saldo para debug
+                const debugBalance = formattedMovements.reduce((sum, m) => {
+                    const amount = m.type === 'Entrada' ? m.amount : -m.amount;
+                    console.debug(`💰 ${m.type}: $${m.amount} (acumulado: $${sum + amount})`);
+                    return sum + amount;
+                }, 0);
+        
+                console.debug(`🎯 Saldo calculado en loadCashMovements: $${debugBalance}`);
+        
+                setCashMovements(formattedMovements);
+                console.debug('✅ Movimientos de caja cargados:', `${formattedMovements.length} movimientos del servidor`);
+            } catch (error) {
+                console.error('❌ Error cargando movimientos de caja:', error && error.message ? error.message : error);
+                // Mantener los movimientos anteriores si falla la carga
+                setCashMovements(prevMovements => prevMovements.length > 0 ? prevMovements : []);
+            }
+        };
 
     // Función para cargar ventas desde el backend
     const loadSales = async () => {
       try {
         console.log('🛒 Cargando ventas del servidor...');
         const response = await api.get('/sales/');
-        const serverSales = response.data;
-        
-        // Las ventas se usan principalmente para reportes y consultas
-        // Por ahora solo las loggeamos para verificar que se están guardando
-        console.log('✅ Ventas cargadas:', `${serverSales.length} ventas del servidor`);
-        console.log('📊 Ventas:', serverSales);
+                // Manejar respuesta paginada de DRF: { count, next, previous, results: [...] }
+                let serverSales = [];
+                if (Array.isArray(response.data)) {
+                    serverSales = response.data;
+                } else if (response.data && Array.isArray(response.data.results)) {
+                    serverSales = response.data.results;
+                } else if (response.data && typeof response.data === 'object' && response.data !== null) {
+                    // A veces la API puede devolver un objeto con key 'data' o 'sales'
+                    if (Array.isArray(response.data.data)) serverSales = response.data.data;
+                    else if (Array.isArray(response.data.sales)) serverSales = response.data.sales;
+                }
+
+                // Guardar ventas completas en el estado para consultas y para marcar productos con ventas
+                setSales(serverSales);
+                console.log('✅ Ventas cargadas en estado:', `${serverSales.length} ventas del servidor`);
+                console.log('📊 Ventas (primeros):', serverSales.slice(0,3));
       } catch (error) {
         console.log('❌ Error cargando ventas:', error.message);
       }
@@ -707,12 +840,14 @@ const App = () => {
 
     // Componente del tablero (Dashboard).
     const Dashboard = () => {
-        // Obtener productos con stock bajo según su umbral personalizado
+        // Obtener productos e insumos con stock bajo según su umbral personalizado
         const lowStockItems = products.filter(product => 
             product.stock < (product.lowStockThreshold || 10)
         );
 
-
+        // Separar productos e insumos para mejor organización
+        const lowStockProducts = lowStockItems.filter(item => item.category === 'Producto');
+        const lowStockSupplies = lowStockItems.filter(item => item.category === 'Insumo');
 
         return (
             <div className="dashboard-container">
@@ -721,13 +856,32 @@ const App = () => {
                     lowStockItems.length > 0 && (
                         <div className="dashboard-alerts">
                             <h3>⚠️ Alerta de Stock Bajo</h3>
-                            <ul className="alert-list">
-                                {lowStockItems.map(item => (
-                                    <li key={item.id} className="alert-item">
-                                        {item.name}: ¡Solo quedan {item.stock} unidades! (Umbral: {item.lowStockThreshold || 10})
-                                    </li>
-                                ))}
-                            </ul>
+                            
+                            {lowStockProducts.length > 0 && (
+                                <div className="alert-section">
+                                    <h4>📦 Productos con Stock Bajo:</h4>
+                                    <ul className="alert-list">
+                                        {lowStockProducts.map(item => (
+                                            <li key={item.id} className="alert-item">
+                                                <strong>{item.name}</strong>: ¡Solo quedan {item.stock} unidades! (Umbral: {item.lowStockThreshold || 10})
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            
+                            {lowStockSupplies.length > 0 && (
+                                <div className="alert-section">
+                                    <h4>🧾 Insumos con Stock Bajo:</h4>
+                                    <ul className="alert-list">
+                                        {lowStockSupplies.map(item => (
+                                            <li key={item.id} className="alert-item">
+                                                <strong>{item.name}</strong>: ¡Solo quedan {item.stock} unidades! (Umbral: {item.lowStockThreshold || 10})
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
                         </div>
                     )
                 )}
@@ -799,16 +953,41 @@ const App = () => {
             }
         };
 
-        const handleDeleteUser = (userId) => {
+    const handleDeleteUser = async (userId) => {
             // Regla de negocio: El gerente no puede eliminarse a sí mismo.
             const userToDelete = users.find(u => u.id === userId);
-            if (userToDelete.role === 'Gerente') {
-                setMessage('�� No puedes eliminar la cuenta de un Gerente.');
+            if (!userToDelete) {
+                setMessage('Usuario no encontrado.');
                 return;
             }
-            if (window.confirm(`¿Estás seguro de que quieres eliminar a ${userToDelete.name}?`)) {
-                setUsers(users.filter(user => user.id !== userId));
-                setMessage('✅ Usuario eliminado exitosamente.');
+
+            // Regla de negocio: no permitir eliminar a un Gerente desde la UI
+            if (userToDelete.role === 'Gerente') {
+                setMessage('No puedes eliminar la cuenta de un Gerente.');
+                return;
+            }
+
+            if (!window.confirm(`¿Estás seguro de que quieres eliminar a ${userToDelete.name}? Esta acción es permanente.`)) {
+                return;
+            }
+
+            try {
+                // Llamada al backend para eliminar el usuario (ruta definida en backend: /api/users/<pk>/delete/)
+                await api.delete(`/users/${userId}/delete/`);
+
+                // Recargar usuarios desde el backend para mantener consistencia cross-browser
+                await loadUsersFromBackend();
+
+                setMessage('✅ Usuario eliminado exitosamente en el servidor.');
+            } catch (error) {
+                console.error('Error eliminando usuario:', error);
+                if (error.response && error.response.status === 403) {
+                    setMessage('No tienes permisos para eliminar este usuario.');
+                } else if (error.response && error.response.status === 404) {
+                    setMessage('Usuario no encontrado en el servidor.');
+                } else {
+                    setMessage('Error eliminando usuario. Revisa la conexión o los permisos.');
+                }
             }
         };
 
@@ -1120,7 +1299,18 @@ const App = () => {
         const availableProducts = products.filter(product => 
             product.category === 'Producto' && product.stock > 0
         );
-        const currentBalance = cashMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : -m.amount), 0);
+        
+        // Calcular saldo con debug detallado
+        console.log('🔍 Calculando saldo de caja...');
+        console.log('📊 Total de movimientos disponibles:', cashMovements.length);
+        
+        const currentBalance = cashMovements.reduce((sum, m, index) => {
+            const amount = m.type === 'Entrada' ? m.amount : -m.amount;
+            console.log(`[${index}] ${m.type}: $${m.amount} | Acumulado: $${sum + amount}`);
+            return sum + amount;
+        }, 0);
+        
+        console.log(`💰 SALDO FINAL CALCULADO: $${currentBalance}`);
 
         return (
             <div className="sales-container">
@@ -1255,10 +1445,9 @@ const App = () => {
             };
 
             try {
-                const today = new Date().toISOString().split('T')[0];
                 await api.post('/cash-movements/', payload);
-                const id = cashMovements.length ? Math.max(...cashMovements.map(m => m.id)) + 1 : 1;
-                setCashMovements([...cashMovements, { ...payload, id, date: today }]);
+                // Recargar movimientos desde el servidor para evitar inconsistencias/duplicados
+                await loadCashMovements();
                 setNewMovement({ type: 'Entrada', amount: '', description: '' });
                 setShowMovementForm(false);
                 setMessage('✅ Movimiento registrado exitosamente.');
@@ -1634,6 +1823,7 @@ const App = () => {
                 items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }]
             });
             const [message, setMessage] = useState('');
+            const [confirmDelete, setConfirmDelete] = useState(null); // ID de la compra a eliminar
     
             // Función para validar fecha en formato dd/mm/aaaa
             const validateDate = (date) => {
@@ -1684,7 +1874,7 @@ const App = () => {
                 return newPurchase.items.reduce((sum, item) => sum + item.total, 0);
             };
     
-            const handleAddPurchase = (e) => {
+            const handleAddPurchase = async (e) => {
                 e.preventDefault();
                 
                 // Validaciones según la especificación
@@ -1715,47 +1905,109 @@ const App = () => {
                     return;
                 }
                 
-                // Crear la nueva compra
-                const id = Math.max(...purchases.map(p => p.id)) + 1;
-                const totalAmount = calculatePurchaseTotal();
-                
-                const purchaseToAdd = {
-                    id,
+                // Crear la nueva compra (persistida en el backend)
+                // Asegurarnos de calcular el total desde quantity * unitPrice para evitar campos stale
+                const itemsForPayload = newPurchase.items.map(item => {
+                    const quantity = Number(item.quantity) || 0;
+                    const unitPrice = Number(item.unitPrice) || 0;
+                    return {
+                        productName: item.productName,
+                        quantity,
+                        unitPrice,
+                        total: quantity * unitPrice
+                    };
+                });
+
+                const totalAmount = itemsForPayload.reduce((sum, it) => sum + it.total, 0);
+
+                const purchasePayload = {
                     date: newPurchase.date,
-                    supplierId: parseInt(newPurchase.supplierId),
-                    supplierName: selectedSupplier.name,
-                    items: newPurchase.items,
-                    totalAmount,
+                    supplier: selectedSupplier.name,
+                    supplier_id: parseInt(newPurchase.supplierId), // backend campo snake_case
+                    items: itemsForPayload,
+                    total_amount: totalAmount,
                     status: 'Completada'
                 };
-                
-                // Actualizar inventario con los productos comprados
-                const updatedInventory = [...inventory];
-                newPurchase.items.forEach(item => {
-                    const existingItem = updatedInventory.find(i => i.name === item.productName);
-                    if (existingItem) {
-                        existingItem.stock += item.quantity;
-                    } else {
-                        // Si el producto no existe, agregarlo al inventario
-                        const newProductId = Math.max(...updatedInventory.map(i => i.id)) + 1;
-                        updatedInventory.push({
-                            id: newProductId,
-                            name: item.productName,
-                            stock: item.quantity,
-                            type: 'Insumo' // Por defecto como insumo
-                        });
+
+                try {
+                    // Actualizar inventario con los productos comprados (también en el backend)
+                    for (const item of newPurchase.items) {
+                        // Buscar si el producto ya existe en el backend
+                        const existingProduct = products.find(p => p.name === item.productName);
+                        
+                        if (existingProduct) {
+                            // Si existe, actualizar el stock en el backend
+                            const updatedProduct = {
+                                ...existingProduct,
+                                stock: existingProduct.stock + item.quantity
+                            };
+                            await api.put(`/products/${existingProduct.id}/`, updatedProduct);
+                            console.log(`✅ Stock actualizado para ${item.productName}: +${item.quantity}`);
+                        } else {
+                            // Si no existe, crear nuevo producto/insumo en el backend
+                            const newProduct = {
+                                name: item.productName,
+                                price: item.unitPrice,
+                                category: 'Insumo',
+                                stock: item.quantity,
+                                description: `Agregado automáticamente desde una compra (${new Date().toLocaleString()})`,
+                                low_stock_threshold: 10
+                            };
+                            await api.post('/products/', newProduct);
+                            console.log(`✅ Nuevo insumo creado: ${item.productName} con stock ${item.quantity}`);
+                        }
                     }
-                });
-                
-                setInventory(updatedInventory);
-                setPurchases([...purchases, purchaseToAdd]);
-                setNewPurchase({
-                    date: '',
-                    supplierId: '',
-                    items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }]
-                });
-                setShowAddPurchase(false);
-                setMessage('✅ Compra registrada exitosamente y stock actualizado.');
+                    
+                    // Persistir la compra en el backend
+                    const resp = await api.post('/purchases/', purchasePayload);
+
+                    // Recargar productos y sincronizar estado
+                    await loadProducts();
+
+                    // Añadir la compra retornada por el servidor al estado local (normalizar campos)
+                    const savedPurchaseRaw = resp.data;
+                    const savedPurchase = normalizePurchaseFromServer(savedPurchaseRaw);
+                    setPurchases(prev => [...prev, savedPurchase]);
+
+                    setNewPurchase({
+                        date: '',
+                        supplierId: '',
+                        items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }]
+                    });
+                    setShowAddPurchase(false);
+                    setMessage('✅ Compra registrada exitosamente y guardada en el servidor.');
+                } catch (error) {
+                    console.error('❌ Error procesando compra:', error);
+                    setMessage('❌ Error: No se pudo procesar la compra. Inténtalo nuevamente.');
+                }
+            };
+
+            // Función para eliminar una compra del historial
+            const handleDeletePurchase = async (purchaseId) => {
+                if (confirmDelete === purchaseId) {
+                    try {
+                        // Intentar eliminar en backend
+                        await api.delete(`/purchases/${purchaseId}/`);
+                    } catch (error) {
+                        console.warn('⚠️ No se pudo eliminar compra en backend, se procederá a eliminar localmente:', error);
+                    }
+
+                    // Confirmar eliminación local
+                    const updatedPurchases = purchases.filter(purchase => purchase.id !== purchaseId);
+                    setPurchases(updatedPurchases);
+                    setConfirmDelete(null);
+                    setMessage('✅ Compra eliminada del historial exitosamente.');
+                } else {
+                    // Mostrar confirmación
+                    setConfirmDelete(purchaseId);
+                    setMessage('⚠️ ¿Estás seguro de que deseas eliminar esta compra del historial? Haz clic nuevamente en "Eliminar" para confirmar.');
+                }
+            };
+
+            // Función para cancelar la eliminación
+            const handleCancelDelete = () => {
+                setConfirmDelete(null);
+                setMessage('');
             };
     
             return (
@@ -1858,7 +2110,36 @@ const App = () => {
                             <li key={purchase.id} className="purchase-list-item">
                                 <div className="purchase-header">
                                     <strong>Compra #{purchase.id} - {purchase.date}</strong>
-                                    <span className="purchase-status">{purchase.status}</span>
+                                    <div className="purchase-actions">
+                                        <span className="purchase-status">{purchase.status}</span>
+                                        {userRole === 'Gerente' && (
+                                            <div className="delete-controls">
+                                                {confirmDelete === purchase.id ? (
+                                                    <div className="confirm-delete">
+                                                        <button 
+                                                            className="action-button danger small"
+                                                            onClick={() => handleDeletePurchase(purchase.id)}
+                                                        >
+                                                            ✓ Confirmar
+                                                        </button>
+                                                        <button 
+                                                            className="action-button secondary small"
+                                                            onClick={handleCancelDelete}
+                                                        >
+                                                            ✕ Cancelar
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button 
+                                                        className="action-button danger small"
+                                                        onClick={() => handleDeletePurchase(purchase.id)}
+                                                    >
+                                                        🗑️ Eliminar
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="purchase-supplier">
                                     <strong>Proveedor:</strong> {purchase.supplierName}
@@ -1940,7 +2221,7 @@ const App = () => {
                 return newOrder.items.reduce((sum, item) => sum + (item.total || 0), 0);
             };
     
-            const handleAddOrder = (e) => {
+            const handleAddOrder = async (e) => {
                 e.preventDefault();
                 
                 // Validaciones
@@ -1964,31 +2245,42 @@ const App = () => {
                     return;
                 }
                 
-                // Crear el nuevo pedido de cliente
-                const id = Math.max(...orders.map(o => o.id), 0) + 1;
-                const totalAmount = calculateOrderTotal();
-                
-                const orderToAdd = {
-                    id,
-                    date: newOrder.date,
-                    customerName: newOrder.customerName,
-                    paymentMethod: newOrder.paymentMethod,
-                    items: validItems,
-                    totalAmount,
-                    status: 'Pendiente',
-                    notes: newOrder.notes
-                };
-                
-                setOrders([...orders, orderToAdd]);
-                setNewOrder({
-                    customerName: '',
-                    date: new Date().toISOString().split('T')[0],
-                    paymentMethod: '',
-                    items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }],
-                    notes: ''
-                });
-                setShowAddOrder(false);
-                setMessage('✅ Pedido de cliente registrado exitosamente.');
+                // Enviar pedido al backend para persistencia cross-browser
+                try {
+                    const payload = {
+                        customer_name: newOrder.customerName,
+                        date: newOrder.date,
+                        payment_method: newOrder.paymentMethod,
+                        items: validItems.map(i => ({ product_name: i.productName, quantity: Number(i.quantity), unit_price: Number(i.unitPrice), total: Number(i.total) })),
+                        notes: newOrder.notes
+                    };
+
+                    const res = await api.post('/orders/', payload);
+                    if (res && res.data) {
+                        // Insertar el pedido devuelto por el servidor
+                        const created = res.data;
+                        const createdNormalized = {
+                            id: created.id,
+                            date: created.date,
+                            customerName: created.customer_name || created.customerName || '',
+                            paymentMethod: created.payment_method || created.paymentMethod || '',
+                            items: Array.isArray(created.items) ? created.items.map(it => ({ productName: it.product_name || it.productName || '', quantity: it.quantity, unitPrice: it.unit_price || it.unitPrice || 0, total: it.total || 0 })) : [],
+                            totalAmount: created.total_amount || created.totalAmount || 0,
+                            status: created.status || 'Pendiente',
+                            notes: created.notes || ''
+                        };
+
+                        setOrders(prev => [...prev, createdNormalized]);
+                        setNewOrder({ customerName: '', date: new Date().toISOString().split('T')[0], paymentMethod: '', items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }], notes: '' });
+                        setShowAddOrder(false);
+                        setMessage('✅ Pedido de cliente registrado exitosamente.');
+                    } else {
+                        setMessage('⚠️ Pedido creado localmente, pero no se obtuvo confirmación del servidor.');
+                    }
+                } catch (err) {
+                    console.error('Error enviando pedido al backend:', err, err.response && err.response.data);
+                    setMessage('❌ Error guardando el pedido en el servidor. Revisar consola.');
+                }
             };
     
             const handleUpdateOrderStatus = (orderId, newStatus) => {
@@ -2200,6 +2492,12 @@ const App = () => {
             'totalOrders': 'Total de Pedidos',
             'pendingOrders': 'Pedidos Pendientes',
             'sentOrders': 'Pedidos Enviados',
+            'customerName': 'Cliente',
+            'customer_name': 'Cliente',
+            'paymentMethod': 'Método de Pago',
+            'payment_method': 'Método de Pago',
+            'products': 'Productos',
+            'units': 'Unidades',
             'totalMovements': 'Total de Movimientos',
             'totalIncome': 'Ingresos Totales',
             'totalExpenses': 'Gastos Totales',
@@ -2213,82 +2511,253 @@ const App = () => {
             const [endDate, setEndDate] = useState('');
             const [queryResults, setQueryResults] = useState(null);
             const [message, setMessage] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
     
-            // Función para validar fecha en formato dd/mm/aaaa
-            const validateDate = (date) => {
-                const dateRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
-                return dateRegex.test(date);
+            // Cargar consulta activa al montar el componente (solo si hay token)
+            useEffect(() => {
+                const token = getAccessToken();
+                if (token) {
+                    console.log('🔄 [useEffect] Iniciando carga de consulta activa y prueba directa');
+                    loadActiveQuery();
+                    // TEMPORAL: Ejecutar prueba directa
+                    testDirectRequest();
+                } else {
+                    console.log('ℹ️ No hay token disponible, omitiendo carga de consulta activa');
+                }
+            }, []);
+
+            // Función para cargar consulta activa desde el backend
+            const loadActiveQuery = async () => {
+                try {
+                    // Verificar que tenemos un token antes de hacer la petición
+                    const token = getAccessToken();
+                    if (!token) {
+                        return;
+                    }
+
+                    setIsLoading(true);
+                    setMessage('');
+
+                    const response = await api.get('/user-queries/active_query/');
+
+                    if (response.data) {
+                        setSelectedQuery(response.data.query_type);
+                        setStartDate(response.data.start_date || '');
+                        setEndDate(response.data.end_date || '');
+                        setQueryResults(response.data.results_data);
+                        setMessage('');
+                    }
+                } catch (error) {
+                    setQueryResults(null);
+                    if (error.response?.status === 404) {
+                        console.log('No hay ninguna consulta guardada para este usuario. Realiza una consulta y guárdala para verla aquí.');
+                    }
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // Función de prueba TEMPORAL para petición directa sin interceptor
+            const testDirectRequest = async () => {
+                try {
+                    const token = getAccessToken();
+                    if (!token) {
+                        return;
+                    }
+                    const axiosRaw = await import('axios');
+                    // Usar la ruta proxied `/api/...` para que CRA dev-server haga el proxy
+                    // y las cookies HttpOnly establecidas por el backend lleguen al navegador.
+                    const response = await axiosRaw.default.get('/api/user-queries/active_query/', {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        timeout: 10000,
+                        withCredentials: true
+                    });
+                    return response.data;
+                } catch (error) {
+                    return null;
+                }
+            };
+
+            // Función para guardar consulta en el backend
+            const saveQueryToBackend = async (queryType, startDate, endDate, results) => {
+                const payload = {
+                    query_type: queryType,
+                    start_date: startDate || null,
+                    end_date: endDate || null,
+                    results_data: results
+                };
+
+                try {
+                    // Primero intentar buscar si ya existe la consulta para este usuario y tipo
+                    const listResp = await api.get(`/user-queries/?query_type=${encodeURIComponent(queryType)}`);
+                    const items = Array.isArray(listResp.data) ? listResp.data : (listResp.data?.results || []);
+
+                    if (items && items.length > 0) {
+                        // Existe: actualizar (PATCH)
+                        const existing = items[0];
+                        const id = existing.id;
+                        try {
+                            const patchResp = await api.patch(`/user-queries/${id}/`, payload);
+                            if (patchResp?.data) {
+                                console.log('✅ Consulta existente actualizada en backend (patch)');
+                                return;
+                            }
+                        } catch (patchErr) {
+                            console.warn('⚠️ Error parchando consulta existente, intentaremos POST como fallback:', patchErr?.response?.data || patchErr?.message || patchErr);
+                            // Intentar POST como último recurso (race condition improbable)
+                        }
+                    }
+
+                    // Si no existe o el PATCH falló, intentar crear (POST)
+                    const postResp = await api.post('/user-queries/', payload);
+                    if (postResp?.data) {
+                        console.log('✅ Consulta guardada en backend (creada)');
+                        return;
+                    }
+                } catch (error) {
+                    // Manejo de errores: si falla por unique constraint (race) intentamos buscar y parchear
+                    const status = error?.response?.status;
+                    const data = error?.response?.data;
+                    console.warn('Advertencia al guardar consulta (fase final), intentando recuperación:', status, data);
+
+                    try {
+                        const listResp2 = await api.get(`/user-queries/?query_type=${encodeURIComponent(queryType)}`);
+                        const items2 = Array.isArray(listResp2.data) ? listResp2.data : (listResp2.data?.results || []);
+                        if (items2 && items2.length > 0) {
+                            const existing = items2[0];
+                            const id = existing.id;
+                            const patchResp2 = await api.patch(`/user-queries/${id}/`, payload);
+                            if (patchResp2?.data) {
+                                console.log('✅ Consulta existente actualizada en backend (patch) [recovery]');
+                                return;
+                            }
+                        }
+                    } catch (recErr) {
+                        console.error('Error intentando recuperar/actualizar consulta después de fallo:', recErr?.response?.data || recErr?.message || recErr);
+                    }
+
+                    console.error('Error final guardando consulta (no creada ni actualizada):', data || error.message || error);
+                }
+            };
+
+            // Función para limpiar consulta activa
+            const clearActiveQuery = async () => {
+                try {
+                    await api.post('/user-queries/clear_active_query/');
+                    console.log('🧹 Consulta activa limpiada del backend');
+                } catch (error) {
+                    console.error('Error limpiando consulta:', error.response?.data || error.message);
+                }
             };
     
-            // Función para convertir fecha dd/mm/aaaa a objeto Date
-            const parseDate = (dateStr) => {
+            // Función para convertir fecha yyyy-mm-dd a dd/mm/yyyy
+            const formatDateForDisplay = (dateStr) => {
+                if (!dateStr) return '';
+                const [year, month, day] = dateStr.split('-');
+                return `${day}/${month}/${year}`;
+            };
+    
+            // Función para convertir fecha dd/mm/yyyy a Date
+            const parseDisplayDate = (dateStr) => {
                 const [day, month, year] = dateStr.split('/');
                 return new Date(year, month - 1, day);
             };
     
-            // Función para formatear fecha a dd/mm/aaaa
-            const formatDate = (date) => {
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const year = date.getFullYear();
-                return `${day}/${month}/${year}`;
+            // Función para convertir fecha yyyy-mm-dd a Date
+            const parseInputDate = (dateStr) => {
+                return new Date(dateStr);
             };
+
+                // Función que intenta parsear una fecha en varios formatos comunes
+                const parseAnyDate = (dateStr) => {
+                    if (!dateStr) return null;
+                    // Si ya es objeto Date
+                    if (dateStr instanceof Date) return dateStr;
+                    // dd/mm/yyyy
+                    if (typeof dateStr === 'string' && dateStr.includes('/')) {
+                        try {
+                            return parseDisplayDate(dateStr);
+                        } catch (e) {
+                            // fallthrough
+                        }
+                    }
+                    // yyyy-mm-dd or ISO
+                    if (typeof dateStr === 'string' && dateStr.includes('-')) {
+                        try {
+                            return parseInputDate(dateStr);
+                        } catch (e) {
+                            // fallthrough
+                        }
+                    }
+                    // intento genérico
+                    const parsed = new Date(dateStr);
+                    return isNaN(parsed.getTime()) ? null : parsed;
+                };
     
             // Función para ejecutar consulta
-            const executeQuery = () => {
+            const executeQuery = async () => {
                 if (!selectedQuery) {
                     setMessage('🚫 Error: Debe seleccionar un tipo de consulta.');
                     return;
                 }
     
-               /* if (startDate && !validateDate(startDate)) {
-                    setMessage('�� Error: La fecha de inicio debe estar en formato dd/mm/aaaa.');
-                    return;
-                }*/
-    
-                /*if (endDate && !validateDate(endDate)) {
-                    setMessage('�� Error: La fecha de fin debe estar en formato dd/mm/aaaa.');
-                    return;
-                }*/
-    
                 if (startDate && endDate) {
-                    const start = parseDate(startDate);
-                    const end = parseDate(endDate);
+                    const start = parseInputDate(startDate);
+                    const end = parseInputDate(endDate);
                     if (start > end) {
-                        setMessage('�� Error: La fecha de inicio no puede ser posterior a la fecha de fin.');
+                        setMessage('🚫 Error: La fecha de inicio no puede ser posterior a la fecha de fin.');
                         return;
                     }
                 }
     
                 setMessage('');
+                setIsLoading(true);
     
-                // Ejecutar consulta según el tipo seleccionado
-                switch (selectedQuery) {
-                    case 'stock':
-                        executeStockQuery();
-                        break;
-                    case 'proveedores':
-                        executeSuppliersQuery();
-                        break;
-                    case 'ventas':
-                        executeSalesQuery();
-                        break;
-                    case 'compras':
-                        executePurchasesQuery();
-                        break;
-                    case 'pedidos':
-                        executeOrdersQuery();
-                        break;
-                    case 'movimientos_caja':
-                        executeCashMovementsQuery();
-                        break;
-                    default:
-                        setMessage('🚫 Error: Tipo de consulta no válido.');
+                try {
+                    let results = null;
+                    
+                    // Ejecutar consulta según el tipo seleccionado
+                    switch (selectedQuery) {
+                        case 'stock':
+                            results = await executeStockQuery();
+                            break;
+                        case 'proveedores':
+                            results = await executeSuppliersQuery();
+                            break;
+                        case 'ventas':
+                            results = await executeSalesQuery();
+                            break;
+                        case 'compras':
+                            results = await executePurchasesQuery();
+                            break;
+                        case 'pedidos':
+                            results = await executeOrdersQuery();
+                            break;
+                        case 'movimientos_caja':
+                            results = await executeCashMovementsQuery();
+                            break;
+                        default:
+                            setMessage('🚫 Error: Tipo de consulta no válido.');
+                            return;
+                    }
+
+                    if (results) {
+                        setQueryResults(results);
+                        // Guardar en backend de forma asíncrona
+                        await saveQueryToBackend(selectedQuery, startDate, endDate, results);
+                    }
+                } catch (error) {
+                    setMessage('🚫 Error ejecutando la consulta: ' + error.message);
+                } finally {
+                    setIsLoading(false);
                 }
             };
     
             // Consulta de stock
-            const executeStockQuery = () => {
+            const executeStockQuery = async () => {
                 const lowStockItems = inventory.filter(item => item.stock < 10);
                 const results = {
                     title: 'Estado del Stock',
@@ -2304,11 +2773,11 @@ const App = () => {
                         status: item.stock < 10 ? 'Stock Bajo' : item.stock < 20 ? 'Stock Medio' : 'Stock Alto'
                     }))
                 };
-                setQueryResults(results);
+                return results;
             };
     
             // Consulta de proveedores
-            const executeSuppliersQuery = () => {
+            const executeSuppliersQuery = async () => {
                 const results = {
                     title: 'Información de Proveedores',
                     summary: {
@@ -2323,76 +2792,137 @@ const App = () => {
                         products: supplier.products
                     }))
                 };
-                setQueryResults(results);
+                return results;
             };
     
             // Consulta de ventas (simulada)
-            const executeSalesQuery = () => {
-                const mockSales = [
-                    { date: '26/10/2023', product: 'Churro', quantity: 25, total: 250.00 },
-                    { date: '26/10/2023', product: 'Café', quantity: 15, total: 300.00 },
-                    { date: '25/10/2023', product: 'Combo Familiar', quantity: 8, total: 200.00 }
-                ];
-    
-                const filteredSales = mockSales.filter(sale => {
+            const executeSalesQuery = async () => {
+                // Usar ventas reales traídas desde backend (estado `sales`).
+                const allSales = Array.isArray(sales) ? sales : [];
+
+                console.log('🔎 executeSalesQuery - sales length:', allSales.length);
+                console.log('🔎 executeSalesQuery - sample sales (0..2):', allSales.slice(0,3));
+
+                // Cada sale puede contener `sale_items` o `sale_items` anidados; normalizamos
+                const rows = [];
+
+                for (const s of allSales) {
+                    // Fecha: preferir timestamp/created_at o timestamp formateado
+                    const date = s.timestamp || s.created_at || s.date || '';
+
+                    // Determinar items dentro de la venta
+                    let itemsArr = [];
+                    if (Array.isArray(s.sale_items) && s.sale_items.length > 0) {
+                        itemsArr = s.sale_items.map(it => ({
+                            product: it.product_name || it.product || it.name || '',
+                            quantity: it.quantity || it.qty || 0,
+                            total: it.price || it.total || 0
+                        }));
+                    } else if (Array.isArray(s.items) && s.items.length > 0) {
+                        itemsArr = s.items.map(it => ({
+                            product: it.product_name || it.productName || it.product || '',
+                            quantity: it.quantity || it.qty || 0,
+                            total: it.total || it.price || 0
+                        }));
+                    }
+
+                    // Si no hay items explícitos, podemos intentar inferir de campos totales
+                    if (itemsArr.length === 0 && s.product) {
+                        itemsArr = [{ product: s.product, quantity: s.quantity || 1, total: s.total || s.amount || 0 }];
+                    }
+
+                    // Agregar una fila por cada item para que la tabla muestre productos individuales
+                    for (const it of itemsArr) {
+                        rows.push({ date, product: it.product, quantity: it.quantity, total: it.total });
+                    }
+                    console.log('🔎 executeSalesQuery - built rows count before filter:', rows.length);
+                }
+
+                // Filtrar por rango de fechas si aplica
+                const filteredSales = rows.filter(sale => {
                     if (startDate && endDate) {
-                        const saleDate = parseDate(sale.date);
-                        const start = parseDate(startDate);
-                        const end = parseDate(endDate);
+                        const saleDate = parseAnyDate(sale.date) || null;
+                        const start = parseAnyDate(startDate);
+                        const end = parseAnyDate(endDate);
+                        if (!saleDate || !start || !end) return false;
                         return saleDate >= start && saleDate <= end;
                     }
                     return true;
                 });
-    
+
+                console.log('🔎 executeSalesQuery - filtered rows count:', filteredSales.length);
+
                 const results = {
                     title: 'Reporte de Ventas',
                     summary: {
                         totalSales: filteredSales.length,
-                        totalRevenue: filteredSales.reduce((sum, sale) => sum + sale.total, 0),
-                        period: startDate && endDate ? `${startDate} - ${endDate}` : 'Todos los períodos'
+                        totalRevenue: filteredSales.reduce((sum, sale) => sum + (Number(sale.total) || 0), 0),
+                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
                     },
-                    data: filteredSales
+                    data: filteredSales.map(r => ({ date: r.date, product: r.product, quantity: r.quantity, total: r.total }))
                 };
-                setQueryResults(results);
+                return results;
             };
     
             // Consulta de compras
-            const executePurchasesQuery = () => {
+            const executePurchasesQuery = async () => {
                 const filteredPurchases = purchases.filter(purchase => {
                     if (startDate && endDate) {
-                        const purchaseDate = parseDate(purchase.date);
-                        const start = parseDate(startDate);
-                        const end = parseDate(endDate);
+                        const purchaseDate = parseAnyDate(purchase.date);
+                        const start = parseAnyDate(startDate);
+                        const end = parseAnyDate(endDate);
+                        if (!purchaseDate || !start || !end) return false;
                         return purchaseDate >= start && purchaseDate <= end;
                     }
                     return true;
                 });
-    
+                // Normalizar cada compra para asegurar compatibilidad UI/PDF
+                const normalized = filteredPurchases.map(purchase => {
+                    const itemsArray = Array.isArray(purchase.items) ? purchase.items.map(it => ({
+                        productName: it.productName || it.product_name || it.product || '',
+                        quantity: it.quantity ?? it.qty ?? 0,
+                        unitPrice: it.unitPrice ?? it.unit_price ?? it.price ?? 0,
+                        total: it.total ?? it.totalAmount ?? ( (it.quantity ?? 0) * (it.unitPrice ?? it.unit_price ?? it.price ?? 0) )
+                    })) : [];
+
+                    const supplierName = purchase.supplierName || purchase.supplier_name || purchase.supplier || '';
+                    const totalAmount = Number(purchase.totalAmount ?? purchase.total_amount ?? purchase.total ?? 0);
+
+                    return {
+                        id: purchase.id,
+                        date: purchase.date,
+                        supplier: supplierName,
+                        supplier_name: supplierName,
+                        items: itemsArray,
+                        total: totalAmount,
+                        totalAmount: totalAmount,
+                        total_amount: totalAmount,
+                        status: purchase.status || 'Completada'
+                    };
+                });
+
                 const results = {
                     title: 'Reporte de Compras',
                     summary: {
-                        totalPurchases: filteredPurchases.length,
-                        totalAmount: filteredPurchases.reduce((sum, purchase) => sum + purchase.totalAmount, 0),
-                        period: startDate && endDate ? `${startDate} - ${endDate}` : 'Todos los períodos'
+                        totalPurchases: normalized.length,
+                        totalAmount: normalized.reduce((sum, p) => sum + (Number(p.total) || 0), 0),
+                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
                     },
-                    data: filteredPurchases.map(purchase => ({
-                        id: purchase.id,
-                        date: purchase.date,
-                        supplier: purchase.supplierName,
-                        total: purchase.totalAmount,
-                        status: purchase.status
-                    }))
+                    data: normalized
                 };
+
                 setQueryResults(results);
+                return results;
             };
     
             // Consulta de pedidos
-            const executeOrdersQuery = () => {
+            const executeOrdersQuery = async () => {
                 const filteredOrders = orders.filter(order => {
                     if (startDate && endDate) {
-                        const orderDate = parseDate(order.date);
-                        const start = parseDate(startDate);
-                        const end = parseDate(endDate);
+                        const orderDate = parseAnyDate(order.date);
+                        const start = parseAnyDate(startDate);
+                        const end = parseAnyDate(endDate);
+                        if (!orderDate || !start || !end) return false;
                         return orderDate >= start && orderDate <= end;
                     }
                     return true;
@@ -2404,47 +2934,117 @@ const App = () => {
                         totalOrders: filteredOrders.length,
                         pendingOrders: filteredOrders.filter(o => o.status === 'Pendiente').length,
                         sentOrders: filteredOrders.filter(o => o.status === 'Enviado').length,
-                        period: startDate && endDate ? `${startDate} - ${endDate}` : 'Todos los períodos'
+                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
                     },
-                    data: filteredOrders.map(order => ({
-                        id: order.id,
-                        date: order.date,
-                        supplier: order.supplierName,
-                        status: order.status,
-                        items: order.items.length
-                    }))
+                    data: filteredOrders.map(order => {
+                        // Normalizar items: preferir lista completa de objetos { productName, quantity, unitPrice, total }
+                        const itemsArray = Array.isArray(order.items) ? order.items : [];
+                        // Crear representaciones para UI/PDF
+                        const productsList = itemsArray.map(it => it.productName || it.product_name || it.product || '').filter(Boolean);
+                        const unitsList = itemsArray.map(it => (it.quantity !== undefined && it.quantity !== null) ? String(it.quantity) : '').filter(Boolean);
+
+                        return {
+                            id: order.id,
+                            date: order.date,
+                            customerName: order.customerName || order.customer_name || '',
+                            paymentMethod: order.paymentMethod || order.payment_method || '',
+                            status: order.status,
+                            // enviar items completos para que el backend PDF pueda usar nombres y cantidades
+                            items: itemsArray,
+                            // Campos derivados para mostrar en la tabla de UI y en caso de export
+                            products: productsList.join(', '),
+                            units: unitsList.join(', '),
+                            // also include snake_case fields for backend PDF generator compatibility
+                            customer_name: order.customerName || order.customer_name || '',
+                            payment_method: order.paymentMethod || order.payment_method || ''
+                        };
+                    })
                 };
                 setQueryResults(results);
+                return results;
             };
     
             // Consulta de movimientos de caja
-            const executeCashMovementsQuery = () => {
-                const filteredMovements = cashMovements.filter(movement => {
+            const executeCashMovementsQuery = async () => {
+                // Si no hay movimientos cargados, intentar recargarlos desde backend
+                if (!cashMovements || cashMovements.length === 0) {
+                    console.log('ℹ️ No hay movimientos en memoria. Intentando cargar desde backend...');
+                    try {
+                        await loadCashMovements();
+                    } catch (e) {
+                        console.warn('⚠️ No se pudo recargar movimientos desde backend:', e && e.message);
+                    }
+                }
+
+                // Aceptar múltiples campos de fecha y normalizar tipo/amount
+                const normalized = (cashMovements || []).map(m => {
+                    // Fecha preferida: date, timestamp, created_at
+                    const rawDate = m.date || m.timestamp || m.created_at || m.date_iso || '';
+                    // Normalizar tipo (Entrada/Salida)
+                    let type = (m.type || '').toString();
+                    const tLower = type.toLowerCase();
+                    if (tLower.startsWith('e') || tLower.includes('entrada') || tLower === 'in') type = 'Entrada';
+                    else if (tLower.startsWith('s') || tLower.includes('salida') || tLower === 'out') type = 'Salida';
+                    else type = m.type || type;
+
+                    const amount = (() => {
+                        const a = m.amount;
+                        const num = typeof a === 'number' ? a : parseFloat(a);
+                        return isNaN(num) ? 0 : num;
+                    })();
+
+                    return {
+                        id: m.id,
+                        date: rawDate,
+                        timestamp: rawDate,
+                        type,
+                        amount,
+                        description: m.description || '',
+                        user: m.user || (m.user_username || m.user_name) || 'Sistema',
+                        // dejar la forma original por compatibilidad
+                        _raw: m
+                    };
+                });
+
+                console.debug('🔎 Movimientos normalizados (primeros 5):', normalized.slice(0,5));
+
+                const filteredMovements = normalized.filter(movement => {
                     if (startDate && endDate) {
-                        const movementDate = parseDate(movement.date);
-                        const start = parseDate(startDate);
-                        const end = parseDate(endDate);
+                        const movementDate = parseAnyDate(movement.date);
+                        const start = parseAnyDate(startDate);
+                        const end = parseAnyDate(endDate);
+                        if (!movementDate || !start || !end) return false;
                         return movementDate >= start && movementDate <= end;
                     }
                     return true;
                 });
-    
+
+                console.debug('🔎 Movimientos filtrados según rango (primeros 5):', filteredMovements.slice(0,5));
+                console.debug(`ℹ️ Movimientos normalizados=${normalized.length}, filtrados=${filteredMovements.length}`);
+
+                const totalIncome = filteredMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : 0), 0);
+                const totalExpenses = filteredMovements.reduce((sum, m) => sum + (m.type === 'Salida' ? m.amount : 0), 0);
+
                 const results = {
                     title: 'Reporte de Movimientos de Caja',
                     summary: {
                         totalMovements: filteredMovements.length,
-                        totalIncome: filteredMovements.filter(m => m.type === 'Entrada').reduce((sum, m) => sum + m.amount, 0),
-                        totalExpenses: filteredMovements.filter(m => m.type === 'Salida').reduce((sum, m) => sum + m.amount, 0),
-                        period: startDate && endDate ? `${startDate} - ${endDate}` : 'Todos los períodos'
+                        totalIncome: safeToFixed(totalIncome),
+                        totalExpenses: safeToFixed(totalExpenses),
+                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
                     },
                     data: filteredMovements.map(movement => ({
+                        id: movement.id,
                         date: movement.date,
+                        timestamp: movement.timestamp,
                         type: movement.type,
                         amount: movement.amount,
-                        description: movement.description
+                        description: movement.description,
+                        user: movement.user
                     }))
                 };
                 setQueryResults(results);
+                return results;
             };
     
             // Función para exportar datos
@@ -2455,8 +3055,9 @@ const App = () => {
                 }
                 try {
                     const token = getAccessToken();
-                    const response = await fetch('http://localhost:8000/api/export-data/', {
+                    const response = await fetch('/api/export-data/', {
                         method: 'POST',
+                        credentials: 'include', // enviar cookies HttpOnly (refresh) si las hay
                         headers: {
                             'Content-Type': 'application/json',
                             'Authorization': token ? `Bearer ${token}` : undefined
@@ -2509,21 +3110,19 @@ const App = () => {
                         
                         <div className="date-filters">
                             <div className="date-input">
-                                <label>Fecha de inicio (dd/mm/aaaa):</label>
+                                <label>Fecha de inicio:</label>
                                 <input 
                                     type="date" 
                                     value={startDate} 
                                     onChange={e => setStartDate(e.target.value)} 
-                                    //placeholder="dd/mm/aaaa"
                                 />
                             </div>
                             <div className="date-input">
-                                <label>Fecha de fin (dd/mm/aaaa):</label>
+                                <label>Fecha de fin:</label>
                                 <input 
                                     type="date" 
                                     value={endDate} 
                                     onChange={e => setEndDate(e.target.value)} 
-                                    //placeholder="dd/mm/aaaa"
                                 />
                             </div>
                         </div>
@@ -2553,26 +3152,109 @@ const App = () => {
                             </div>
                             
                             <div className="results-table">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            {Object.keys(queryResults.data[0] || {}).map(key => (
-                                                <th key={key}>
-                                                    {headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {queryResults.data.map((row, index) => (
-                                            <tr key={index}>
-                                                {Object.values(row).map((value, colIndex) => (
-                                                    <td key={colIndex}>{value}</td>
-                                                ))}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                {queryResults.data && queryResults.data.length > 0 ? (
+                                    (() => {
+                                        // Helper para mostrar de forma segura valores que pueden ser arrays/objetos
+                                        const renderCellValue = (value) => {
+                                            if (value === null || value === undefined) return '';
+                                            // Array -> intentar formatear cada elemento
+                                            if (Array.isArray(value)) {
+                                                if (value.length === 0) return '';
+                                                // Si todos son primitivos, unirlos
+                                                if (value.every(v => v === null || ['string','number','boolean'].includes(typeof v))) {
+                                                    return value.filter(v => v !== null && v !== undefined).join(', ');
+                                                }
+                                                // Array de objetos: mapear a una representación legible
+                                                return value.map(item => {
+                                                    if (item === null || item === undefined) return '';
+                                                    if (typeof item === 'string' || typeof item === 'number') return String(item);
+                                                    // Intentar campos comunes
+                                                    const name = item.productName || item.product_name || item.product || item.name || item.productName;
+                                                    const qty = item.quantity ?? item.cantidad ?? item.qty ?? '';
+                                                    const unit = item.unitPrice ?? item.unit_price ?? item.price ?? '';
+                                                    const total = item.total ?? item.totalAmount ?? item.total_amount ?? '';
+                                                    const parts = [];
+                                                    if (name) parts.push(String(name));
+                                                    if (qty !== '') parts.push(String(qty));
+                                                    if (unit !== '') parts.push(`x ${safeToFixed(unit)}`);
+                                                    if (total !== '') parts.push(`= ${safeToFixed(total)}`);
+                                                    return parts.join(' ');
+                                                }).filter(Boolean).join('; ');
+                                            }
+
+                                            // Object -> intentar formatear campos conocidos o hacer JSON
+                                            if (typeof value === 'object') {
+                                                const name = value.productName || value.product_name || value.name;
+                                                if (name) {
+                                                    const qty = value.quantity ?? value.cantidad ?? value.qty ?? '';
+                                                    const unit = value.unitPrice ?? value.unit_price ?? value.price ?? '';
+                                                    const total = value.total ?? value.totalAmount ?? value.total_amount ?? '';
+                                                    const parts = [String(name)];
+                                                    if (qty !== '') parts.push(String(qty));
+                                                    if (unit !== '') parts.push(`x ${safeToFixed(unit)}`);
+                                                    if (total !== '') parts.push(`= ${safeToFixed(total)}`);
+                                                    return parts.join(' ');
+                                                }
+                                                try { return JSON.stringify(value); } catch (e) { return String(value); }
+                                            }
+
+                                            // Primitivos
+                                            return String(value);
+                                        };
+
+                                        const sample = queryResults.data[0] || {};
+
+                                        // Si es reporte de pedidos y tiene customerName, mostrar columnas amigables
+                                        if (sample.customerName || sample.customer_name) {
+                                            const cols = ['id','date','customerName','paymentMethod','status','products','units'];
+                                            return (
+                                                <table>
+                                                    <thead>
+                                                        <tr>
+                                                            {cols.map(key => (
+                                                                <th key={key}>{headerTranslationMap[key] || key}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {queryResults.data.map((row, index) => (
+                                                            <tr key={index}>
+                                                                {cols.map((k, ci) => (
+                                                                    <td key={ci}>{renderCellValue(row[k] ?? row[k === 'products' ? 'items' : k])}</td>
+                                                                ))}
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            );
+                                        }
+
+                                        // Por defecto: columnas derivadas de las keys del primer objeto
+                                        const keys = Object.keys(sample);
+                                        return (
+                                            <table>
+                                                <thead>
+                                                    <tr>
+                                                        {keys.map(key => (
+                                                            <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {queryResults.data.map((row, rIdx) => (
+                                                        <tr key={rIdx}>
+                                                            {keys.map((k, cIdx) => (
+                                                                <td key={cIdx}>{renderCellValue(row[k])}</td>
+                                                            ))}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        );
+                                    })()
+                                ) : (
+                                    <p>No hay datos que mostrar para los criterios seleccionados.</p>
+                                )}
                             </div>
                         </div>
                     )}
@@ -2641,7 +3323,7 @@ const App = () => {
             };
     
             // Función para guardar los cambios
-            const handleSaveChanges = (e) => {
+            const handleSaveChanges = async (e) => {
                 e.preventDefault();
     
                 // Validaciones según la especificación
@@ -2674,32 +3356,38 @@ const App = () => {
                 if (!editingProduct.name.trim() || editingProduct.price <= 0 || !editingProduct.category) {
                     setMessage('🚫 Error: No se pueden eliminar datos obligatorios (nombre, precio, categoría).');
                     return;
-                }                // Actualizar el producto en la lista principal
-                const updatedProducts = products.map(product => 
-                    product.id === selectedProduct.id 
-                        ? { 
-                            ...product, 
-                            name: editingProduct.name,
-                            price: editingProduct.price,
-                            category: editingProduct.category,
-                            stock: editingProduct.stock,
-                            description: editingProduct.description,
-                            lowStockThreshold: editingProduct.lowStockThreshold
-                        }
-                        : product
-                );
-                
-                setProducts(updatedProducts);
-                setSelectedProduct(null);
-                setEditingProduct({
-                    name: '',
-                    price: 0,
-                    category: 'Producto',
-                    stock: 0,
-                    description: '',
-                    lowStockThreshold: 10
-                });
-                setMessage('✅ Producto actualizado correctamente. Los cambios se reflejan en Ventas e Inventario.');
+                }
+
+                try {
+                    // Actualizar el producto en el backend primero
+                    const updatedProduct = {
+                        name: editingProduct.name,
+                        price: editingProduct.price,
+                        category: editingProduct.category,
+                        stock: editingProduct.stock,
+                        description: editingProduct.description,
+                        lowStockThreshold: editingProduct.lowStockThreshold
+                    };
+
+                    await api.put(`/products/${selectedProduct.id}/`, updatedProduct);
+                    
+                    // Si se actualiza correctamente en el backend, recargar productos desde el servidor
+                    await loadProducts();
+                    
+                    setSelectedProduct(null);
+                    setEditingProduct({
+                        name: '',
+                        price: 0,
+                        category: 'Producto',
+                        stock: 0,
+                        description: '',
+                        lowStockThreshold: 10
+                    });
+                    setMessage('✅ Producto actualizado correctamente en el servidor. Los cambios se reflejan en todas las secciones.');
+                } catch (error) {
+                    console.error('Error actualizando producto en el servidor:', error);
+                    setMessage('❌ Error: No se pudo actualizar el producto en el servidor. Los cambios no fueron guardados.');
+                }
             };
     
             // Función para cancelar la edición
@@ -2956,7 +3644,17 @@ const App = () => {
         if (!isLoggedIn) {
             return <Login />;
         }
-        switch (currentPage) {
+
+        // Defensive: ensure currentPage is a known page when logged in to avoid falling
+        // into the default case which renders the "Página no encontrada." message
+        const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas','editar productos','login']);
+        let pageToRender = currentPage;
+        if (!validPages.has(String(currentPage))) {
+            console.warn('⚠️ currentPage inválido detectado, forzando a dashboard:', currentPage);
+            pageToRender = 'dashboard';
+        }
+
+        switch (pageToRender) {
             case 'dashboard':
                 return <Dashboard />;
             case 'inventario':
@@ -3007,48 +3705,182 @@ const App = () => {
       }
     }, [isLoggedIn]);
 
-    // Sincronización periódica de productos (cada 5 minutos para reducir interrupciones)
+    // Sincronización periódica de productos (cada 5 minutos, muy cuidadosa)
     useEffect(() => {
       let interval = null;
+      let registerInteraction = null;
+      
       if (isLoggedIn) {
+        // Registrar interacciones del usuario para pausar sincronización
+        registerInteraction = () => {
+          window.lastUserInteraction = Date.now();
+        };
+        
+        // Escuchar eventos de interacción
+        document.addEventListener('click', registerInteraction);
+        document.addEventListener('keydown', registerInteraction);
+        document.addEventListener('input', registerInteraction);
+        document.addEventListener('change', registerInteraction);
+        
         interval = setInterval(() => {
-          // Solo sincronizar si no hay inputs activos para evitar interrumpir al usuario
+          // Verificaciones múltiples para no interrumpir al usuario
           const activeElement = document.activeElement;
           const isTyping = activeElement && (
             activeElement.tagName === 'INPUT' || 
             activeElement.tagName === 'TEXTAREA' || 
+            activeElement.tagName === 'SELECT' ||
             activeElement.contentEditable === 'true'
           );
           
-          if (!isTyping) {
+          // Verificar si hay formularios abiertos, modales, o consultas en progreso
+          const hasOpenForms = document.querySelector('.form-container:not([style*="display: none"])') ||
+                               document.querySelector('.modal-overlay') ||
+                               document.querySelector('.tab-content') ||
+                               document.querySelector('[class*="show"]') ||
+                               document.querySelector('.consultation-results') ||
+                               document.querySelector('.purchase-item') ||
+                               document.querySelector('.order-item') ||
+                               document.querySelector('.query-results'); // Proteger resultados de consulta
+          
+          // Verificar si estamos en la página de consultas con resultados
+          const isInConsultationPage = currentPage === 'consultas';
+          const hasQueryResults = document.querySelector('.query-results');
+          
+          // Verificar si el usuario ha interactuado recientemente (últimos 2 minutos)
+          const lastInteraction = window.lastUserInteraction || 0;
+          const now = Date.now();
+          const recentInteraction = now - lastInteraction < 120000; // 2 minutos
+          
+          if (!isTyping && !hasOpenForms && !recentInteraction && !(isInConsultationPage && hasQueryResults)) {
             loadProducts();
             console.log('🔄 Sincronización automática de productos');
           } else {
-            console.log('⏸️ Sincronización pausada - usuario escribiendo');
+            console.log('⏸️ Sincronización pausada - usuario activo:', {
+              typing: isTyping,
+              forms: !!hasOpenForms,
+              recent: recentInteraction,
+              consultingData: !!(isInConsultationPage && hasQueryResults)
+            });
           }
-        }, 300000); // 5 minutos en lugar de 30 segundos
+        }, 300000); // 5 minutos
       }
-      
+
       return () => {
         if (interval) {
           clearInterval(interval);
         }
+        // Limpiar event listeners si existen
+        if (registerInteraction) {
+          document.removeEventListener('click', registerInteraction);
+          document.removeEventListener('keydown', registerInteraction);
+          document.removeEventListener('input', registerInteraction);
+          document.removeEventListener('change', registerInteraction);
+        }
       };
-    }, [isLoggedIn]);
+    }, [isLoggedIn, currentPage]);    // Sincronización cuando la ventana recupera el foco (menos agresiva)
 
-    // Sincronización cuando la ventana recupera el foco
+    // Marcar productos que tienen ventas para que no sean considerados "sin ventas"
+    // Depende solo de `sales`. Usamos un update funcional y solo aplicamos setProducts
+    // cuando realmente cambie la bandera `hasSales`, para evitar bucles de render.
+    useEffect(() => {
+        if (!Array.isArray(sales) || sales.length === 0) return;
+
+        // Construir set de nombres de producto que aparecen en las ventas
+        const soldProductNames = new Set();
+        sales.forEach(s => {
+            const items = Array.isArray(s.sale_items) && s.sale_items.length ? s.sale_items : (Array.isArray(s.items) ? s.items : []);
+            items.forEach(it => {
+                const name = (it && (it.product_name || it.product || it.productName)) || '';
+                if (name) soldProductNames.add(String(name).trim());
+            });
+        });
+
+        setProducts(prev => {
+            if (!Array.isArray(prev) || prev.length === 0) return prev;
+            // Construir nuevo array pero solo cambiar si alguna bandera difiere
+            let changed = false;
+            const next = prev.map(p => {
+                const shouldHaveSales = soldProductNames.has(p.name) || !!p.hasSales;
+                if (shouldHaveSales !== !!p.hasSales) changed = true;
+                return shouldHaveSales !== !!p.hasSales ? { ...p, hasSales: shouldHaveSales } : p;
+            });
+            return changed ? next : prev;
+        });
+    }, [sales]);
     useEffect(() => {
       const handleFocus = () => {
         if (isLoggedIn) {
-          loadProducts();
-          console.log('👁️ Ventana enfocada - sincronizando productos');
+          // Solo sincronizar si no hay formularios abiertos o inputs activos
+          const activeElement = document.activeElement;
+          const isTyping = activeElement && (
+            activeElement.tagName === 'INPUT' || 
+            activeElement.tagName === 'TEXTAREA' || 
+            activeElement.tagName === 'SELECT' ||
+            activeElement.contentEditable === 'true'
+          );
+          
+          // Verificar si hay formularios, modales abiertos o resultados de consulta
+          const hasOpenForms = document.querySelector('.form-container:not([style*="display: none"])') ||
+                               document.querySelector('.modal-overlay') ||
+                               document.querySelector('.tab-content') ||
+                               document.querySelector('[class*="show"]') ||
+                               document.querySelector('.query-results'); // Proteger resultados de consulta
+          
+          // Verificar si estamos en la página de consultas con resultados
+          const isInConsultationPage = currentPage === 'consultas';
+          const hasQueryResults = document.querySelector('.query-results');
+          
+          if (!isTyping && !hasOpenForms && !(isInConsultationPage && hasQueryResults)) {
+            // Solo sincronizar productos cada 30 segundos como máximo al enfocar
+            const lastSync = window.lastFocusSync || 0;
+            const now = Date.now();
+            
+            if (now - lastSync > 30000) { // 30 segundos
+              loadProducts();
+              window.lastFocusSync = now;
+              console.log('👁️ Ventana enfocada - sincronizando productos (sin formularios abiertos)');
+            } else {
+              console.log('⏸️ Sincronización saltada - muy reciente o usuario trabajando');
+            }
+          } else {
+            console.log('⏸️ Sincronización pausada - usuario interactuando con formularios o consultando datos');
+          }
         }
       };
 
       const handleVisibilityChange = () => {
         if (!document.hidden && isLoggedIn) {
-          loadProducts();
-          console.log('👁️ Pestaña visible - sincronizando productos');
+          // Aplicar la misma lógica que handleFocus
+          const activeElement = document.activeElement;
+          const isTyping = activeElement && (
+            activeElement.tagName === 'INPUT' || 
+            activeElement.tagName === 'TEXTAREA' || 
+            activeElement.tagName === 'SELECT' ||
+            activeElement.contentEditable === 'true'
+          );
+          
+          const hasOpenForms = document.querySelector('.form-container:not([style*="display: none"])') ||
+                               document.querySelector('.modal-overlay') ||
+                               document.querySelector('.tab-content') ||
+                               document.querySelector('[class*="show"]') ||
+                               document.querySelector('.query-results'); // Proteger resultados de consulta
+          
+          // Verificar si estamos en la página de consultas con resultados
+          const isInConsultationPage = currentPage === 'consultas';
+          const hasQueryResults = document.querySelector('.query-results');
+          
+          if (!isTyping && !hasOpenForms && !(isInConsultationPage && hasQueryResults)) {
+            const lastSync = window.lastVisibilitySync || 0;
+            const now = Date.now();
+            
+            if (now - lastSync > 30000) { // 30 segundos
+              loadProducts();
+              window.lastVisibilitySync = now;
+              console.log('👁️ Pestaña visible - sincronizando productos (sin formularios abiertos)');
+            }
+          } else {
+            console.log('⏸️ Sincronización pausada - usuario trabajando o consultando datos');
+          }
         }
       };
 
@@ -3059,10 +3891,22 @@ const App = () => {
         window.removeEventListener('focus', handleFocus);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
-    }, [isLoggedIn]);
+    }, [isLoggedIn, currentPage]);
+
+    if (!sessionChecked) {
+        return (
+            <div className="app-loading" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh'}}>
+                <div style={{textAlign: 'center'}}>
+                    <div style={{fontSize: 18, marginBottom: 8}}>Comprobando sesión...</div>
+                    <div style={{fontSize: 12, color: '#666'}}>Si esto tarda mucho, confirma que el backend esté corriendo.</div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="app-container">
+            {/* Panel de desarrollo "DEV STATUS" eliminado para UI limpia. */}
             {showModal && <LockedAccountModal />}
             {isLoggedIn && <Navbar />}
             {renderPage()}

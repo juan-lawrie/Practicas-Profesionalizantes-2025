@@ -1,7 +1,9 @@
 # backend/api/serializers.py
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role
+from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role, UserQuery
+from .models import Purchase
+from .models import Order, OrderItem
 
 User = get_user_model()  # Usa el modelo de usuario personalizado
 
@@ -139,3 +141,50 @@ class SaleSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(f'Producto con ID {product_id} no encontrado')
         
         return sale
+
+# Serializer para consultas de usuario
+class UserQuerySerializer(serializers.ModelSerializer):
+    user = serializers.ReadOnlyField(source='user.username')
+    
+    class Meta:
+        model = UserQuery
+        fields = '__all__'
+        read_only_fields = ('user', 'created_at', 'updated_at')
+
+
+# Serializer para compras
+class PurchaseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Purchase
+        fields = '__all__'
+        read_only_fields = ('id', 'created_at')
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderItem
+        fields = ('id', 'product_name', 'quantity', 'unit_price', 'total')
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    items = OrderItemSerializer(many=True)
+    user = serializers.ReadOnlyField(source='user.username')
+
+    class Meta:
+        model = Order
+        fields = ('id', 'customer_name', 'date', 'payment_method', 'items', 'total_amount', 'notes', 'status', 'created_at', 'user')
+        read_only_fields = ('id', 'created_at', 'user')
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        order = Order.objects.create(**validated_data)
+        total = 0
+        for item in items_data:
+            qty = item.get('quantity', 1)
+            unit = item.get('unit_price', 0)
+            line_total = qty * unit
+            OrderItem.objects.create(order=order, product_name=item.get('product_name', ''), quantity=qty, unit_price=unit, total=line_total)
+            total += line_total
+        order.total_amount = total
+        order.save()
+        return order

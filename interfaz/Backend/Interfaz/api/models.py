@@ -89,5 +89,70 @@ class SaleItem(models.Model):
 
     def __str__(self):
         return f'{self.quantity} x {self.product.name} en Venta #{self.sale.id}'
+
+# Modelo para guardar el estado de consultas de datos
+class UserQuery(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    query_type = models.CharField(max_length=50)  # 'stock', 'ventas', 'compras', etc.
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    results_data = models.JSONField()  # Almacenar los resultados de la consulta
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)  # Para saber si la consulta está activa
+
+    class Meta:
+        ordering = ['-updated_at']
+        unique_together = ['user', 'query_type']  # Un usuario solo puede tener una consulta activa por tipo
+
+    def __str__(self):
+        return f'{self.user.username} - {self.query_type} - {self.updated_at}'
+
+
+# Modelo para almacenar compras (compras de insumos/proveedores)
+class Purchase(models.Model):
+    date = models.CharField(max_length=50, blank=True, null=True)
+    supplier = models.CharField(max_length=255, blank=True, null=True)
+    supplier_id = models.IntegerField(blank=True, null=True)
+    items = models.JSONField(default=list)  # Lista de items con {productName, quantity, unitPrice, total}
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    status = models.CharField(max_length=50, default='Completada')
+    created_at = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Compra #{self.id} - {self.supplier or "(sin proveedor)"} - {self.created_at.strftime("%Y-%m-%d %H:%M")}'
+
+
+# Modelos para pedidos de clientes (persistencia de orders)
+class Order(models.Model):
+    customer_name = models.CharField(max_length=255)
+    date = models.DateField(null=True, blank=True)
+    payment_method = models.CharField(max_length=100, blank=True, null=True)
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    notes = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=50, default='Pendiente')
+    created_at = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Pedido #{self.id} - {self.customer_name} - {self.created_at.strftime("%Y-%m-%d %H:%M")}'
+
+
+class OrderItem(models.Model):
+    order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
+    product_name = models.CharField(max_length=255)
+    quantity = models.IntegerField(default=1)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    def __str__(self):
+        return f'{self.quantity} x {self.product_name} for Order #{self.order.id}'
     
     

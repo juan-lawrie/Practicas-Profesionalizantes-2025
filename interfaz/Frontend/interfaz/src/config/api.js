@@ -5,7 +5,8 @@
 // Resultado: 404 Cannot POST /auth/login/.
 
 const API_CONFIG = {
-  baseURL: 'http://127.0.0.1:8000/api',
+  // En desarrollo usamos el proxy del dev server (package.json -> proxy) para evitar CORS
+  baseURL: '/api',
   timeout: 10000
 };
 
