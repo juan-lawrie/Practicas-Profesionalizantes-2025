@@ -19,9 +19,7 @@ __pycache__/
 
 # Django (IMPORTANTES - ARCHIVOS PESADOS O SENSIBLES)
 *.log
-media/
-staticfiles/
-static/
+
 
 # Migraciones locales (CUIDADO - MEJOR INCLUIR)
 # migrations/

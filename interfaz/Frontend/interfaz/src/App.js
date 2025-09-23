@@ -2466,11 +2466,13 @@ const App = () => {
             'phone': 'Teléfono',
             'address': 'Dirección',
             'products': 'Productos',
+            'items': 'Insumo/Producto',
             'id': 'ID',
             'date': 'Fecha',
             'email': 'Email',
             'role': 'Rol',
             'username': 'Usuario',
+            'user': 'Usuario',
             'type': 'Tipo',
             'amount': 'Monto',
             'description': 'Descripción',
@@ -2813,17 +2815,29 @@ const App = () => {
                     // Determinar items dentro de la venta
                     let itemsArr = [];
                     if (Array.isArray(s.sale_items) && s.sale_items.length > 0) {
-                        itemsArr = s.sale_items.map(it => ({
-                            product: it.product_name || it.product || it.name || '',
-                            quantity: it.quantity || it.qty || 0,
-                            total: it.price || it.total || 0
-                        }));
+                        itemsArr = s.sale_items.map(it => {
+                            const qty = Number(it.quantity ?? it.qty ?? 0) || 0;
+                            const unit = Number(it.price ?? it.unit_price ?? 0) || 0;
+                            const lineTotal = (it.total !== undefined && it.total !== null) ? Number(it.total) : (qty * unit);
+                            return {
+                                product: it.product_name || it.product || it.name || '',
+                                quantity: qty,
+                                unitPrice: unit,
+                                total: lineTotal
+                            };
+                        });
                     } else if (Array.isArray(s.items) && s.items.length > 0) {
-                        itemsArr = s.items.map(it => ({
-                            product: it.product_name || it.productName || it.product || '',
-                            quantity: it.quantity || it.qty || 0,
-                            total: it.total || it.price || 0
-                        }));
+                        itemsArr = s.items.map(it => {
+                            const qty = Number(it.quantity ?? it.qty ?? 0) || 0;
+                            const unit = Number(it.price ?? it.unitPrice ?? it.unit_price ?? 0) || 0;
+                            const lineTotal = (it.total !== undefined && it.total !== null) ? Number(it.total) : (qty * unit);
+                            return {
+                                product: it.product_name || it.productName || it.product || it.name || '',
+                                quantity: qty,
+                                unitPrice: unit,
+                                total: lineTotal
+                            };
+                        });
                     }
 
                     // Si no hay items explícitos, podemos intentar inferir de campos totales
@@ -2832,8 +2846,10 @@ const App = () => {
                     }
 
                     // Agregar una fila por cada item para que la tabla muestre productos individuales
+                    // Determinar usuario de la venta (varios formatos posibles)
+                    const saleUser = s.user || s.user_username || s.user_name || (s.user && s.user.username) || (s.user && s.user.name) || 'Sistema';
                     for (const it of itemsArr) {
-                        rows.push({ date, product: it.product, quantity: it.quantity, total: it.total });
+                        rows.push({ id: s.id ?? null, date, product: it.product, quantity: it.quantity, total: it.total, user: saleUser });
                     }
                     console.log('🔎 executeSalesQuery - built rows count before filter:', rows.length);
                 }
@@ -2859,7 +2875,7 @@ const App = () => {
                         totalRevenue: filteredSales.reduce((sum, sale) => sum + (Number(sale.total) || 0), 0),
                         period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
                     },
-                    data: filteredSales.map(r => ({ date: r.date, product: r.product, quantity: r.quantity, total: r.total }))
+                    data: filteredSales.map(r => ({ id: r.id, date: r.date, product: r.product, quantity: r.quantity, total: r.total, user: r.user }))
                 };
                 return results;
             };
@@ -2878,26 +2894,52 @@ const App = () => {
                 });
                 // Normalizar cada compra para asegurar compatibilidad UI/PDF
                 const normalized = filteredPurchases.map(purchase => {
-                    const itemsArray = Array.isArray(purchase.items) ? purchase.items.map(it => ({
-                        productName: it.productName || it.product_name || it.product || '',
-                        quantity: it.quantity ?? it.qty ?? 0,
-                        unitPrice: it.unitPrice ?? it.unit_price ?? it.price ?? 0,
-                        total: it.total ?? it.totalAmount ?? ( (it.quantity ?? 0) * (it.unitPrice ?? it.unit_price ?? it.price ?? 0) )
-                    })) : [];
+                    const itemsArray = Array.isArray(purchase.items) ? purchase.items.map(it => {
+                        const productName = it.productName || it.product_name || it.product || it.name || '';
+                        const quantity = it.quantity ?? it.qty ?? 0;
+                        const unitPrice = it.unitPrice ?? it.unit_price ?? it.price ?? 0;
+                        const total = it.total ?? it.totalAmount ?? ((quantity ?? 0) * (unitPrice ?? 0));
+                        // Prefer explicit category from backend, si no existe intentar inferir desde inventory (products sync)
+                        let category = it.category || it.type || it.productCategory || it.product_category || '';
+                        if ((!category || String(category).trim() === '') && productName) {
+                            try {
+                                const found = (inventory || []).find(p => p && p.name && String(p.name).toLowerCase() === String(productName).toLowerCase());
+                                if (found && (found.type || found.category)) {
+                                    category = found.type || found.category || '';
+                                }
+                            } catch (e) {
+                                // ignore and fallback to empty
+                            }
+                        }
+                        return { productName, quantity, unitPrice, total, category };
+                    }) : [];
 
-                    const supplierName = purchase.supplierName || purchase.supplier_name || purchase.supplier || '';
+                    const supplierName = purchase.supplierName || purchase.supplier || '';
                     const totalAmount = Number(purchase.totalAmount ?? purchase.total_amount ?? purchase.total ?? 0);
+
+                    // items as comma-separated names for UI/PDF
+                    const itemsNames = itemsArray.map(i => i.productName).filter(Boolean).join(', ');
+
+                    // Determine purchase-level type: if all items are 'Insumo' or 'Producto' or mixed
+                    const detectedTypes = Array.from(new Set(itemsArray.map(i => (i.category || '').toString().toLowerCase()).filter(Boolean)));
+                    let purchaseType = 'Producto';
+                    if (detectedTypes.length === 0) {
+                        purchaseType = 'Producto';
+                    } else if (detectedTypes.length === 1) {
+                        purchaseType = detectedTypes[0].includes('insumo') ? 'Insumo' : (detectedTypes[0].includes('producto') ? 'Producto' : 'Producto');
+                    } else {
+                        purchaseType = 'Mixto';
+                    }
 
                     return {
                         id: purchase.id,
                         date: purchase.date,
                         supplier: supplierName,
-                        supplier_name: supplierName,
-                        items: itemsArray,
+                        // supplier_name removed intentionally to avoid duplication
+                        items: itemsNames,
                         total: totalAmount,
-                        totalAmount: totalAmount,
-                        total_amount: totalAmount,
-                        status: purchase.status || 'Completada'
+                        status: purchase.status || 'Completada',
+                        type: purchaseType
                     };
                 });
 
@@ -2996,7 +3038,6 @@ const App = () => {
                     return {
                         id: m.id,
                         date: rawDate,
-                        timestamp: rawDate,
                         type,
                         amount,
                         description: m.description || '',
@@ -3036,7 +3077,6 @@ const App = () => {
                     data: filteredMovements.map(movement => ({
                         id: movement.id,
                         date: movement.date,
-                        timestamp: movement.timestamp,
                         type: movement.type,
                         amount: movement.amount,
                         description: movement.description,
@@ -3221,6 +3261,31 @@ const App = () => {
                                                             <tr key={index}>
                                                                 {cols.map((k, ci) => (
                                                                     <td key={ci}>{renderCellValue(row[k] ?? row[k === 'products' ? 'items' : k])}</td>
+                                                                ))}
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            );
+                                        }
+
+                                        // Si es reporte de ventas, forzar columnas en orden fijo incluyendo 'user'
+                                        if (selectedQuery === 'ventas' || (sample.product && sample.quantity !== undefined && sample.total !== undefined)) {
+                                            const cols = ['id','date','product','quantity','total','user'];
+                                            return (
+                                                <table>
+                                                    <thead>
+                                                        <tr>
+                                                            {cols.map(key => (
+                                                                <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {queryResults.data.map((row, index) => (
+                                                            <tr key={index}>
+                                                                {cols.map((k, ci) => (
+                                                                    <td key={ci}>{renderCellValue(row[k])}</td>
                                                                 ))}
                                                             </tr>
                                                         ))}

@@ -563,13 +563,29 @@ class ExportDataView(APIView):
         return table
 
     def _generate_sales_table(self, data):
-        table_data = [['Fecha', 'Producto', 'Cantidad', 'Total']]
+        # Columns: ID, Fecha, Producto, Cantidad, Total, Usuario
+        table_data = [['ID', 'Fecha', 'Producto', 'Cantidad', 'Total', 'Usuario']]
         for item in data:
+            # Normalizar campo usuario: puede venir como string, dict u otros formatos
+            raw_user = item.get('user') or item.get('username') or item.get('user_name') or ''
+            usuario = ''
+            try:
+                # Si viene como dict (JSON desde frontend), extraer username/name
+                if isinstance(raw_user, dict):
+                    usuario = raw_user.get('username') or raw_user.get('name') or str(raw_user)
+                else:
+                    # Si es None o vacío, dejar vacío; si es objeto tipo Decimal/int, convertir a str
+                    usuario = str(raw_user) if raw_user is not None else ''
+            except Exception:
+                usuario = str(raw_user)
+
             table_data.append([
+                str(item.get('id', '')),
                 item.get('date', ''),
                 item.get('product', ''),
                 str(item.get('quantity', 0)),
-                f"${item.get('total', 0)}"
+                f"${item.get('total', 0)}",
+                usuario
             ])
         table = Table(table_data)
         table.setStyle(TableStyle([
@@ -606,13 +622,18 @@ class ExportDataView(APIView):
         return table
 
     def _generate_cash_movements_table(self, data):
-        table_data = [['Fecha', 'Tipo', 'Monto', 'Descripción']]
+        # Mostrar ID, Fecha, Tipo, Monto, Descripción y Usuario
+        table_data = [['ID', 'Fecha', 'Tipo', 'Monto', 'Descripción', 'Usuario']]
         for item in data:
+            # Soportar varias formas de nombrar al usuario que pueden venir desde el frontend/backend
+            usuario = item.get('user') or item.get('user_username') or item.get('user_name') or item.get('username') or ''
             table_data.append([
+                item.get('id', ''),
                 item.get('date', ''),
                 item.get('type', ''),
                 f"${item.get('amount', 0)}",
-                item.get('description', '')
+                item.get('description', ''),
+                usuario
             ])
         table = Table(table_data)
         table.setStyle(TableStyle([
@@ -628,13 +649,24 @@ class ExportDataView(APIView):
         return table
 
     def _generate_purchases_table(self, data):
-        table_data = [['ID', 'Fecha', 'Proveedor', 'Total', 'Estado']]
+        # Columns: ID, Fecha, Proveedor, Items (nombres), Total, Tipo, Estado
+        table_data = [['ID', 'Fecha', 'Proveedor', 'Insumo/Producto', 'Total', 'Tipo', 'Estado']]
         for item in data:
+            # items can be a comma-separated string or list
+            items_field = item.get('items')
+            if isinstance(items_field, (list, tuple)):
+                items_str = ', '.join([ (it.get('productName') if isinstance(it, dict) else str(it)) for it in items_field ])
+            else:
+                items_str = str(items_field or '')
+
+            total_val = item.get('total') if item.get('total', None) is not None else (item.get('totalAmount') if item.get('totalAmount', None) is not None else item.get('total_amount', 0))
             table_data.append([
                 item.get('id', ''),
                 item.get('date', ''),
                 item.get('supplier', ''),
-                f"${item.get('total', 0)}" if item.get('total', None) is not None else f"${item.get('totalAmount', 0)}",
+                items_str,
+                f"${total_val}",
+                item.get('type', ''),
                 item.get('status', '')
             ])
         table = Table(table_data)
