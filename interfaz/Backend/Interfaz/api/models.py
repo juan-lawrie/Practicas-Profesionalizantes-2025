@@ -2,10 +2,36 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 
+# Modelo para almacenamiento tipo localStorage por usuario
+class UserStorage(models.Model):
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='storage')
+    key = models.CharField(max_length=100)
+    value = models.JSONField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'key')
+        verbose_name = 'User Storage'
+        verbose_name_plural = 'User Storages'
+
+    def __str__(self):
+        return f"{self.user.username} - {self.key}"
+
 # Modelo para roles
 class Role(models.Model):
     name = models.CharField(max_length=50, unique=True)
     
+    def __str__(self):
+        return self.name
+
+# Modelo para proveedores
+class Supplier(models.Model):
+    name = models.CharField(max_length=255)
+    cuit = models.CharField(max_length=20, blank=True, null=True)
+    address = models.CharField(max_length=255, blank=True, null=True)
+    phone = models.CharField(max_length=30, blank=True, null=True)
+    products = models.CharField(max_length=255, blank=True, null=True)
+
     def __str__(self):
         return self.name
 

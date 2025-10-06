@@ -1,7 +1,18 @@
 # backend/api/serializers.py
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role, UserQuery
+from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role, UserQuery, Supplier, UserStorage
+# Serializer para el modelo de proveedor
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = '__all__'
+
+# Serializer para UserStorage
+class UserStorageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserStorage
+        fields = ['id', 'key', 'value', 'updated_at']
 from .models import Purchase
 from .models import Order, OrderItem
 
@@ -46,9 +57,19 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
 # Serializer para el modelo de producto
 class ProductSerializer(serializers.ModelSerializer):
+    estado = serializers.SerializerMethodField()
+
     class Meta:
         model = Product
         fields = '__all__'
+        # Agregamos 'estado' como campo extra
+        extra_fields = ['estado']
+
+    def get_estado(self, obj):
+        # Lógica: Activo si stock > 0, Inactivo si stock == 0
+        if obj.stock > 0:
+            return 'Activo'
+        return 'Inactivo'
     
     def validate_name(self, value):
         if not value or not value.strip():

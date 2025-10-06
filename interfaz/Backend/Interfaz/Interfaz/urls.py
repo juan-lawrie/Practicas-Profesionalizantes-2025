@@ -24,7 +24,7 @@ from api.views import (
     UserViewSet, ProductViewSet, CashMovementViewSet, 
     InventoryChangeViewSet, SaleViewSet, SaleCreate,
     UserListCreate, UserDestroy, login_view, ExportDataView,
-    UserQueryViewSet
+    UserQueryViewSet, SupplierViewSet, UserStorageViewSet
 )
 from api.views import PurchaseViewSet, OrderViewSet, refresh_from_cookie, logout_view
 from api.views import PurchaseViewSet
@@ -35,8 +35,9 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 
-# Creamos un router para registrar nuestros ViewSets
+
 router = DefaultRouter()
+router.register(r'userstorage', UserStorageViewSet, basename='userstorage')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'products', ProductViewSet, basename='product')
 router.register(r'cash-movements', CashMovementViewSet, basename='cash-movement')
@@ -45,6 +46,7 @@ router.register(r'sales', SaleViewSet, basename='sale')
 router.register(r'user-queries', UserQueryViewSet, basename='user-query')
 router.register(r'purchases', PurchaseViewSet, basename='purchase')
 router.register(r'orders', OrderViewSet, basename='order')
+router.register(r'suppliers', SupplierViewSet, basename='supplier')
 
 def root_redirect(request):
     return redirect('/api/')

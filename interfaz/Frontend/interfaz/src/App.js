@@ -1,119 +1,115 @@
+
 import React, { useState, useEffect } from 'react';
 import './App.css';
-import api, { safeStorage, backendLogin, backendLogout } from './services/api';
+import api, { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken } from './services/api';
+import userStorage from './services/userStorage';
+import DataConsultation from './DataConsultation';
 
-const LS_KEYS = {
-  inventory: 'inventory',
-  users: 'users',
-  cashMovements: 'cashMovements',
-  suppliers: 'suppliers',
-  purchases: 'purchases',
-  orders: 'orders',
-  products: 'products',
-};
 
-const loadLS = (key, fallback) => {
-  try {
-    // Verificar que safeStorage esté disponible
-        if (typeof safeStorage === 'undefined' || !safeStorage || !safeStorage.isAvailable()) {
-            // Si safeStorage no está disponible, retornamos fallback silenciosamente.
-            return fallback;
-        }
 
-        const raw = safeStorage.getItem(key);
-        if (raw === null || raw === undefined) return fallback;
-        try { return JSON.parse(raw); } catch (e) { return fallback; }
-  } catch (error) {
-        console.debug && console.debug(`Error al cargar ${key} desde almacenamiento:`, error && error.message);
-    return fallback;
-  }
-};
-
-const saveLS = (key, value) => {
-  try {
-    // Verificar que safeStorage esté disponible
-        if (typeof safeStorage === 'undefined' || !safeStorage || !safeStorage.isAvailable()) {
-            // Silencioso: no intentar guardar si no hay storage confiable
-            return true;
-        }
-
-        const serialized = JSON.stringify(value);
-        return safeStorage.setItem(key, serialized);
-  } catch (error) {
-        console.debug && console.debug(`Error al guardar ${key} en almacenamiento:`, error && error.message);
-    return true; // Devolver true para no bloquear la funcionalidad
-  }
-};
-
-const removeLS = (key) => {
-  try {
-    // Verificar que safeStorage esté disponible
-        if (typeof safeStorage === 'undefined' || !safeStorage || !safeStorage.isAvailable()) {
-            return true;
-        }
-
-        return safeStorage.removeItem(key);
-  } catch (error) {
-        console.debug && console.debug(`Error al eliminar ${key}:`, error && error.message);
-    return true; // Devolver true para no bloquear la funcionalidad
-  }
-};
-
-// Función helper para obtener token de forma segura
-const getAccessToken = () => {
+// Helpers para usar el backend storage seguro
+const loadLS = async (key, fallback) => {
     try {
-        if (typeof safeStorage !== 'undefined' && safeStorage && safeStorage.isAvailable && safeStorage.isAvailable()) {
-            return safeStorage.getItem('accessToken');
-        }
-
-        // Intentar localStorage como último recurso pero sin loguear repetidamente
-        try {
-            if (typeof localStorage !== 'undefined') return localStorage.getItem('accessToken');
-        } catch (e) {
-            // Silencioso: el warning principal ya lo hace safeStorage al inicializarse
-        }
-
-        return null;
+        const value = await userStorage.loadLS(key);
+        return value !== null && value !== undefined ? value : fallback;
     } catch (error) {
-        console.debug && console.debug('Error obteniendo token:', error && error.message);
-        return null;
+        if (console.debug) console.debug(`Error al cargar ${key} desde backend:`, error && error.message);
+        return fallback;
     }
 };
 
-// Función helper para guardar token de forma segura (sin JSON.stringify)
-const saveAccessToken = (token) => {
+const saveLS = async (key, value) => {
     try {
-        // Preferir safeStorage (maneja fallback internamente)
-        if (typeof safeStorage !== 'undefined' && safeStorage && safeStorage.isAvailable && safeStorage.isAvailable()) {
-            return safeStorage.setItem('accessToken', token);
-        }
-
-        try {
-            if (typeof localStorage !== 'undefined') {
-                localStorage.setItem('accessToken', token);
-                return true;
-            }
-        } catch (e) { /* silently ignore */ }
-
-        return false;
+        return await userStorage.saveLS(key, value);
     } catch (error) {
-        console.debug && console.debug('Error guardando token:', error && error.message);
+        if (console.debug) console.debug(`Error al guardar ${key} en backend:`, error && error.message);
         return false;
     }
 };
 
-// Función helper para eliminar token de forma segura
-const removeAccessToken = () => {
+const removeLS = async (key) => {
     try {
-        if (typeof safeStorage !== 'undefined' && safeStorage && safeStorage.isAvailable && safeStorage.isAvailable()) {
-            return safeStorage.removeItem('accessToken');
-        }
-
-        try { if (typeof localStorage !== 'undefined') { localStorage.removeItem('accessToken'); return true; } } catch (e) { /* ignore */ }
-
-        return true;
+        return await userStorage.removeLS(key);
     } catch (error) {
-        console.debug && console.debug('Error eliminando token:', error && error.message);
+        if (console.debug) console.debug(`Error al eliminar ${key} en backend:`, error && error.message);
+        return false;
+    }
+};
+
+// Función helper para obtener token de forma segura desde backend storage
+const getAccessToken = async () => {
+    try {
+        return await loadLS('accessToken', null);
+    } catch (error) {
+        if (console.debug) console.debug('Error obteniendo token:', error && error.message);
+        return null;
+    }
+};
+
+// Función helper para guardar token de forma segura en backend storage
+const saveAccessToken = async (token) => {
+    try {
+        return await saveLS('accessToken', token);
+    } catch (error) {
+        if (console.debug) console.debug('Error guardando token:', error && error.message);
+        return false;
+    }
+};
+
+// Asegurar que haya un token en memoria antes de hacer peticiones protegidas.
+// Esto resuelve el caso de "segunda pestaña" donde la cookie HttpOnly existe
+// pero el token en memoria (JS) todavía no está inicializado; hacemos un
+// refresh silencioso explícito que rellena el token en memoria antes de
+// proceder con llamadas que dependen del header Authorization.
+const ensureInMemoryToken = async () => {
+    try {
+        if (getInMemoryToken()) return true;
+        // Intentar refresh directo usando fetch para que la cookie HttpOnly se envíe
+        if (console.debug) console.debug('ensureInMemoryToken: no hay token en memoria, llamando /api/refresh-cookie/');
+        const resp = await fetch('/api/refresh-cookie/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
+        if (!resp) {
+            console.debug('ensureInMemoryToken: fetch devolvió respuesta vacía');
+            return false;
+        }
+        if (!resp.ok) {
+            console.debug('ensureInMemoryToken: refresh devolvió status', resp.status);
+            // Intentar leer cuerpo si está disponible para más detalle
+            try {
+                const txt = await resp.text();
+                console.debug('ensureInMemoryToken: cuerpo de respuesta (no ok):', txt);
+            } catch (e) { /* ignore */ }
+            return false;
+        }
+        const data = await resp.json();
+        if (console.debug) console.debug('ensureInMemoryToken: refresh-cookie devolvió JSON:', data);
+        if (data && data.access) {
+            try { setInMemoryToken(data.access); } catch (e) { /* silent */ }
+            try { await saveAccessToken(data.access); } catch (e) { /* silent */ }
+            // No tocar setters de React desde helpers fuera del componente.
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.debug('ensureInMemoryToken error:', e && e.message);
+        return false;
+    }
+};
+
+// Exponer utilidades de debug en window para diagnóstico manual desde la consola
+if (typeof window !== 'undefined') {
+    try {
+        // No exponer helpers de debug en window por seguridad / limpieza
+    } catch (e) {
+        // ignore
+    }
+}
+
+// Función helper para eliminar token de forma segura en backend storage
+const removeAccessToken = async () => {
+    try {
+        return await removeLS('accessToken');
+    } catch (error) {
+        if (console.debug) console.debug('Error eliminando token:', error && error.message);
         return true; // Devolver true para no bloquear el logout
     }
 };
@@ -156,19 +152,31 @@ const rolePermissions = {
 
 // Componente principal de la aplicación.
 const App = () => {
-    // Limpiar almacenamiento de productos y movimientos de caja al cargar la aplicación
+    // Limpiar almacenamiento de productos y movimientos de caja: sólo si ya hay token en memoria
+    // (evita llamadas backend en el montaje cuando el usuario no está autenticado)
     React.useEffect(() => {
         try {
-            const removedProducts = removeLS(LS_KEYS.products);
-            const removedCash = removeLS(LS_KEYS.cashMovements);
-            console.log('🧹 Almacenamiento limpiado al iniciar:');
-            console.log('- Productos:', removedProducts ? 'Éxito' : 'Con warnings');
-            console.log('- Movimientos de caja:', removedCash ? 'Éxito' : 'Con warnings');
-            console.log('✅ Datos se cargarán desde PostgreSQL');
+            const token = getInMemoryToken();
+            if (!token) return; // sin token -> no intentamos tocar userstorage
+
+            (async () => {
+                try {
+                    const removedProducts = await removeLS('products');
+                    const removedCash = await removeLS('cashMovements');
+                    console.log('🧹 Almacenamiento limpiado al iniciar (usuario autenticado):');
+                    console.log('- Productos:', removedProducts ? 'Éxito' : 'Con warnings');
+                    console.log('- Movimientos de caja:', removedCash ? 'Éxito' : 'Con warnings');
+                    console.log('✅ Datos se cargarán desde PostgreSQL');
+                } catch (err) {
+                    console.warn('Error asíncrono al limpiar almacenamiento:', err);
+                }
+            })();
         } catch (error) {
-            console.warn('Error al limpiar almacenamiento:', error);
+            console.warn('Error al comprobar token en memoria:', error);
         }
     }, []);
+
+    
 
     // Definimos los roles de usuario disponibles.
     const roles = ['Gerente', 'Panadero', 'Encargado', 'Cajero'];
@@ -179,6 +187,46 @@ const App = () => {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     // Indica si ya intentamos restaurar sesión al montar (para evitar parpadeos)
     const [sessionChecked, setSessionChecked] = useState(false);
+        // Intentar restaurar el token en memoria al montar la app y cada vez que la pestaña
+        // reciba foco. Esto reduce la ventana donde una nueva pestaña tiene la cookie HttpOnly
+        // pero no tiene aún el token en memoria, evitando el caso en que la primera consulta
+        // devuelve vacío y la segunda sí funciona.
+        useEffect(() => {
+            let mounted = true;
+
+            const tryRestore = async () => {
+                try {
+                    const currentToken = getInMemoryToken();
+                    if (currentToken || sessionChecked) return;
+                    if (console.debug) console.debug('App: intentando restaurar token en memoria al montar');
+                    const restored = await ensureInMemoryToken();
+                    if (restored && mounted) {
+                        setIsLoggedIn(true);
+                    }
+                } catch (e) {
+                    // ignore
+                } finally {
+                    if (mounted) setSessionChecked(true);
+                }
+            };
+
+            // llamada inmediata
+            tryRestore();
+
+            const onFocus = async () => {
+                try {
+                    if (console.debug) console.debug('App: pestaña recibió focus, intentando restaurar token en memoria');
+                    const currentToken = getInMemoryToken();
+                    if (!currentToken) {
+                        const restored = await ensureInMemoryToken();
+                        if (restored && mounted) setIsLoggedIn(true);
+                    }
+                } catch (e) { /* ignore */ }
+            };
+
+            window.addEventListener('focus', onFocus);
+            return () => { mounted = false; window.removeEventListener('focus', onFocus); };
+        }, [sessionChecked]);
     const [loginError, setLoginError] = useState('');
     const [failedAttempts, setFailedAttempts] = useState(0);
     const [isLocked, setIsLocked] = useState(false);
@@ -202,80 +250,69 @@ const App = () => {
 
         // Manejo de login: realiza petición al backend, guarda token y actualiza estado
         const handleLogin = async (e, { email: userEmail, password: userPassword }) => {
-            if (e && typeof e.preventDefault === 'function') e.preventDefault();
-            try {
-                setLoginError('');
-                // Validaciones mínimas
-                if (!userEmail || !userPassword) {
-                    setLoginError('Debes ingresar email y contraseña');
-                    setFailedAttempts(prev => prev + 1);
-                    return;
-                }
-
-                // Petición de login al backend
-                // El view `TokenObtainPairView` espera `username` y `password` (no `email`).
-                // En algunos entornos el proyecto también expone `api/auth/login/` que acepta `email`.
-                let resp;
-                const looksLikeEmail = typeof userEmail === 'string' && userEmail.includes('@');
-                try {
-                    if (looksLikeEmail) {
-                        // Si el usuario ingresó un email, preferimos el endpoint que acepta email
-                        resp = await api.post('/auth/login/', { email: userEmail, password: userPassword });
-                    } else {
-                        // Si no parece email, asumir username y usar endpoint JWT estándar
-                        resp = await api.post('/token/', { username: userEmail, password: userPassword });
-                    }
-                } catch (innerErr) {
-                    const status = innerErr?.response?.status;
-                    // Si la llamada preferida falló con 404/400/401 intentamos el otro endpoint como fallback
-                    if (status === 404 || status === 400 || status === 401) {
-                        if (looksLikeEmail) {
-                            console.warn(`/api/auth/login/ responded with ${status}, intentando /api/token/ como fallback`);
-                            resp = await api.post('/token/', { username: userEmail, password: userPassword });
-                        } else {
-                            console.warn(`/api/token/ responded with ${status}, intentando /api/auth/login/ como fallback`);
-                            resp = await api.post('/auth/login/', { email: userEmail, password: userPassword });
-                        }
-                    } else {
-                        // Re-lanzar para que el catch exterior lo maneje
-                        throw innerErr;
-                    }
-                }
-                // Normalizar distintos formatos de respuesta de token
-                const access = resp?.data?.access
-                    || resp?.data?.accessToken
-                    || resp?.data?.token
-                    || resp?.data?.tokens?.access
-                    || resp?.data?.tokens?.access_token
-                    || resp?.data?.tokens?.token;
-
-                if (!access) {
-                    console.error('Respuesta de login sin token esperado:', resp?.data);
-                    setLoginError('No se recibió token del servidor');
-                    return;
-                }
-
-                // Guardar token usando helper (refresh está en cookie HttpOnly)
-                try { saveAccessToken(access); } catch (err) { console.warn('No se pudo guardar token:', err); }
-
-                setIsLoggedIn(true);
-                // Obtener rol desde distintas posibles posiciones
-                const roleFromResp = resp?.data?.user?.role || resp?.data?.role || (resp?.data?.user && resp.data.user.role) || 'Gerente';
-                setUserRole(roleFromResp);
-                setCurrentPage('dashboard');
-
-                // Cargar datos iniciales directamente desde backend
-                if (typeof loadUsersFromBackend === 'function') await loadUsersFromBackend();
-                if (typeof loadProducts === 'function') await loadProducts();
-                if (typeof loadSales === 'function') await loadSales();
-                console.log('🔐 Login completo y datos iniciales cargados');
-            } catch (error) {
-                console.error('Error de login con backend:', error?.response?.data || error?.message || error);
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        try {
+            setLoginError('');
+            // Validaciones mínimas
+            if (!userEmail || !userPassword) {
+                setLoginError('Debes ingresar email y contraseña');
                 setFailedAttempts(prev => prev + 1);
-                if (error.response && error.response.status === 401) setLoginError('Credenciales inválidas');
-                else setLoginError('Error iniciando sesión. Revisa la consola.');
+                return;
             }
-        };
+            let resp;
+            const looksLikeEmail = userEmail && userEmail.includes('@');
+            try {
+                if (looksLikeEmail) {
+                    resp = await api.post('/auth/login/', { email: userEmail, password: userPassword });
+                } else {
+                    resp = await api.post('/token/', { username: userEmail, password: userPassword });
+                }
+            } catch (innerErr) {
+                const status = innerErr?.response?.status;
+                if (status === 404 || status === 400 || status === 401) {
+                    if (looksLikeEmail) {
+                        console.warn(`/api/auth/login/ responded with ${status}, intentando /api/token/ como fallback`);
+                        resp = await api.post('/token/', { username: userEmail, password: userPassword });
+                    } else {
+                        console.warn(`/api/token/ responded with ${status}, intentando /api/auth/login/ como fallback`);
+                        resp = await api.post('/auth/login/', { email: userEmail, password: userPassword });
+                    }
+                } else {
+                    throw innerErr;
+                }
+            }
+            const access = resp?.data?.access
+                || resp?.data?.accessToken
+                || resp?.data?.token
+                || resp?.data?.tokens?.access
+                || resp?.data?.tokens?.access_token
+                || resp?.data?.tokens?.token;
+
+            if (!access) {
+                console.error('Respuesta de login sin token esperado:', resp?.data);
+                setLoginError('No se recibió token del servidor');
+                return;
+            }
+
+            try { setInMemoryToken(access); } catch (err) { /* silent */ }
+            try { await saveAccessToken(access); } catch (err) { console.warn('No se pudo guardar token:', err); }
+
+            setIsLoggedIn(true);
+            const roleFromResp = resp?.data?.user?.role || resp?.data?.role || (resp?.data?.user && resp.data.user.role) || 'Gerente';
+            setUserRole(roleFromResp);
+            setCurrentPage('dashboard');
+
+            if (typeof loadUsersFromBackend === 'function') await loadUsersFromBackend();
+            if (typeof loadProducts === 'function') await loadProducts();
+            if (typeof loadSales === 'function') await loadSales();
+            console.log('🔐 Login completo y datos iniciales cargados');
+        } catch (error) {
+            console.error('Error de login con backend:', error?.response?.data || error?.message || error);
+            setFailedAttempts(prev => prev + 1);
+            if (error.response && error.response.status === 401) setLoginError('Credenciales inválidas');
+            else setLoginError('Error iniciando sesión. Revisa la consola.');
+        }
+    };
     
     // Estado para el inventario - SIEMPRE basado en products, PERO products SÍ usa localStorage
     const [inventory, setInventory] = useState(() => {
@@ -293,10 +330,8 @@ const App = () => {
     });
     
     // Proveedores
-    const [suppliers, setSuppliers] = useState(loadLS(LS_KEYS.suppliers, [
-        { id: 1, name: 'Distribuidora Central', cuit: '20123456789', address: 'Av. San Martín 1234', phone: '03421567890', products: 'Harina, Azúcar, Aceite' },
-        { id: 2, name: 'Proveedor Express', cuit: '30123456789', address: 'Belgrano 567', phone: '03421567891', products: 'Medialunas, Café' },
-    ]));
+    // Proveedores - cargar solo desde backend
+    const [suppliers, setSuppliers] = useState([]);
     
     // Compras
     const [purchases, setPurchases] = useState([]);
@@ -340,7 +375,7 @@ const App = () => {
     useEffect(() => {
         const fetchOrders = async () => {
             try {
-                const token = getAccessToken();
+                const token = getInMemoryToken();
                 if (!token) return;
                 const res = await api.get('/orders/');
                 if (res && res.data) {
@@ -379,10 +414,11 @@ const App = () => {
                 // que pueda provocar que la UI muestre pantalla de cajero aun cuando el
                 // usuario fue borrado en el backend.
                 try {
-                    const prev = getAccessToken();
+                    const prev = getInMemoryToken();
                     if (prev) {
                         console.debug('💾 Token previo detectado en storage — limpiando antes del refresh');
-                        try { removeAccessToken(); } catch (e) { console.debug('⚠️ No se pudo eliminar token previo:', e && e.message); }
+                        try { await removeAccessToken(); } catch (e) { console.debug('⚠️ No se pudo eliminar token previo:', e && e.message); }
+                        try { clearInMemoryToken(); } catch (e) { /* silent */ }
                     }
                 } catch (e) { /* silent */ }
 
@@ -392,10 +428,12 @@ const App = () => {
                     // Backend puede devolver { access: null } si el usuario fue borrado/inactivo
                     if (!data || !data.access) {
                         console.debug('🔐 Refresh silencioso: no hay access (usuario ausente o inactivo). Limpiando sesión.');
-                        try { removeAccessToken(); } catch (e) {}
+                        try { await removeAccessToken(); } catch (e) {}
+                        try { clearInMemoryToken(); } catch (e) {}
                         try { setIsLoggedIn(false); setCurrentPage('login'); } catch (e) {}
                     } else if (data && data.access) {
-                        try { saveAccessToken(data.access); } catch (e) { console.debug('⚠️ No se pudo guardar access tras refresh silencioso:', e && e.message); }
+                        try { setInMemoryToken(data.access); } catch (e) { /* silent */ }
+                        try { await saveAccessToken(data.access); } catch (e) { console.debug('⚠️ No se pudo guardar access tras refresh silencioso:', e && e.message); }
                         setIsLoggedIn(true);
                         try { setCurrentPage('dashboard'); } catch (e) { console.debug('⚠️ No se pudo setear currentPage tras refresh silencioso:', e && e.message); }
                         // Asignar el rol devuelto por el backend si existe
@@ -420,7 +458,8 @@ const App = () => {
                 try {
                     console.warn('❌ Refresh silencioso falló — probablemente el backend no está accesible. Forzando logout temporalmente. Asegúrate de ejecutar `python manage.py runserver` en el backend.');
                 } catch (ee) { /* ignore */ }
-                try { removeAccessToken(); } catch (err) { /* silent */ }
+                try { await removeAccessToken(); } catch (err) { /* silent */ }
+                try { clearInMemoryToken(); } catch (e) {}
                 try { setIsLoggedIn(false); setCurrentPage('login'); } catch (err) { /* silent */ }
                 try { setSessionChecked(true); } catch (e) { /* silent */ }
             }
@@ -440,7 +479,8 @@ const App = () => {
                 // Si la razón fue que el backend no está accesible, forzar logout para evitar mostrar UI inconsistente
                 if (e && (e.message && (e.message.includes('NetworkError') || e.message.includes('Failed to fetch') || e.message.includes('ECONNRESET')))) {
                     try { console.warn('❌ Fallo de red al cargar movimientos — backend inaccesible. Forzando logout.'); } catch (ee) {}
-                    try { removeAccessToken(); } catch (err) {}
+                    try { await removeAccessToken(); } catch (err) {}
+                    try { clearInMemoryToken(); } catch (e) {}
                     try { setIsLoggedIn(false); setCurrentPage('login'); } catch (err) {}
                 }
             }
@@ -459,7 +499,25 @@ const App = () => {
     // useEffect para guardar en localStorage (inventory NO se guarda, products SÍ se guarda)
     // useEffect(() => { saveLS(LS_KEYS.inventory, inventory); }, [inventory]); // DESHABILITADO - inventario se regenera desde products
     // useEffect(() => { saveLS(LS_KEYS.cashMovements, cashMovements); }, [cashMovements]); // DESHABILITADO - cashMovements se cargan desde PostgreSQL
-    useEffect(() => { saveLS(LS_KEYS.suppliers, suppliers); }, [suppliers]);
+
+    // Cargar proveedores desde el backend al iniciar sesión
+    useEffect(() => {
+        const fetchSuppliers = async () => {
+            try {
+                const token = getInMemoryToken();
+                if (!token) return;
+                const response = await fetch('/api/suppliers/', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!response.ok) throw new Error('Error al cargar proveedores');
+                const data = await response.json();
+                setSuppliers(data);
+            } catch (error) {
+                setSuppliers([]);
+            }
+        };
+        if (isLoggedIn) fetchSuppliers();
+    }, [isLoggedIn]);
     
     // Función para cargar usuarios desde el backend
     const loadUsersFromBackend = async () => {
@@ -485,7 +543,7 @@ const App = () => {
     
     // Cargar usuarios al inicializar la aplicación (solo si hay token)
     useEffect(() => {
-        const token = getAccessToken();
+        const token = getInMemoryToken();
         if (token && isLoggedIn) {
             loadUsersFromBackend();
         }
@@ -507,10 +565,12 @@ const App = () => {
 
                 // Reconstruir inventario desde products (actual desde API)
                 const newInventory = products.map(product => ({
-                        id: product.id,
-                        name: product.name,
-                        stock: product.stock,
-                        type: product.category || 'Producto'
+                    id: product.id,
+                    name: product.name,
+                    stock: product.stock,
+                    type: product.category || 'Producto',
+                    price: product.price,      // Ahora sí se incluye el precio
+                    estado: product.estado     // Y el estado si viene del backend
                 }));
 
                 console.log('🎯 Inventario sincronizado:', newInventory?.length ? `${newInventory.length} productos` : 'Array vacío');
@@ -519,7 +579,7 @@ const App = () => {
         }, [products]);
 
     // Función para cerrar la sesión.
-    const handleLogout = () => {
+    const handleLogout = async () => {
         setIsLoggedIn(false);
         setUserRole(null);
         setCurrentPage('login');
@@ -529,7 +589,8 @@ const App = () => {
         setFailedAttempts(0);  // Resetear intentos fallidos
         setIsLocked(false);    // Desbloquear cuenta
         setShowModal(false);   // Cerrar modal
-        removeAccessToken(); // quitar solo el token
+    try { await removeAccessToken(); } catch (e) {}
+    try { clearInMemoryToken(); } catch (e) {}
     };
 
     // Función para manejar la navegación.
@@ -571,7 +632,10 @@ const App = () => {
       try {
         const response = await api.get('/products/');
         setInventory(response.data);
-        saveLS(LS_KEYS.inventory, response.data);
+        try {
+            const token = getInMemoryToken();
+            if (token) saveLS('inventory', response.data);
+        } catch (e) { /* silent */ }
       } catch (error) {
         console.error('Error cargando inventario:', error);
       }
@@ -589,10 +653,10 @@ const App = () => {
                         hashedPassword: 'backend-managed'
                     }));
                     setUsers(normalized);
-                    saveLS(LS_KEYS.users, normalized);
+                    try { if (getInMemoryToken()) saveLS('users', normalized); } catch (e) { /* silent */ }
                 } else {
                     setUsers(response.data);
-                    saveLS(LS_KEYS.users, response.data);
+                    try { if (getInMemoryToken()) saveLS('users', response.data); } catch (e) { /* silent */ }
                 }
             } catch (error) {
                 console.error('Error cargando usuarios:', error);
@@ -704,7 +768,15 @@ const App = () => {
     // Función para cargar ventas desde el backend
     const loadSales = async () => {
       try {
-        console.log('🛒 Cargando ventas del servidor...');
+                // Cargando ventas desde backend
+                // Si no hay token en memoria, intentar restaurarlo desde la cookie HttpOnly
+                if (!getInMemoryToken()) {
+                        console.debug('loadSales: no hay token en memoria — intentando ensureInMemoryToken');
+                        const restored = await ensureInMemoryToken();
+                        if (restored) {
+                            try { setIsLoggedIn(true); } catch (e) { /* silent */ }
+                        }
+                }
         const response = await api.get('/sales/');
                 // Manejar respuesta paginada de DRF: { count, next, previous, results: [...] }
                 let serverSales = [];
@@ -719,11 +791,11 @@ const App = () => {
                 }
 
                 // Guardar ventas completas en el estado para consultas y para marcar productos con ventas
-                setSales(serverSales);
-                console.log('✅ Ventas cargadas en estado:', `${serverSales.length} ventas del servidor`);
-                console.log('📊 Ventas (primeros):', serverSales.slice(0,3));
+                                                                setSales(serverSales);
+                                                                return serverSales;
       } catch (error) {
-        console.log('❌ Error cargando ventas:', error.message);
+                console.error('❌ Error cargando ventas:', error?.message || error);
+                return Array.isArray(sales) ? sales : [];
       }
     };
 
@@ -1541,7 +1613,7 @@ const App = () => {
     
                 try {
                     // Verificación específica para Safari antes de crear el producto
-                    const token = getAccessToken();
+                    const token = getInMemoryToken();
                     if (!token) {
                         setMessage('🚫 Error: No hay token de autenticación. Por favor, vuelve a iniciar sesión.');
                         return;
@@ -1686,133 +1758,99 @@ const App = () => {
             });
             const [message, setMessage] = useState('');
     
-            // Función para validar CUIT (11 dígitos)
-            const validateCUIT = (cuit) => {
-                return /^\d{11}$/.test(cuit);
-            };
-    
-            // Función para validar teléfono (mínimo 8 dígitos, solo números)
-            const validatePhone = (phone) => {
-                return /^\d{8,}$/.test(phone);
-            };
-    
-            const handleAddSupplier = (e) => {
-                e.preventDefault();
-                
-                // Validaciones según la especificación
-                if (!newSupplier.name.trim()) {
-                    setMessage('🚫 Error: El nombre es obligatorio.');
-                    return;
-                }
-                
-                if (!validateCUIT(newSupplier.cuit)) {
-                    setMessage('🚫 Error: El CUIT debe ser un número de 11 dígitos.');
-                    return;
-                }
-                
-                if (!validatePhone(newSupplier.phone)) {
-                    setMessage('�� Error: El teléfono debe contener solo números, con un mínimo de 8 dígitos.');
-                    return;
-                }
-                
-                // Validar si el proveedor ya existe por CUIT
-                const supplierExists = suppliers.some(s => s.cuit === newSupplier.cuit);
-                if (supplierExists) {
-                    setMessage('🚫 Error: El CUIT ya existe en el sistema.');
-                    return;
-                }
-                
-                // Agregar el nuevo proveedor
-                const id = Math.max(...suppliers.map(s => s.id)) + 1;
-                setSuppliers([...suppliers, { ...newSupplier, id }]);
-                setNewSupplier({ name: '', cuit: '', address: '', phone: '', products: '' });
-                setShowAddSupplier(false);
-                setMessage('✅ Proveedor registrado exitosamente.');
-            };
-    
-            const handleDeleteSupplier = (supplierId) => {
-                const supplierToDelete = suppliers.find(s => s.id === supplierId);
-                if (window.confirm(`¿Estás seguro de que quieres eliminar a ${supplierToDelete.name}?`)) {
-                    setSuppliers(suppliers.filter(supplier => supplier.id !== supplierId));
-                    setMessage('✅ Proveedor eliminado exitosamente.');
-                }
-            };
-    
-            return (
-                <div className="management-container">
-                    <h2>Gestión de Proveedores</h2>
-                    {message && <p className="message">{message}</p>}
-                    {!showAddSupplier ? (
-                        <button className="main-button" onClick={() => setShowAddSupplier(true)}>Registrar Nuevo Proveedor</button>
-                    ) : (
-                        <form className="form-container" onSubmit={handleAddSupplier}>
-                            <h3>Registrar Proveedor Nuevo</h3>
-                            <input 
-                                type="text" 
-                                value={newSupplier.name} 
-                                onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} 
-                                placeholder="Nombre del Proveedor" 
-                                required 
-                            />
-                            <input 
-                                type="text" 
-                                value={newSupplier.cuit} 
-                                onChange={e => setNewSupplier({ ...newSupplier, cuit: e.target.value })} 
-                                placeholder="CUIT (11 dígitos)" 
-                                maxLength="11"
-                                required 
-                            />
-                            <input 
-                                type="text" 
-                                value={newSupplier.address} 
-                                onChange={e => setNewSupplier({ ...newSupplier, address: e.target.value })} 
-                                placeholder="Dirección" 
-                                required 
-                            />
-                            <input 
-                                type="text" 
-                                value={newSupplier.phone} 
-                                onChange={e => setNewSupplier({ ...newSupplier, phone: e.target.value })} 
-                                placeholder="Teléfono (mínimo 8 dígitos)" 
-                                required 
-                            />
-                            <textarea 
-                                value={newSupplier.products} 
-                                onChange={e => setNewSupplier({ ...newSupplier, products: e.target.value })} 
-                                placeholder="Productos que ofrece (separados por comas)" 
-                                required 
-                            />
-                            <div className="button-group">
-                                <button type="submit" className="action-button primary">Registrar Proveedor</button>
-                                <button type="button" className="action-button secondary" onClick={() => setShowAddSupplier(false)}>Cancelar</button>
-                            </div>
-                        </form>
-                    )}
-    
-                    <h3>Proveedores Registrados</h3>
-                    <ul className="list-container">
-                        {suppliers.map(supplier => (
-                            <li key={supplier.id} className="list-item">
-                                <div className="supplier-item">
-                                    <div className="supplier-info">
-                                        <span className="supplier-name">{supplier.name}</span>
-                                        <div className="supplier-details">
-                                            <small>CUIT: {supplier.cuit}</small>
-                                            <br />
-                                            <small>�� {supplier.phone} | 📍 {supplier.address}</small>
-                                        </div>
-                                    </div>
-                                    <div className="supplier-products">
-                                        <strong>Productos:</strong> {supplier.products}
-                                    </div>
-                                </div>
-                                <button onClick={() => handleDeleteSupplier(supplier.id)} className="delete-button">Eliminar</button>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            );
-        };
+    // Validar CUIT (11 dígitos)
+    const validateCUIT = (cuit) => /^\d{11}$/.test(cuit);
+    // Validar teléfono (mínimo 8 dígitos, solo números)
+    const validatePhone = (phone) => /^\d{8,}$/.test(phone);
+
+    // Agregar proveedor usando API
+    const handleAddSupplier = async (e) => {
+        e.preventDefault();
+        if (!newSupplier.name.trim()) {
+            setMessage('🚫 Error: El nombre es obligatorio.');
+            return;
+        }
+        if (!validateCUIT(newSupplier.cuit)) {
+            setMessage('🚫 Error: El CUIT debe ser un número de 11 dígitos.');
+            return;
+        }
+        if (!validatePhone(newSupplier.phone)) {
+            setMessage('🚫 Error: El teléfono debe contener solo números, con un mínimo de 8 dígitos.');
+            return;
+        }
+        try {
+            const token = getInMemoryToken();
+            const response = await fetch('/api/suppliers/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(newSupplier)
+            });
+            if (!response.ok) throw new Error('Error al agregar proveedor');
+            const created = await response.json();
+            setSuppliers(prev => [...prev, created]);
+            setMessage('Proveedor agregado correctamente.');
+            setShowAddSupplier(false);
+            setNewSupplier({ name: '', cuit: '', address: '', phone: '', products: '' });
+        } catch (error) {
+            setMessage('Error al agregar proveedor.');
+        }
+    };
+
+    // Eliminar proveedor usando API
+    const handleDeleteSupplier = async (supplierId) => {
+        try {
+            const token = getInMemoryToken();
+            const response = await fetch(`/api/suppliers/${supplierId}/`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!response.ok) throw new Error('Error al eliminar proveedor');
+            setSuppliers(prev => prev.filter(s => s.id !== supplierId));
+            setMessage('Proveedor eliminado correctamente.');
+        } catch (error) {
+            setMessage('Error al eliminar proveedor.');
+        }
+    };
+
+    return (
+        <div className="management-container">
+            <h2>Gestión de Proveedores</h2>
+            {message && <p className="message">{message}</p>}
+            {!showAddSupplier ? (
+                <button className="main-button" onClick={() => setShowAddSupplier(true)}>Registrar Nuevo Proveedor</button>
+            ) : (
+                <form className="form-container" onSubmit={handleAddSupplier}>
+                    <h3>Registrar Proveedor</h3>
+                    <input type="text" value={newSupplier.name} onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} placeholder="Nombre del Proveedor" required />
+                    <input type="text" value={newSupplier.cuit} onChange={e => setNewSupplier({ ...newSupplier, cuit: e.target.value })} placeholder="CUIT (11 dígitos)" required />
+                    <input type="text" value={newSupplier.address} onChange={e => setNewSupplier({ ...newSupplier, address: e.target.value })} placeholder="Dirección" required />
+                    <input type="text" value={newSupplier.phone} onChange={e => setNewSupplier({ ...newSupplier, phone: e.target.value })} placeholder="Teléfono" required />
+                    <input type="text" value={newSupplier.products} onChange={e => setNewSupplier({ ...newSupplier, products: e.target.value })} placeholder="Productos que provee" />
+                    <div className="button-group">
+                        <button type="submit" className="action-button primary">Registrar</button>
+                        <button type="button" className="action-button secondary" onClick={() => setShowAddSupplier(false)}>Cancelar</button>
+                    </div>
+                </form>
+            )}
+            <h3>Proveedores Registrados</h3>
+            <ul className="list-container">
+                {suppliers.map(supplier => (
+                    <li key={supplier.id} className="list-item">
+                        <div className="supplier-info-container">
+                            <div><strong>{supplier.name}</strong> (CUIT: {supplier.cuit})</div>
+                            <div>{supplier.address} | Tel: {supplier.phone}</div>
+                            <div>Productos: {supplier.products}</div>
+                        </div>
+                        <button onClick={() => handleDeleteSupplier(supplier.id)} className="delete-button">Eliminar</button>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
     
         // Componente de la interfaz de gestión de compras (para Gerente, Encargado, Cajero, Panadero).
         const PurchaseManagement = () => {
@@ -2461,7 +2499,7 @@ const App = () => {
     
         // Mapeo de traducción para encabezados de tablas
         const headerTranslationMap = {
-            'name': 'Nombre',
+            'name': 'Producto/Insumo',
             'cuit': 'CUIT',
             'phone': 'Teléfono',
             'address': 'Dirección',
@@ -2506,826 +2544,8 @@ const App = () => {
             'period': 'Período'
         };
 
-        // Componente de la interfaz de consulta de datos (solo para Gerente).
-        const DataConsultation = () => {
-            const [selectedQuery, setSelectedQuery] = useState('');
-            const [startDate, setStartDate] = useState('');
-            const [endDate, setEndDate] = useState('');
-            const [queryResults, setQueryResults] = useState(null);
-            const [message, setMessage] = useState('');
-            const [isLoading, setIsLoading] = useState(false);
-    
-            // Cargar consulta activa al montar el componente (solo si hay token)
-            useEffect(() => {
-                const token = getAccessToken();
-                if (token) {
-                    console.log('🔄 [useEffect] Iniciando carga de consulta activa y prueba directa');
-                    loadActiveQuery();
-                    // TEMPORAL: Ejecutar prueba directa
-                    testDirectRequest();
-                } else {
-                    console.log('ℹ️ No hay token disponible, omitiendo carga de consulta activa');
-                }
-            }, []);
-
-            // Función para cargar consulta activa desde el backend
-            const loadActiveQuery = async () => {
-                try {
-                    // Verificar que tenemos un token antes de hacer la petición
-                    const token = getAccessToken();
-                    if (!token) {
-                        return;
-                    }
-
-                    setIsLoading(true);
-                    setMessage('');
-
-                    const response = await api.get('/user-queries/active_query/');
-
-                    if (response.data) {
-                        setSelectedQuery(response.data.query_type);
-                        setStartDate(response.data.start_date || '');
-                        setEndDate(response.data.end_date || '');
-                        setQueryResults(response.data.results_data);
-                        setMessage('');
-                    }
-                } catch (error) {
-                    setQueryResults(null);
-                    if (error.response?.status === 404) {
-                        console.log('No hay ninguna consulta guardada para este usuario. Realiza una consulta y guárdala para verla aquí.');
-                    }
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-
-            // Función de prueba TEMPORAL para petición directa sin interceptor
-            const testDirectRequest = async () => {
-                try {
-                    const token = getAccessToken();
-                    if (!token) {
-                        return;
-                    }
-                    const axiosRaw = await import('axios');
-                    // Usar la ruta proxied `/api/...` para que CRA dev-server haga el proxy
-                    // y las cookies HttpOnly establecidas por el backend lleguen al navegador.
-                    const response = await axiosRaw.default.get('/api/user-queries/active_query/', {
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
-                        },
-                        timeout: 10000,
-                        withCredentials: true
-                    });
-                    return response.data;
-                } catch (error) {
-                    return null;
-                }
-            };
-
-            // Función para guardar consulta en el backend
-            const saveQueryToBackend = async (queryType, startDate, endDate, results) => {
-                const payload = {
-                    query_type: queryType,
-                    start_date: startDate || null,
-                    end_date: endDate || null,
-                    results_data: results
-                };
-
-                try {
-                    // Primero intentar buscar si ya existe la consulta para este usuario y tipo
-                    const listResp = await api.get(`/user-queries/?query_type=${encodeURIComponent(queryType)}`);
-                    const items = Array.isArray(listResp.data) ? listResp.data : (listResp.data?.results || []);
-
-                    if (items && items.length > 0) {
-                        // Existe: actualizar (PATCH)
-                        const existing = items[0];
-                        const id = existing.id;
-                        try {
-                            const patchResp = await api.patch(`/user-queries/${id}/`, payload);
-                            if (patchResp?.data) {
-                                console.log('✅ Consulta existente actualizada en backend (patch)');
-                                return;
-                            }
-                        } catch (patchErr) {
-                            console.warn('⚠️ Error parchando consulta existente, intentaremos POST como fallback:', patchErr?.response?.data || patchErr?.message || patchErr);
-                            // Intentar POST como último recurso (race condition improbable)
-                        }
-                    }
-
-                    // Si no existe o el PATCH falló, intentar crear (POST)
-                    const postResp = await api.post('/user-queries/', payload);
-                    if (postResp?.data) {
-                        console.log('✅ Consulta guardada en backend (creada)');
-                        return;
-                    }
-                } catch (error) {
-                    // Manejo de errores: si falla por unique constraint (race) intentamos buscar y parchear
-                    const status = error?.response?.status;
-                    const data = error?.response?.data;
-                    console.warn('Advertencia al guardar consulta (fase final), intentando recuperación:', status, data);
-
-                    try {
-                        const listResp2 = await api.get(`/user-queries/?query_type=${encodeURIComponent(queryType)}`);
-                        const items2 = Array.isArray(listResp2.data) ? listResp2.data : (listResp2.data?.results || []);
-                        if (items2 && items2.length > 0) {
-                            const existing = items2[0];
-                            const id = existing.id;
-                            const patchResp2 = await api.patch(`/user-queries/${id}/`, payload);
-                            if (patchResp2?.data) {
-                                console.log('✅ Consulta existente actualizada en backend (patch) [recovery]');
-                                return;
-                            }
-                        }
-                    } catch (recErr) {
-                        console.error('Error intentando recuperar/actualizar consulta después de fallo:', recErr?.response?.data || recErr?.message || recErr);
-                    }
-
-                    console.error('Error final guardando consulta (no creada ni actualizada):', data || error.message || error);
-                }
-            };
-
-            // Función para limpiar consulta activa
-            const clearActiveQuery = async () => {
-                try {
-                    await api.post('/user-queries/clear_active_query/');
-                    console.log('🧹 Consulta activa limpiada del backend');
-                } catch (error) {
-                    console.error('Error limpiando consulta:', error.response?.data || error.message);
-                }
-            };
-    
-            // Función para convertir fecha yyyy-mm-dd a dd/mm/yyyy
-            const formatDateForDisplay = (dateStr) => {
-                if (!dateStr) return '';
-                const [year, month, day] = dateStr.split('-');
-                return `${day}/${month}/${year}`;
-            };
-    
-            // Función para convertir fecha dd/mm/yyyy a Date
-            const parseDisplayDate = (dateStr) => {
-                const [day, month, year] = dateStr.split('/');
-                return new Date(year, month - 1, day);
-            };
-    
-            // Función para convertir fecha yyyy-mm-dd a Date
-            const parseInputDate = (dateStr) => {
-                return new Date(dateStr);
-            };
-
-                // Función que intenta parsear una fecha en varios formatos comunes
-                const parseAnyDate = (dateStr) => {
-                    if (!dateStr) return null;
-                    // Si ya es objeto Date
-                    if (dateStr instanceof Date) return dateStr;
-                    // dd/mm/yyyy
-                    if (typeof dateStr === 'string' && dateStr.includes('/')) {
-                        try {
-                            return parseDisplayDate(dateStr);
-                        } catch (e) {
-                            // fallthrough
-                        }
-                    }
-                    // yyyy-mm-dd or ISO
-                    if (typeof dateStr === 'string' && dateStr.includes('-')) {
-                        try {
-                            return parseInputDate(dateStr);
-                        } catch (e) {
-                            // fallthrough
-                        }
-                    }
-                    // intento genérico
-                    const parsed = new Date(dateStr);
-                    return isNaN(parsed.getTime()) ? null : parsed;
-                };
-    
-            // Función para ejecutar consulta
-            const executeQuery = async () => {
-                if (!selectedQuery) {
-                    setMessage('🚫 Error: Debe seleccionar un tipo de consulta.');
-                    return;
-                }
-    
-                if (startDate && endDate) {
-                    const start = parseInputDate(startDate);
-                    const end = parseInputDate(endDate);
-                    if (start > end) {
-                        setMessage('🚫 Error: La fecha de inicio no puede ser posterior a la fecha de fin.');
-                        return;
-                    }
-                }
-    
-                setMessage('');
-                setIsLoading(true);
-    
-                try {
-                    let results = null;
-                    
-                    // Ejecutar consulta según el tipo seleccionado
-                    switch (selectedQuery) {
-                        case 'stock':
-                            results = await executeStockQuery();
-                            break;
-                        case 'proveedores':
-                            results = await executeSuppliersQuery();
-                            break;
-                        case 'ventas':
-                            results = await executeSalesQuery();
-                            break;
-                        case 'compras':
-                            results = await executePurchasesQuery();
-                            break;
-                        case 'pedidos':
-                            results = await executeOrdersQuery();
-                            break;
-                        case 'movimientos_caja':
-                            results = await executeCashMovementsQuery();
-                            break;
-                        default:
-                            setMessage('🚫 Error: Tipo de consulta no válido.');
-                            return;
-                    }
-
-                    if (results) {
-                        setQueryResults(results);
-                        // Guardar en backend de forma asíncrona
-                        await saveQueryToBackend(selectedQuery, startDate, endDate, results);
-                    }
-                } catch (error) {
-                    setMessage('🚫 Error ejecutando la consulta: ' + error.message);
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-    
-            // Consulta de stock
-            const executeStockQuery = async () => {
-                const lowStockItems = inventory.filter(item => item.stock < 10);
-                const results = {
-                    title: 'Estado del Stock',
-                    summary: {
-                        totalProducts: inventory.length,
-                        lowStockItems: lowStockItems.length,
-                        totalStock: inventory.reduce((sum, item) => sum + item.stock, 0)
-                    },
-                    data: inventory.map(item => ({
-                        name: item.name,
-                        stock: item.stock,
-                        type: item.type,
-                        status: item.stock < 10 ? 'Stock Bajo' : item.stock < 20 ? 'Stock Medio' : 'Stock Alto'
-                    }))
-                };
-                return results;
-            };
-    
-            // Consulta de proveedores
-            const executeSuppliersQuery = async () => {
-                const results = {
-                    title: 'Información de Proveedores',
-                    summary: {
-                        totalSuppliers: suppliers.length,
-                        activeSuppliers: suppliers.length
-                    },
-                    data: suppliers.map(supplier => ({
-                        name: supplier.name,
-                        cuit: supplier.cuit,
-                        phone: supplier.phone,
-                        address: supplier.address,
-                        products: supplier.products
-                    }))
-                };
-                return results;
-            };
-    
-            // Consulta de ventas (simulada)
-            const executeSalesQuery = async () => {
-                // Usar ventas reales traídas desde backend (estado `sales`).
-                const allSales = Array.isArray(sales) ? sales : [];
-
-                console.log('🔎 executeSalesQuery - sales length:', allSales.length);
-                console.log('🔎 executeSalesQuery - sample sales (0..2):', allSales.slice(0,3));
-
-                // Cada sale puede contener `sale_items` o `sale_items` anidados; normalizamos
-                const rows = [];
-
-                for (const s of allSales) {
-                    // Fecha: preferir timestamp/created_at o timestamp formateado
-                    const date = s.timestamp || s.created_at || s.date || '';
-
-                    // Determinar items dentro de la venta
-                    let itemsArr = [];
-                    if (Array.isArray(s.sale_items) && s.sale_items.length > 0) {
-                        itemsArr = s.sale_items.map(it => {
-                            const qty = Number(it.quantity ?? it.qty ?? 0) || 0;
-                            const unit = Number(it.price ?? it.unit_price ?? 0) || 0;
-                            const lineTotal = (it.total !== undefined && it.total !== null) ? Number(it.total) : (qty * unit);
-                            return {
-                                product: it.product_name || it.product || it.name || '',
-                                quantity: qty,
-                                unitPrice: unit,
-                                total: lineTotal
-                            };
-                        });
-                    } else if (Array.isArray(s.items) && s.items.length > 0) {
-                        itemsArr = s.items.map(it => {
-                            const qty = Number(it.quantity ?? it.qty ?? 0) || 0;
-                            const unit = Number(it.price ?? it.unitPrice ?? it.unit_price ?? 0) || 0;
-                            const lineTotal = (it.total !== undefined && it.total !== null) ? Number(it.total) : (qty * unit);
-                            return {
-                                product: it.product_name || it.productName || it.product || it.name || '',
-                                quantity: qty,
-                                unitPrice: unit,
-                                total: lineTotal
-                            };
-                        });
-                    }
-
-                    // Si no hay items explícitos, podemos intentar inferir de campos totales
-                    if (itemsArr.length === 0 && s.product) {
-                        itemsArr = [{ product: s.product, quantity: s.quantity || 1, total: s.total || s.amount || 0 }];
-                    }
-
-                    // Agregar una fila por cada item para que la tabla muestre productos individuales
-                    // Determinar usuario de la venta (varios formatos posibles)
-                    const saleUser = s.user || s.user_username || s.user_name || (s.user && s.user.username) || (s.user && s.user.name) || 'Sistema';
-                    for (const it of itemsArr) {
-                        rows.push({ id: s.id ?? null, date, product: it.product, quantity: it.quantity, total: it.total, user: saleUser });
-                    }
-                    console.log('🔎 executeSalesQuery - built rows count before filter:', rows.length);
-                }
-
-                // Filtrar por rango de fechas si aplica
-                const filteredSales = rows.filter(sale => {
-                    if (startDate && endDate) {
-                        const saleDate = parseAnyDate(sale.date) || null;
-                        const start = parseAnyDate(startDate);
-                        const end = parseAnyDate(endDate);
-                        if (!saleDate || !start || !end) return false;
-                        return saleDate >= start && saleDate <= end;
-                    }
-                    return true;
-                });
-
-                console.log('🔎 executeSalesQuery - filtered rows count:', filteredSales.length);
-
-                const results = {
-                    title: 'Reporte de Ventas',
-                    summary: {
-                        totalSales: filteredSales.length,
-                        totalRevenue: filteredSales.reduce((sum, sale) => sum + (Number(sale.total) || 0), 0),
-                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
-                    },
-                    data: filteredSales.map(r => ({ id: r.id, date: r.date, product: r.product, quantity: r.quantity, total: r.total, user: r.user }))
-                };
-                return results;
-            };
-    
-            // Consulta de compras
-            const executePurchasesQuery = async () => {
-                const filteredPurchases = purchases.filter(purchase => {
-                    if (startDate && endDate) {
-                        const purchaseDate = parseAnyDate(purchase.date);
-                        const start = parseAnyDate(startDate);
-                        const end = parseAnyDate(endDate);
-                        if (!purchaseDate || !start || !end) return false;
-                        return purchaseDate >= start && purchaseDate <= end;
-                    }
-                    return true;
-                });
-                // Normalizar cada compra para asegurar compatibilidad UI/PDF
-                const normalized = filteredPurchases.map(purchase => {
-                    const itemsArray = Array.isArray(purchase.items) ? purchase.items.map(it => {
-                        const productName = it.productName || it.product_name || it.product || it.name || '';
-                        const quantity = it.quantity ?? it.qty ?? 0;
-                        const unitPrice = it.unitPrice ?? it.unit_price ?? it.price ?? 0;
-                        const total = it.total ?? it.totalAmount ?? ((quantity ?? 0) * (unitPrice ?? 0));
-                        // Prefer explicit category from backend, si no existe intentar inferir desde inventory (products sync)
-                        let category = it.category || it.type || it.productCategory || it.product_category || '';
-                        if ((!category || String(category).trim() === '') && productName) {
-                            try {
-                                const found = (inventory || []).find(p => p && p.name && String(p.name).toLowerCase() === String(productName).toLowerCase());
-                                if (found && (found.type || found.category)) {
-                                    category = found.type || found.category || '';
-                                }
-                            } catch (e) {
-                                // ignore and fallback to empty
-                            }
-                        }
-                        return { productName, quantity, unitPrice, total, category };
-                    }) : [];
-
-                    const supplierName = purchase.supplierName || purchase.supplier || '';
-                    const totalAmount = Number(purchase.totalAmount ?? purchase.total_amount ?? purchase.total ?? 0);
-
-                    // items as comma-separated names for UI/PDF
-                    const itemsNames = itemsArray.map(i => i.productName).filter(Boolean).join(', ');
-
-                    // Determine purchase-level type: if all items are 'Insumo' or 'Producto' or mixed
-                    const detectedTypes = Array.from(new Set(itemsArray.map(i => (i.category || '').toString().toLowerCase()).filter(Boolean)));
-                    let purchaseType = 'Producto';
-                    if (detectedTypes.length === 0) {
-                        purchaseType = 'Producto';
-                    } else if (detectedTypes.length === 1) {
-                        purchaseType = detectedTypes[0].includes('insumo') ? 'Insumo' : (detectedTypes[0].includes('producto') ? 'Producto' : 'Producto');
-                    } else {
-                        purchaseType = 'Mixto';
-                    }
-
-                    return {
-                        id: purchase.id,
-                        date: purchase.date,
-                        supplier: supplierName,
-                        // supplier_name removed intentionally to avoid duplication
-                        items: itemsNames,
-                        total: totalAmount,
-                        status: purchase.status || 'Completada',
-                        type: purchaseType
-                    };
-                });
-
-                const results = {
-                    title: 'Reporte de Compras',
-                    summary: {
-                        totalPurchases: normalized.length,
-                        totalAmount: normalized.reduce((sum, p) => sum + (Number(p.total) || 0), 0),
-                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
-                    },
-                    data: normalized
-                };
-
-                setQueryResults(results);
-                return results;
-            };
-    
-            // Consulta de pedidos
-            const executeOrdersQuery = async () => {
-                const filteredOrders = orders.filter(order => {
-                    if (startDate && endDate) {
-                        const orderDate = parseAnyDate(order.date);
-                        const start = parseAnyDate(startDate);
-                        const end = parseAnyDate(endDate);
-                        if (!orderDate || !start || !end) return false;
-                        return orderDate >= start && orderDate <= end;
-                    }
-                    return true;
-                });
-    
-                const results = {
-                    title: 'Reporte de Pedidos',
-                    summary: {
-                        totalOrders: filteredOrders.length,
-                        pendingOrders: filteredOrders.filter(o => o.status === 'Pendiente').length,
-                        sentOrders: filteredOrders.filter(o => o.status === 'Enviado').length,
-                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
-                    },
-                    data: filteredOrders.map(order => {
-                        // Normalizar items: preferir lista completa de objetos { productName, quantity, unitPrice, total }
-                        const itemsArray = Array.isArray(order.items) ? order.items : [];
-                        // Crear representaciones para UI/PDF
-                        const productsList = itemsArray.map(it => it.productName || it.product_name || it.product || '').filter(Boolean);
-                        const unitsList = itemsArray.map(it => (it.quantity !== undefined && it.quantity !== null) ? String(it.quantity) : '').filter(Boolean);
-
-                        return {
-                            id: order.id,
-                            date: order.date,
-                            customerName: order.customerName || order.customer_name || '',
-                            paymentMethod: order.paymentMethod || order.payment_method || '',
-                            status: order.status,
-                            // enviar items completos para que el backend PDF pueda usar nombres y cantidades
-                            items: itemsArray,
-                            // Campos derivados para mostrar en la tabla de UI y en caso de export
-                            products: productsList.join(', '),
-                            units: unitsList.join(', '),
-                            // also include snake_case fields for backend PDF generator compatibility
-                            customer_name: order.customerName || order.customer_name || '',
-                            payment_method: order.paymentMethod || order.payment_method || ''
-                        };
-                    })
-                };
-                setQueryResults(results);
-                return results;
-            };
-    
-            // Consulta de movimientos de caja
-            const executeCashMovementsQuery = async () => {
-                // Si no hay movimientos cargados, intentar recargarlos desde backend
-                if (!cashMovements || cashMovements.length === 0) {
-                    console.log('ℹ️ No hay movimientos en memoria. Intentando cargar desde backend...');
-                    try {
-                        await loadCashMovements();
-                    } catch (e) {
-                        console.warn('⚠️ No se pudo recargar movimientos desde backend:', e && e.message);
-                    }
-                }
-
-                // Aceptar múltiples campos de fecha y normalizar tipo/amount
-                const normalized = (cashMovements || []).map(m => {
-                    // Fecha preferida: date, timestamp, created_at
-                    const rawDate = m.date || m.timestamp || m.created_at || m.date_iso || '';
-                    // Normalizar tipo (Entrada/Salida)
-                    let type = (m.type || '').toString();
-                    const tLower = type.toLowerCase();
-                    if (tLower.startsWith('e') || tLower.includes('entrada') || tLower === 'in') type = 'Entrada';
-                    else if (tLower.startsWith('s') || tLower.includes('salida') || tLower === 'out') type = 'Salida';
-                    else type = m.type || type;
-
-                    const amount = (() => {
-                        const a = m.amount;
-                        const num = typeof a === 'number' ? a : parseFloat(a);
-                        return isNaN(num) ? 0 : num;
-                    })();
-
-                    return {
-                        id: m.id,
-                        date: rawDate,
-                        type,
-                        amount,
-                        description: m.description || '',
-                        user: m.user || (m.user_username || m.user_name) || 'Sistema',
-                        // dejar la forma original por compatibilidad
-                        _raw: m
-                    };
-                });
-
-                console.debug('🔎 Movimientos normalizados (primeros 5):', normalized.slice(0,5));
-
-                const filteredMovements = normalized.filter(movement => {
-                    if (startDate && endDate) {
-                        const movementDate = parseAnyDate(movement.date);
-                        const start = parseAnyDate(startDate);
-                        const end = parseAnyDate(endDate);
-                        if (!movementDate || !start || !end) return false;
-                        return movementDate >= start && movementDate <= end;
-                    }
-                    return true;
-                });
-
-                console.debug('🔎 Movimientos filtrados según rango (primeros 5):', filteredMovements.slice(0,5));
-                console.debug(`ℹ️ Movimientos normalizados=${normalized.length}, filtrados=${filteredMovements.length}`);
-
-                const totalIncome = filteredMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : 0), 0);
-                const totalExpenses = filteredMovements.reduce((sum, m) => sum + (m.type === 'Salida' ? m.amount : 0), 0);
-
-                const results = {
-                    title: 'Reporte de Movimientos de Caja',
-                    summary: {
-                        totalMovements: filteredMovements.length,
-                        totalIncome: safeToFixed(totalIncome),
-                        totalExpenses: safeToFixed(totalExpenses),
-                        period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
-                    },
-                    data: filteredMovements.map(movement => ({
-                        id: movement.id,
-                        date: movement.date,
-                        type: movement.type,
-                        amount: movement.amount,
-                        description: movement.description,
-                        user: movement.user
-                    }))
-                };
-                setQueryResults(results);
-                return results;
-            };
-    
-            // Función para exportar datos
-            const exportData = async () => {
-                if (!queryResults) {
-                    setMessage('🚫 Error: No hay datos para exportar.');
-                    return;
-                }
-                try {
-                    const token = getAccessToken();
-                    const response = await fetch('/api/export-data/', {
-                        method: 'POST',
-                        credentials: 'include', // enviar cookies HttpOnly (refresh) si las hay
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': token ? `Bearer ${token}` : undefined
-                        },
-                        body: JSON.stringify({
-                            query_type: selectedQuery,
-                            data: queryResults.data
-                        })
-                    });
-                    if (!response.ok) {
-                        setMessage('🚫 Error al exportar PDF.');
-                        return;
-                    }
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${selectedQuery}_reporte.pdf`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    window.URL.revokeObjectURL(url);
-                    setMessage('✅ PDF exportado correctamente.');
-                } catch (error) {
-                    setMessage('🚫 Error al exportar PDF.');
-                }
-            };
-    
-            return (
-                <div className="management-container">
-                    <h2>Consultar Datos</h2>
-                    {message && <p className="message">{message}</p>}
-                    
-                    <div className="query-form">
-                        <h3>Seleccionar Consulta</h3>
-                        
-                        <select 
-                            value={selectedQuery} 
-                            onChange={e => setSelectedQuery(e.target.value)}
-                            className="query-select"
-                        >
-                            <option value="">Seleccionar tipo de consulta</option>
-                            <option value="stock">Estado de Stock</option>
-                            <option value="proveedores">Información de Proveedores</option>
-                            <option value="ventas">Reporte de Ventas</option>
-                            <option value="compras">Reporte de Compras</option>
-                            <option value="pedidos">Reporte de Pedidos</option>
-                            <option value="movimientos_caja">Movimientos de Caja</option>
-                        </select>
-                        
-                        <div className="date-filters">
-                            <div className="date-input">
-                                <label>Fecha de inicio:</label>
-                                <input 
-                                    type="date" 
-                                    value={startDate} 
-                                    onChange={e => setStartDate(e.target.value)} 
-                                />
-                            </div>
-                            <div className="date-input">
-                                <label>Fecha de fin:</label>
-                                <input 
-                                    type="date" 
-                                    value={endDate} 
-                                    onChange={e => setEndDate(e.target.value)} 
-                                />
-                            </div>
-                        </div>
-                        
-                        <div className="query-actions">
-                            <button onClick={executeQuery} className="action-button primary">
-                                Ejecutar Consulta
-                            </button>
-                            <button onClick={exportData} className="action-button secondary" disabled={!queryResults}>
-                                Exportar Datos
-                            </button>
-                        </div>
-                    </div>
-    
-                    {queryResults && (
-                        <div className="query-results">
-                            <h3>{queryResults.title}</h3>
-                            
-                            <div className="results-summary">
-                                {Object.entries(queryResults.summary).map(([key, value]) => (
-                                    <div key={key} className="summary-item">
-                                        <strong>
-                                            {headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
-                                        </strong> {value}
-                                    </div>
-                                ))}
-                            </div>
-                            
-                            <div className="results-table">
-                                {queryResults.data && queryResults.data.length > 0 ? (
-                                    (() => {
-                                        // Helper para mostrar de forma segura valores que pueden ser arrays/objetos
-                                        const renderCellValue = (value) => {
-                                            if (value === null || value === undefined) return '';
-                                            // Array -> intentar formatear cada elemento
-                                            if (Array.isArray(value)) {
-                                                if (value.length === 0) return '';
-                                                // Si todos son primitivos, unirlos
-                                                if (value.every(v => v === null || ['string','number','boolean'].includes(typeof v))) {
-                                                    return value.filter(v => v !== null && v !== undefined).join(', ');
-                                                }
-                                                // Array de objetos: mapear a una representación legible
-                                                return value.map(item => {
-                                                    if (item === null || item === undefined) return '';
-                                                    if (typeof item === 'string' || typeof item === 'number') return String(item);
-                                                    // Intentar campos comunes
-                                                    const name = item.productName || item.product_name || item.product || item.name || item.productName;
-                                                    const qty = item.quantity ?? item.cantidad ?? item.qty ?? '';
-                                                    const unit = item.unitPrice ?? item.unit_price ?? item.price ?? '';
-                                                    const total = item.total ?? item.totalAmount ?? item.total_amount ?? '';
-                                                    const parts = [];
-                                                    if (name) parts.push(String(name));
-                                                    if (qty !== '') parts.push(String(qty));
-                                                    if (unit !== '') parts.push(`x ${safeToFixed(unit)}`);
-                                                    if (total !== '') parts.push(`= ${safeToFixed(total)}`);
-                                                    return parts.join(' ');
-                                                }).filter(Boolean).join('; ');
-                                            }
-
-                                            // Object -> intentar formatear campos conocidos o hacer JSON
-                                            if (typeof value === 'object') {
-                                                const name = value.productName || value.product_name || value.name;
-                                                if (name) {
-                                                    const qty = value.quantity ?? value.cantidad ?? value.qty ?? '';
-                                                    const unit = value.unitPrice ?? value.unit_price ?? value.price ?? '';
-                                                    const total = value.total ?? value.totalAmount ?? value.total_amount ?? '';
-                                                    const parts = [String(name)];
-                                                    if (qty !== '') parts.push(String(qty));
-                                                    if (unit !== '') parts.push(`x ${safeToFixed(unit)}`);
-                                                    if (total !== '') parts.push(`= ${safeToFixed(total)}`);
-                                                    return parts.join(' ');
-                                                }
-                                                try { return JSON.stringify(value); } catch (e) { return String(value); }
-                                            }
-
-                                            // Primitivos
-                                            return String(value);
-                                        };
-
-                                        const sample = queryResults.data[0] || {};
-
-                                        // Si es reporte de pedidos y tiene customerName, mostrar columnas amigables
-                                        if (sample.customerName || sample.customer_name) {
-                                            const cols = ['id','date','customerName','paymentMethod','status','products','units'];
-                                            return (
-                                                <table>
-                                                    <thead>
-                                                        <tr>
-                                                            {cols.map(key => (
-                                                                <th key={key}>{headerTranslationMap[key] || key}</th>
-                                                            ))}
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {queryResults.data.map((row, index) => (
-                                                            <tr key={index}>
-                                                                {cols.map((k, ci) => (
-                                                                    <td key={ci}>{renderCellValue(row[k] ?? row[k === 'products' ? 'items' : k])}</td>
-                                                                ))}
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            );
-                                        }
-
-                                        // Si es reporte de ventas, forzar columnas en orden fijo incluyendo 'user'
-                                        if (selectedQuery === 'ventas' || (sample.product && sample.quantity !== undefined && sample.total !== undefined)) {
-                                            const cols = ['id','date','product','quantity','total','user'];
-                                            return (
-                                                <table>
-                                                    <thead>
-                                                        <tr>
-                                                            {cols.map(key => (
-                                                                <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>
-                                                            ))}
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {queryResults.data.map((row, index) => (
-                                                            <tr key={index}>
-                                                                {cols.map((k, ci) => (
-                                                                    <td key={ci}>{renderCellValue(row[k])}</td>
-                                                                ))}
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            );
-                                        }
-
-                                        // Por defecto: columnas derivadas de las keys del primer objeto
-                                        const keys = Object.keys(sample);
-                                        return (
-                                            <table>
-                                                <thead>
-                                                    <tr>
-                                                        {keys.map(key => (
-                                                            <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>
-                                                        ))}
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {queryResults.data.map((row, rIdx) => (
-                                                        <tr key={rIdx}>
-                                                            {keys.map((k, cIdx) => (
-                                                                <td key={cIdx}>{renderCellValue(row[k])}</td>
-                                                            ))}
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        );
-                                    })()
-                                ) : (
-                                    <p>No hay datos que mostrar para los criterios seleccionados.</p>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        };
+        // DataConsultation moved to `src/DataConsultation.js` to provide a stable identity
+        // and avoid remounts caused by defining the component inline within App.
     
         // Componente de la interfaz de edición de productos nuevos (solo para Gerente).
         const EditNewProducts = () => {
@@ -3737,7 +2957,22 @@ const App = () => {
             case 'pedidos':
                 return userRole === 'Gerente' ? <OrderManagement /> : <div>Acceso Denegado</div>;
             case 'consultas':
-                return userRole === 'Gerente' ? <DataConsultation /> : <div>Acceso Denegado</div>;
+                return userRole === 'Gerente' ? (
+                    <DataConsultation
+                        getInMemoryToken={getInMemoryToken}
+                        api={api}
+                        loadSales={loadSales}
+                        loadCashMovements={loadCashMovements}
+                        inventory={inventory}
+                        suppliers={suppliers}
+                        purchases={purchases}
+                        orders={orders}
+                        cashMovements={cashMovements}
+                        sales={sales}
+                        headerTranslationMap={headerTranslationMap}
+                        safeToFixed={safeToFixed}
+                    />
+                ) : <div>Acceso Denegado</div>;
             case 'editar productos':
                 return userRole === 'Gerente' ? <EditNewProducts /> : <div>Acceso Denegado</div>;
             default:
@@ -3748,12 +2983,12 @@ const App = () => {
     useEffect(() => {
       if (isLoggedIn) {
         // Verificación especial para Safari - asegurar que el token esté disponible
-        const token = getAccessToken();
+    const token = getInMemoryToken();
         if (!token) {
           console.log('⚠️ No hay token disponible, esperando...');
           // Reintentar en 200ms para Safari
-          setTimeout(() => {
-            const retryToken = getAccessToken();
+                    setTimeout(() => {
+                        const retryToken = getInMemoryToken();
             if (retryToken && isLoggedIn) {
               loadUsers();
               loadProducts();

@@ -6,13 +6,65 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Product, CashMovement, InventoryChange, Sale, UserQuery
+from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier
 from django.conf import settings
 from .serializers import (
     UserSerializer, UserCreateSerializer, ProductSerializer,
     CashMovementSerializer, InventoryChangeSerializer, SaleSerializer,
-    UserQuerySerializer
+    UserQuerySerializer, SupplierSerializer, UserStorageSerializer
 )
+from .models import UserStorage
+# ViewSet para almacenamiento tipo localStorage por usuario
+class UserStorageViewSet(viewsets.ModelViewSet):
+    serializer_class = UserStorageSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return UserStorage.objects.filter(user=self.request.user)
+
+    @action(detail=False, methods=['get'])
+    def keys(self, request):
+        """Obtener todas las claves almacenadas para el usuario autenticado."""
+        keys = list(UserStorage.objects.filter(user=request.user).values_list('key', flat=True))
+        return Response({'keys': keys})
+
+    @action(detail=False, methods=['post'])
+    def save(self, request):
+        """Guardar o actualizar un valor (saveLS). Espera {key, value}."""
+        key = request.data.get('key')
+        value = request.data.get('value')
+        if not key:
+            return Response({'error': 'Key requerida'}, status=400)
+        obj, created = UserStorage.objects.update_or_create(
+            user=request.user, key=key,
+            defaults={'value': value}
+        )
+        return Response({'success': True, 'created': created, 'key': key, 'value': value})
+
+    @action(detail=False, methods=['get'])
+    def load(self, request):
+        """Obtener un valor por clave (loadLS). Recibe ?key=..."""
+        key = request.query_params.get('key')
+        if not key:
+            return Response({'error': 'Key requerida'}, status=400)
+        obj = UserStorage.objects.filter(user=request.user, key=key).first()
+        if not obj:
+            return Response({'value': None, 'found': False})
+        return Response({'value': obj.value, 'found': True})
+
+    @action(detail=False, methods=['post'])
+    def remove(self, request):
+        """Eliminar un valor por clave (removeLS). Espera {key}."""
+        key = request.data.get('key')
+        if not key:
+            return Response({'error': 'Key requerida'}, status=400)
+        deleted, _ = UserStorage.objects.filter(user=request.user, key=key).delete()
+        return Response({'success': True, 'deleted': bool(deleted), 'key': key})
+# ViewSet para la gestión de proveedores (CRUD)
+class SupplierViewSet(viewsets.ModelViewSet):
+    queryset = Supplier.objects.all()
+    serializer_class = SupplierSerializer
+    permission_classes = [IsAuthenticated]
 from .models import Purchase
 from .serializers import PurchaseSerializer
 from .models import Order
@@ -515,6 +567,45 @@ class ExportDataView(APIView):
                 if query_type in ['inventario', 'stock']:
                     story.append(self._generate_inventory_table(query_data))
                 elif query_type == 'ventas':
+                    # Si el frontend envió un resumen (summary), renderizarlo arriba
+                    summary = data.get('summary') or {}
+                    if summary:
+                        try:
+                            # Crear tres recuadros: Total de Ventas, Ingresos Totales, Período
+                            total_sales = int(summary.get('totalSales') or summary.get('total_sales') or 0)
+                        except Exception:
+                            total_sales = 0
+                        try:
+                            total_revenue = float(summary.get('totalRevenue') or summary.get('total_revenue') or 0) or 0.0
+                        except Exception:
+                            total_revenue = 0.0
+                        period = summary.get('period') or summary.get('date_range') or ''
+
+                        # Estilo para recuadros
+                        box_style = TableStyle([
+                            ('BACKGROUND', (0,0), (-1,-1), colors.whitesmoke),
+                            ('BOX', (0,0), (-1,-1), 1, colors.lightgrey),
+                            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                        ])
+                        boxes = [
+                            [Paragraph(f"<b>Total de Ventas:</b> {total_sales}", styles['Normal']) , ''],
+                            [Paragraph(f"<b>Ingresos Totales:</b> ${total_revenue:.2f}", styles['Normal']), ''],
+                            [Paragraph(f"<b>Período:</b> {period}", styles['Normal']), '']
+                        ]
+                        # Convertir cada box a una tabla individual alineada horizontalmente
+                        # Usaremos una tabla única con 3 columnas para mostrar los 3 recuadros
+                        header_row = ['','', '']
+                        box_table = Table([[Paragraph(f"<b>Total de Ventas:</b> {total_sales}", styles['Normal']), Paragraph(f"<b>Ingresos Totales:</b> ${total_revenue:.2f}", styles['Normal']), Paragraph(f"<b>Período:</b> {period}", styles['Normal'])]])
+                        box_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                            ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+                            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.white),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ]))
+                        story.append(box_table)
+                        story.append(Spacer(1,12))
+
                     story.append(self._generate_sales_table(query_data))
                 elif query_type in ['usuarios', 'users']:
                     story.append(self._generate_users_table(query_data))
@@ -541,13 +632,24 @@ class ExportDataView(APIView):
         
         
     def _generate_inventory_table(self, data):
-        table_data = [['Producto', 'Stock', 'Precio', 'Umbral']]
+        # Encabezados igual que la interfaz gráfica
+        table_data = [['Producto/Insumo', 'Stock', 'Tipo', 'Precio', 'Estado']]
         for item in data:
+            precio = item.get('price')
+            # Si el precio es None, mostrar vacío, si no, formatear con dos decimales
+            if precio is not None:
+                try:
+                    precio_str = f"${float(precio):.2f}"
+                except Exception:
+                    precio_str = str(precio)
+            else:
+                precio_str = ''
             table_data.append([
                 item.get('name', ''),
                 str(item.get('stock', 0)),
-                f"${item.get('price', 0)}",
-                str(item.get('low_stock_threshold', 0))
+                item.get('type', ''),
+                precio_str,
+                item.get('status', '')
             ])
         table = Table(table_data)
         table.setStyle(TableStyle([
@@ -579,12 +681,22 @@ class ExportDataView(APIView):
             except Exception:
                 usuario = str(raw_user)
 
+            # Formatear total con dos decimales
+            total_val = item.get('total', 0)
+            try:
+                total_num = float(total_val)
+            except Exception:
+                try:
+                    total_num = float(str(total_val).replace('$','').replace(',',''))
+                except Exception:
+                    total_num = 0.0
+
             table_data.append([
                 str(item.get('id', '')),
                 item.get('date', ''),
                 item.get('product', ''),
                 str(item.get('quantity', 0)),
-                f"${item.get('total', 0)}",
+                f"${total_num:.2f}",
                 usuario
             ])
         table = Table(table_data)

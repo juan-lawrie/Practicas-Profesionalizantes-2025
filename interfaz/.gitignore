@@ -9,6 +9,7 @@
 Curl.txt
 *.tmp
 *.temp
+Cookies.txt
 
 # ===== ARCHIVOS DEL SISTEMA (NO IMPORTANTES) =====
 .DS_Store
