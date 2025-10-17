@@ -943,6 +943,64 @@ h2 {
   }
 }
 
+/* Estilos para el componente SearchableSelect */
+.searchable-select {
+    position: relative;
+    margin-bottom: 1rem; /* Espacio igual a otros form-groups */
+}
+
+.searchable-select-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #cbd5e0;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    box-sizing: border-box;
+    background-color: #fff;
+}
+
+.searchable-select-input:focus {
+    outline: none;
+    border-color: #3182ce;
+    box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.5);
+}
+
+.searchable-select-list {
+    position: absolute;
+    z-index: 100; /* Asegurar que esté por encima de otros elementos */
+    background: white;
+    border: 1px solid #ddd;
+    width: 100%;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 0;
+    margin-top: 4px;
+    list-style: none;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.searchable-select-list li {
+    padding: 0.75rem;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.searchable-select-list li:last-child {
+    border-bottom: none;
+}
+
+.searchable-select-list li button {
+    all: unset; /* Resetea todos los estilos del botón */
+    cursor: pointer;
+    display: block;
+    width: 100%;
+    text-align: left;
+}
+
+.searchable-select-list li:hover {
+    background-color: #f7fafc;
+}
+
 /* Estilos específicos para edición de productos */
 .products-list {
   margin-bottom: 2rem;
@@ -1172,4 +1230,121 @@ h2 {
 .modal-content p {
     margin: 10px 0;
     line-height: 1.5;
+}
+
+.inventory-stock {
+  text-align: right;
+  min-width: 120px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.inventory-name {
+    font-weight: 600;
+}
+.product-selection {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.product-selection .searchable-select {
+    flex-grow: 1;
+}
+
+.cart-summary .list-item {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 1rem;
+    align-items: center;
+}
+
+/* Purchase Requests Styles */
+.purchase-requests-container .list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 1rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.purchase-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.purchase-items {
+    list-style: disc;
+    padding-left: 20px;
+    margin-top: 0.5rem;
+}
+
+/* Purchase History List Styles */
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.history-item {
+    display: flex;
+    align-items: center; /* Changed to center for better vertical alignment */
+    padding: 15px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    gap: 10px;
+    background-color: #ffffff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    transition: box-shadow 0.3s ease;
+}
+
+.history-item:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.history-item.history-header {
+    font-weight: bold;
+    background-color: #edf2f7;
+    border-bottom: 2px solid #cbd5e0;
+    box-shadow: none;
+}
+
+.history-field {
+    flex: 1 1 0px; /* Allow shrinking and growing */
+    padding: 0 10px; /* Increased padding */
+    word-wrap: break-word;
+}
+
+.history-field.id-col {
+    flex: 0 0 60px; /* Fixed width for ID column */
+    font-weight: bold;
+}
+
+.history-field.items-col {
+    flex-grow: 2; /* Give more space to the items column */
+}
+
+.history-field.actions-col {
+    flex: 0 0 130px; /* Fixed width for actions */
+    text-align: right;
+}
+
+.inner-items-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.9em;
+    color: #4a5568;
+}
+
+.inner-items-list li {
+    margin-bottom: 4px;
+}
+
+.confirm-delete {
+    display: flex;
+    gap: 5px;
+    justify-content: flex-end;
 }

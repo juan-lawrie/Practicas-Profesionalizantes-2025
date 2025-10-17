@@ -1,7 +1,7 @@
 # backend/api/serializers.py
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role, UserQuery, Supplier, UserStorage
+from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role, UserQuery, Supplier, UserStorage, LowStockReport
 # Serializer para el modelo de proveedor
 class SupplierSerializer(serializers.ModelSerializer):
     class Meta:
@@ -26,11 +26,35 @@ class RoleSerializer(serializers.ModelSerializer):
 # Serializer para el modelo de usuario (usando el modelo extendido)
 class UserSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True)
-    
+    role_id = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.all(), source='role', write_only=True, allow_null=True
+    )
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'role', 'is_active')
-        read_only_fields = ('is_active',)  # El estado activo no se modifica por la API
+        fields = ('id', 'username', 'email', 'role', 'role_id', 'is_active')
+        read_only_fields = ('is_active',)
+
+# Serializer para que el Gerente actualice usuarios (SIN CONTRASEÑA)
+class UserUpdateSerializer(serializers.ModelSerializer):
+    role_id = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.all(), source='role', required=False, allow_null=True
+    )
+
+    class Meta:
+        model = User
+        fields = ('username', 'email', 'role_id', 'is_active')
+        extra_kwargs = {
+            'username': {'required': False},
+            'email': {'required': False},
+            'is_active': {'required': False}
+        }
+
+    def update(self, instance, validated_data):
+        # El rol se maneja a través de role_id
+        instance = super().update(instance, validated_data)
+        return instance
+
 
 # Serializer para crear usuarios (incluye el campo de contraseña)
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -96,7 +120,7 @@ class CashMovementSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = CashMovement
-        fields = '__all__'
+        fields = ('id', 'type', 'amount', 'description', 'timestamp', 'user', 'payment_method')
         read_only_fields = ('user',)
 
 # Serializer para el modelo de cambio de inventario
@@ -107,6 +131,30 @@ class InventoryChangeSerializer(serializers.ModelSerializer):
         model = InventoryChange
         fields = '__all__'
         read_only_fields = ('user',)
+
+    def validate(self, attrs):
+        # Normalize quantity: accept negative for 'Salida' but store positive
+        change_type = attrs.get('type') or getattr(self.instance, 'type', None)
+        qty = attrs.get('quantity')
+        if qty is None:
+            raise serializers.ValidationError({'quantity': 'La cantidad es requerida.'})
+
+        try:
+            qty_int = int(qty)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({'quantity': 'Cantidad inválida.'})
+
+        if change_type == 'Salida' and qty_int > 0:
+            # allow frontend to send negative; but accept positive and interpret as exit
+            # we will treat quantity as absolute value when applying
+            pass
+
+        if qty_int < 0:
+            qty_int = abs(qty_int)
+
+        attrs['quantity'] = qty_int
+        return attrs
+
 
 # Serializer para los productos de una venta
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -175,10 +223,30 @@ class UserQuerySerializer(serializers.ModelSerializer):
 
 # Serializer para compras
 class PurchaseSerializer(serializers.ModelSerializer):
+    user = serializers.ReadOnlyField(source='user.username')
+    approved_by = serializers.ReadOnlyField(source='approved_by.username', allow_null=True)
+    approved_by_name = serializers.ReadOnlyField(source='approved_by.username', allow_null=True)
+    supplier_name = serializers.ReadOnlyField(source='supplier')
+    total = serializers.SerializerMethodField()
+
     class Meta:
         model = Purchase
         fields = '__all__'
-        read_only_fields = ('id', 'created_at')
+        read_only_fields = ('id', 'created_at', 'user', 'status', 'approved_by', 'approved_at')
+
+    def get_total(self, obj):
+        from decimal import Decimal
+        if isinstance(obj.items, list):
+            total = Decimal('0')
+            for item in obj.items:
+                qty = item.get('quantity') or item.get('qty') or 0
+                unit_price = item.get('unitPrice') or item.get('unit_price') or item.get('price') or 0
+                try:
+                    total += Decimal(str(qty)) * Decimal(str(unit_price))
+                except Exception:
+                    continue
+            return total
+        return obj.total_amount
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -209,3 +277,23 @@ class OrderSerializer(serializers.ModelSerializer):
         order.total_amount = total
         order.save()
         return order
+
+
+# Serializer para auditoría de cambios de inventario (restaurado)
+class InventoryChangeAuditSerializer(serializers.ModelSerializer):
+    user = serializers.ReadOnlyField(source='user.username')
+    product_name = serializers.ReadOnlyField(source='product.name')
+
+    class Meta:
+        model = getattr(__import__('api.models', fromlist=['InventoryChangeAudit']), 'InventoryChangeAudit')
+        fields = ('id', 'inventory_change', 'product', 'product_name', 'user', 'role', 'change_type', 'quantity', 'previous_stock', 'new_stock', 'reason', 'timestamp')
+        read_only_fields = ('id', 'inventory_change', 'product_name', 'user', 'previous_stock', 'new_stock', 'timestamp')
+
+class LowStockReportSerializer(serializers.ModelSerializer):
+    reported_by = serializers.ReadOnlyField(source='reported_by.username')
+    product_name = serializers.ReadOnlyField(source='product.name')
+
+    class Meta:
+        model = LowStockReport
+        fields = ('id', 'product', 'product_name', 'message', 'reported_by', 'created_at', 'is_resolved')
+        read_only_fields = ('id', 'reported_by', 'created_at')

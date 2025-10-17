@@ -74,10 +74,8 @@ class CashMovement(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     description = models.TextField(blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-
-    def __str__(self):
-        return f'{self.type} de ${self.amount} - {self.timestamp.strftime("%Y-%m-%d %H:%M")}'
+    user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
+    payment_method = models.CharField(max_length=50, blank=True, null=True)
 
 # Modelo para cambios de inventario (no por ventas)
 class InventoryChange(models.Model):
@@ -90,23 +88,43 @@ class InventoryChange(models.Model):
     quantity = models.IntegerField()
     reason = models.TextField(blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
         return f'{self.type} de {self.quantity} de {self.product.name}'
 
-# Modelo para ventas
+# Modelo para auditoría de cambios de inventario
+class InventoryChangeAudit(models.Model):
+    inventory_change = models.ForeignKey('InventoryChange', on_delete=models.SET_NULL, null=True, blank=True, related_name='audits')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    role = models.CharField(max_length=50, blank=True, null=True)
+    change_type = models.CharField(max_length=10, choices=InventoryChange.CHANGE_CHOICES)
+    quantity = models.PositiveIntegerField()
+    previous_stock = models.IntegerField()
+    new_stock = models.IntegerField()
+    reason = models.TextField(blank=True, null=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        user_repr = self.user.username if self.user else 'Sistema'
+        return f"Audit: {self.change_type} {self.quantity} on {self.product.name} by {user_repr} at {self.timestamp}"
+
+
+# ---------------------- Modelos relacionados con ventas, compras y pedidos (definidos en migraciones)
 class Sale(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(max_length=50)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    products = models.ManyToManyField(Product, through='SaleItem')
+    user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
 
     def __str__(self):
-        return f'Venta #{self.id} - Total: ${self.total_amount}'
+        return f"Sale {self.id} - {self.total_amount}"
 
-# Modelo intermedio para la relación Many-to-Many entre Sale y Product
+
 class SaleItem(models.Model):
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
@@ -114,61 +132,48 @@ class SaleItem(models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2)
 
     def __str__(self):
-        return f'{self.quantity} x {self.product.name} en Venta #{self.sale.id}'
-
-# Modelo para guardar el estado de consultas de datos
-class UserQuery(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    query_type = models.CharField(max_length=50)  # 'stock', 'ventas', 'compras', etc.
-    start_date = models.DateField(null=True, blank=True)
-    end_date = models.DateField(null=True, blank=True)
-    results_data = models.JSONField()  # Almacenar los resultados de la consulta
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    is_active = models.BooleanField(default=True)  # Para saber si la consulta está activa
-
-    class Meta:
-        ordering = ['-updated_at']
-        unique_together = ['user', 'query_type']  # Un usuario solo puede tener una consulta activa por tipo
-
-    def __str__(self):
-        return f'{self.user.username} - {self.query_type} - {self.updated_at}'
+        return f"{self.quantity} x {self.product.name} @ {self.price}"
 
 
-# Modelo para almacenar compras (compras de insumos/proveedores)
 class Purchase(models.Model):
+    STATUS_CHOICES = (
+        ('Pendiente', 'Pendiente'),
+        ('Aprobada', 'Aprobada'),
+        ('Rechazada', 'Rechazada'),
+    )
     date = models.CharField(max_length=50, blank=True, null=True)
     supplier = models.CharField(max_length=255, blank=True, null=True)
     supplier_id = models.IntegerField(blank=True, null=True)
-    items = models.JSONField(default=list)  # Lista de items con {productName, quantity, unitPrice, total}
+    items = models.JSONField(default=list)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    status = models.CharField(max_length=50, default='Completada')
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Pendiente')
     created_at = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='purchases')
+    approved_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_purchases')
+    approved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
-        return f'Compra #{self.id} - {self.supplier or "(sin proveedor)"} - {self.created_at.strftime("%Y-%m-%d %H:%M")}'
+        return f"Purchase {self.id} - {self.total_amount}"
 
 
-# Modelos para pedidos de clientes (persistencia de orders)
 class Order(models.Model):
     customer_name = models.CharField(max_length=255)
-    date = models.DateField(null=True, blank=True)
+    date = models.DateField(blank=True, null=True)
     payment_method = models.CharField(max_length=100, blank=True, null=True)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     notes = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=50, default='Pendiente')
     created_at = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
-        return f'Pedido #{self.id} - {self.customer_name} - {self.created_at.strftime("%Y-%m-%d %H:%M")}'
+        return f"Order {self.id} - {self.customer_name}"
 
 
 class OrderItem(models.Model):
@@ -179,6 +184,32 @@ class OrderItem(models.Model):
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     def __str__(self):
-        return f'{self.quantity} x {self.product_name} for Order #{self.order.id}'
-    
-    
+        return f"{self.quantity} x {self.product_name}"
+
+
+class UserQuery(models.Model):
+    query_type = models.CharField(max_length=50)
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
+    results_data = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+    user = models.ForeignKey('User', on_delete=models.CASCADE)
+
+    class Meta:
+        ordering = ['-updated_at']
+        unique_together = ('user', 'query_type')
+
+    def __str__(self):
+        return f"Query {self.query_type} by {self.user.username}"
+
+class LowStockReport(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    message = models.TextField()
+    reported_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_resolved = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"Report for {self.product.name} by {self.reported_by.username}"

@@ -1,9 +1,13 @@
-
 import React, { useState, useEffect } from 'react';
+import Select from 'react-select';
 import './App.css';
-import api, { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken } from './services/api';
+import api, { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken, getPendingPurchases, approvePurchase, rejectPurchase, getPurchaseHistory } from './services/api';
 import userStorage from './services/userStorage';
 import DataConsultation from './DataConsultation';
+import MyUserData from './components/MyUserData';
+import PurchaseManagement from './components/PurchaseManagement';
+import PurchaseRequests from './components/PurchaseRequests';
+import PurchaseHistory from './components/PurchaseHistory';
 
 
 
@@ -128,6 +132,8 @@ const getProductIdByName = (inventory, name) => {
   return p ? p.id : null;
 };
 
+
+
 // Simulación de la base de datos de usuarios con roles y credenciales
 const mockUsers = [
   { email: 'gerente@example.com', password: 'Password123', role: 'Gerente' },
@@ -144,11 +150,11 @@ const passwordPolicy = {
 };
 
 const rolePermissions = {
-  'Gerente': ['Dashboard', 'Inventario', 'Gestión de Usuarios', 'Ventas', 'Productos', 'Editar Productos', 'Proveedores', 'Compras', 'Pedidos', 'Consultas'],
-  'Panadero': ['Dashboard', 'Inventario', 'Ventas', 'Compras'],
-  'Encargado': ['Dashboard', 'Inventario', 'Ventas', 'Compras'],
-  'Cajero': ['Dashboard', 'Ventas', 'Inventario', 'Compras'],
-};
+    'Gerente': ['Dashboard', 'Inventario', 'Gestión de Usuarios', 'Ventas', 'Pedidos', 'Productos', 'Editar Productos', 'Proveedores', 'Compras', 'Consultas', 'Ver Reportes de Faltantes'],
+    'Panadero': ['Dashboard', 'Inventario', 'Ventas', 'Datos de mi Usuario', 'Reportar Faltantes'],
+    'Encargado': ['Dashboard', 'Inventario', 'Ventas', 'Compras', 'Datos de mi Usuario'],
+    'Cajero': ['Dashboard', 'Ventas', 'Inventario', 'Datos de mi Usuario', 'Reportar Faltantes'],
+  };
 
 // Componente principal de la aplicación.
 const App = () => {
@@ -178,55 +184,52 @@ const App = () => {
 
     
 
-    // Definimos los roles de usuario disponibles.
-    const roles = ['Gerente', 'Panadero', 'Encargado', 'Cajero'];
-     
     // Estados para el sistema de autenticación
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     // Indica si ya intentamos restaurar sesión al montar (para evitar parpadeos)
     const [sessionChecked, setSessionChecked] = useState(false);
-        // Intentar restaurar el token en memoria al montar la app y cada vez que la pestaña
-        // reciba foco. Esto reduce la ventana donde una nueva pestaña tiene la cookie HttpOnly
-        // pero no tiene aún el token en memoria, evitando el caso en que la primera consulta
-        // devuelve vacío y la segunda sí funciona.
-        useEffect(() => {
-            let mounted = true;
+    // Intentar restaurar el token en memoria al montar la app y cada vez que la pestaña
+    // reciba foco. Esto reduce la ventana donde una nueva pestaña tiene la cookie HttpOnly
+    // pero no tiene aún el token en memoria, evitando el caso en que la primera consulta
+    // devuelve vacío y la segunda sí funciona.
+    useEffect(() => {
+        let mounted = true;
 
-            const tryRestore = async () => {
-                try {
-                    const currentToken = getInMemoryToken();
-                    if (currentToken || sessionChecked) return;
-                    if (console.debug) console.debug('App: intentando restaurar token en memoria al montar');
-                    const restored = await ensureInMemoryToken();
-                    if (restored && mounted) {
-                        setIsLoggedIn(true);
-                    }
-                } catch (e) {
-                    // ignore
-                } finally {
-                    if (mounted) setSessionChecked(true);
+        const tryRestore = async () => {
+            try {
+                const currentToken = getInMemoryToken();
+                if (currentToken || sessionChecked) return;
+                if (console.debug) console.debug('App: intentando restaurar token en memoria al montar');
+                const restored = await ensureInMemoryToken();
+                if (restored && mounted) {
+                    setIsLoggedIn(true);
                 }
-            };
+            } catch (e) {
+                // ignore
+            } finally {
+                if (mounted) setSessionChecked(true);
+            }
+        };
 
-            // llamada inmediata
-            tryRestore();
+        // llamada inmediata
+        tryRestore();
 
-            const onFocus = async () => {
-                try {
-                    if (console.debug) console.debug('App: pestaña recibió focus, intentando restaurar token en memoria');
-                    const currentToken = getInMemoryToken();
-                    if (!currentToken) {
-                        const restored = await ensureInMemoryToken();
-                        if (restored && mounted) setIsLoggedIn(true);
-                    }
-                } catch (e) { /* ignore */ }
-            };
+        const onFocus = async () => {
+            try {
+                if (console.debug) console.debug('App: pestaña recibió focus, intentando restaurar token en memoria');
+                const currentToken = getInMemoryToken();
+                if (!currentToken) {
+                    const restored = await ensureInMemoryToken();
+                    if (restored && mounted) setIsLoggedIn(true);
+                }
+            } catch (e) { /* ignore */ }
+        };
 
-            window.addEventListener('focus', onFocus);
-            return () => { mounted = false; window.removeEventListener('focus', onFocus); };
-        }, [sessionChecked]);
+        window.addEventListener('focus', onFocus);
+        return () => { mounted = false; window.removeEventListener('focus', onFocus); };
+    }, [sessionChecked]);
     const [loginError, setLoginError] = useState('');
     const [failedAttempts, setFailedAttempts] = useState(0);
     const [isLocked, setIsLocked] = useState(false);
@@ -237,6 +240,58 @@ const App = () => {
     const [userRole, setUserRole] = useState(null);
     // Estado para la página current a mostrar.
     const [currentPage, setCurrentPage] = useState('login');
+    // Estado para la lista de roles
+    const [roles, setRoles] = useState([]);
+    const [confirmDeletePurchaseId, setConfirmDeletePurchaseId] = useState(null);
+
+    // Función para cargar roles desde el backend
+    const loadRoles = async () => {
+        try {
+            const response = await api.get('/roles/');
+            if (response.data) {
+                setRoles(response.data);
+            }
+        } catch (error) {
+            console.error('Error cargando roles:', error);
+        }
+    };
+
+    const handleApprovePurchase = async (purchaseId) => {
+        try {
+            await api.post(`/purchases/${purchaseId}/approve/`);
+            fetchPurchases();
+            fetchPurchaseHistory();
+        } catch (error) {
+            console.error("Error approving purchase", error);
+        }
+    };
+
+    const handleRejectPurchase = async (purchaseId) => {
+        try {
+            await api.post(`/purchases/${purchaseId}/reject/`);
+            fetchPurchases();
+        } catch (error) {
+            console.error("Error rejecting purchase", error);
+        }
+    };
+
+    const handleDeletePurchase = async (purchaseId) => {
+        if (confirmDeletePurchaseId === purchaseId) {
+            try {
+                await api.delete(`/purchases/${purchaseId}/`);
+                fetchPurchaseHistory();
+                setConfirmDeletePurchaseId(null);
+            } catch (error) {
+                console.error("Error deleting purchase", error);
+            }
+        } else {
+            setConfirmDeletePurchaseId(purchaseId);
+        }
+    };
+
+    const handleCancelDeletePurchase = () => {
+        setConfirmDeletePurchaseId(null);
+    };
 
         // Validación de contraseña mínima (se usa en creación de usuarios)
         const validatePassword = (pwd) => {
@@ -302,9 +357,13 @@ const App = () => {
             setUserRole(roleFromResp);
             setCurrentPage('dashboard');
 
-            if (typeof loadUsersFromBackend === 'function') await loadUsersFromBackend();
-            if (typeof loadProducts === 'function') await loadProducts();
-            if (typeof loadSales === 'function') await loadSales();
+            // Cargar datos iniciales
+            await Promise.all([
+                loadUsersFromBackend(),
+                loadProducts(),
+                loadSales(),
+                loadRoles()
+            ]);
             console.log('🔐 Login completo y datos iniciales cargados');
         } catch (error) {
             console.error('Error de login con backend:', error?.response?.data || error?.message || error);
@@ -355,20 +414,35 @@ const App = () => {
     const [orders, setOrders] = useState([]);
 
     // Estado para productos con información completa - COMPLETAMENTE basado en API del backend
+    const [purchaseHistory, setPurchaseHistory] = useState([]);
+
+    // Cargar historial de compras desde el backend al iniciar sesión
+    const fetchPurchases = async () => {
+        try {
+            const response = await api.get('/purchases/pending-approval/');
+            // Normalizar cada compra para asegurar campos frontend-friendly
+            const normalized = Array.isArray(response.data) ? response.data.map(normalizePurchaseFromServer) : [];
+            setPurchases(normalized);
+        } catch (error) {
+            console.error('Error al cargar compras desde el backend:', error);
+        }
+    };
+
+    const fetchPurchaseHistory = async () => {
+        try {
+            const response = await api.get('/purchases/history/');
+            const normalized = Array.isArray(response.data) ? response.data.map(normalizePurchaseFromServer) : [];
+            setPurchaseHistory(normalized);
+        } catch (error) {
+            console.error('Error al cargar el historial de compras:', error);
+        }
+    };
+
     // Cargar historial de compras desde el backend al iniciar sesión
     useEffect(() => {
-        const fetchPurchases = async () => {
-            try {
-                const response = await api.get('/purchases/');
-                // Normalizar cada compra para asegurar campos frontend-friendly
-                const normalized = Array.isArray(response.data) ? response.data.map(normalizePurchaseFromServer) : [];
-                setPurchases(normalized);
-            } catch (error) {
-                console.error('Error al cargar compras desde el backend:', error);
-            }
-        };
         if (isLoggedIn) {
             fetchPurchases();
+            fetchPurchaseHistory();
         }
     }, [isLoggedIn]);
     // Cargar pedidos desde backend al iniciar sesión (persistencia cross-browser)
@@ -443,6 +517,13 @@ const App = () => {
                             // Si no viene el rol, usar el anterior o el default
                             try { if (!userRole) setUserRole('Cajero'); } catch (e) { /* silent */ }
                         }
+                        // Cargar roles inmediatamente tras restaurar sesión silenciosamente
+                        try {
+                            await loadRoles();
+                            console.debug('✅ Roles cargados tras refresh silencioso');
+                        } catch (e) {
+                            console.debug('⚠️ No se pudieron cargar roles tras refresh silencioso:', e && e.message);
+                        }
                         console.debug('✅ Refresh silencioso OK — sesión restablecida');
                     }
                     // Indicamos que ya fue chequeda la sesión
@@ -474,6 +555,13 @@ const App = () => {
             try {
                 console.debug('🔔 isLoggedIn=true — cargando movimientos de caja desde backend');
                 await loadCashMovements();
+                // Cargar roles también cuando la sesión inicia en esta pestaña
+                try {
+                    await loadRoles();
+                    console.debug('✅ Roles cargados tras isLoggedIn=true');
+                } catch (e) {
+                    console.debug('⚠️ Error cargando roles tras isLoggedIn:', e && e.message);
+                }
             } catch (e) {
                 console.warn('⚠️ No se pudo cargar movimientos al autenticar:', e && e.message);
                 // Si la razón fue que el backend no está accesible, forzar logout para evitar mostrar UI inconsistente
@@ -530,6 +618,7 @@ const App = () => {
                     name: user.username,
                     email: user.email,
                     role: user.role ? user.role.name : 'Cajero', // Extraer nombre del rol
+                    is_active: user.is_active,
                     hashedPassword: 'backend-managed' // Password manejado por backend
                 }));
                 setUsers(backendUsers);
@@ -720,47 +809,42 @@ const App = () => {
         const loadCashMovements = async () => {
             try {
                 console.debug('🔎 loadCashMovements invoked');
-                // Intentar refresh explícito para asegurarnos de tener access antes de pedir movimientos
-                try {
-                    console.debug('🔁 Intentando refresh explícito antes de cargar movimientos');
-                    await fetch('/api/refresh-cookie/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
-                } catch (e) {
-                    console.debug('⚠️ Refresh explícito falló o no devolvió nuevo access (silent):', e && e.message);
+                if (!getInMemoryToken()) {
+                    const restored = await ensureInMemoryToken();
+                    if (!restored) {
+                        console.warn('loadCashMovements: No se pudo obtener token para autenticación.');
+                        return;
+                    }
                 }
 
                 console.log('💰 Cargando movimientos de caja del servidor...');
                 const response = await api.get('/cash-movements/');
-                const serverMovements = response.data || [];
+
+                let serverMovements = [];
+                if (response.data && Array.isArray(response.data.results)) {
+                    serverMovements = response.data.results;
+                } else if (Array.isArray(response.data)) {
+                    serverMovements = response.data;
+                }
         
                 console.debug('🔍 Datos recibidos del servidor:', serverMovements.length, 'movimientos');
         
-                // Convertir movimientos del servidor al formato local
                 const formattedMovements = serverMovements.map(movement => ({
                     id: movement.id,
                     type: movement.type,
                     amount: parseFloat(movement.amount), // Asegurar que sea número
                     description: movement.description || '',
                     date: movement.timestamp || movement.created_at || new Date().toISOString(),
-                    user: movement.user || 'Sistema'
+                    user: movement.user || 'Sistema',
+                    payment_method: movement.payment_method || ''
                 }));
         
-                // Debug: Mostrar algunos movimientos para verificar
                 console.debug('📋 Primeros 3 movimientos formateados:', formattedMovements.slice(0, 3));
-        
-                // Calcular saldo para debug
-                const debugBalance = formattedMovements.reduce((sum, m) => {
-                    const amount = m.type === 'Entrada' ? m.amount : -m.amount;
-                    console.debug(`💰 ${m.type}: $${m.amount} (acumulado: $${sum + amount})`);
-                    return sum + amount;
-                }, 0);
-        
-                console.debug(`🎯 Saldo calculado en loadCashMovements: $${debugBalance}`);
         
                 setCashMovements(formattedMovements);
                 console.debug('✅ Movimientos de caja cargados:', `${formattedMovements.length} movimientos del servidor`);
             } catch (error) {
                 console.error('❌ Error cargando movimientos de caja:', error && error.message ? error.message : error);
-                // Mantener los movimientos anteriores si falla la carga
                 setCashMovements(prevMovements => prevMovements.length > 0 ? prevMovements : []);
             }
         };
@@ -910,6 +994,42 @@ const App = () => {
         );
     };
 
+    const ClientOrders = () => (
+        <div className="management-container">
+            <h2>Pedidos de Clientes</h2>
+            {orders.length === 0 ? (
+                <p>No hay pedidos para mostrar.</p>
+            ) : (
+                <ul className="list-container">
+                    {orders.map(order => (
+                        <li key={order.id} className="list-item">
+                            <div className="order-header">
+                                <strong>ID: {order.id}</strong>
+                                <span>Cliente: {order.customerName}</span>
+                                <span>Fecha: {new Date(order.date).toLocaleDateString()}</span>
+                            </div>
+                            <div className="order-details">
+                                <p><strong>Estado:</strong> {order.status}</p>
+                                <p><strong>Total:</strong> ${safeToFixed(order.totalAmount)}</p>
+                            </div>
+                            <div className="order-items">
+                                <strong>Items:</strong>
+                                <ul>
+                                    {order.items.map((item, index) => (
+                                        <li key={index}>
+                                            {item.productName} (x{item.quantity}) - ${safeToFixed(item.total)}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                            {order.notes && <div className="order-notes"><strong>Notas:</strong> {order.notes}</div>}
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+
     // Componente del tablero (Dashboard).
     const Dashboard = () => {
         // Obtener productos e insumos con stock bajo según su umbral personalizado
@@ -969,140 +1089,171 @@ const App = () => {
     // Componente de la interfaz de gestión de usuarios (solo para Gerente).
     const UserManagement = () => {
         const [showAddUser, setShowAddUser] = useState(false);
+        const [editingUser, setEditingUser] = useState(null); // Usuario en edición
+        const [newPassword, setNewPassword] = useState(''); // Nuevo estado para la contraseña
         const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Cajero', password: '' });
         const [message, setMessage] = useState('');
 
         const handleAddUser = async (e) => {
             e.preventDefault();
-            
-            // Validar campos obligatorios
             if (!newUser.name || !newUser.email || !newUser.password) {
                 setMessage('Error: Todos los campos son obligatorios.');
                 return;
             }
-            
-            // Validar formato de contraseña
             const passwordError = validatePassword(newUser.password);
             if (passwordError) {
                 setMessage(`Error de contraseña: ${passwordError}`);
                 return;
             }
-            
-            // Validar si el usuario ya existe por email en la lista local
             const userExists = users.some(u => u.email === newUser.email);
             if (userExists) {
                 setMessage('Error: El email ya está registrado.');
                 return;
             }
-
             try {
-                // Crear usuario en el backend
-                const response = await api.post('/users/create/', {
+                await api.post('/users/', { 
                     username: newUser.name,
                     email: newUser.email,
                     password: newUser.password,
-                    role_name: newUser.role
+                    role: newUser.role 
                 });
-
-                if (response.data) {
-                    // Recargar usuarios desde el backend para obtener datos actualizados
-                    await loadUsersFromBackend();
-                    
-                    // Limpiar formulario
-                    setNewUser({ name: '', email: '', role: 'Cajero', password: '' });
-                    setShowAddUser(false);
-                    setMessage('✅ Usuario creado exitosamente en el sistema.');
-                    
-                    console.log('Usuario creado exitosamente:', response.data);
-                }
+                await loadUsersFromBackend();
+                setNewUser({ name: '', email: '', role: 'Cajero', password: '' });
+                setShowAddUser(false);
+                setMessage('✅ Usuario creado exitosamente.');
             } catch (error) {
-                console.error('Error creando usuario:', error);
-                if (error.response && error.response.status === 400) {
-                    setMessage('Error: El usuario ya existe en el sistema.');
-                } else {
-                    setMessage('Error: No se pudo crear el usuario. Revisa la conexión.');
-                }
+                setMessage(error.response?.data?.email?.[0] || 'Error: No se pudo crear el usuario.');
             }
         };
 
-    const handleDeleteUser = async (userId) => {
-            // Regla de negocio: El gerente no puede eliminarse a sí mismo.
-            const userToDelete = users.find(u => u.id === userId);
-            if (!userToDelete) {
-                setMessage('Usuario no encontrado.');
-                return;
-            }
+        const handleUpdateUser = async (e) => {
+            e.preventDefault();
+            if (!editingUser) return;
 
-            // Regla de negocio: no permitir eliminar a un Gerente desde la UI
-            if (userToDelete.role === 'Gerente') {
-                setMessage('No puedes eliminar la cuenta de un Gerente.');
-                return;
-            }
-
-            if (!window.confirm(`¿Estás seguro de que quieres eliminar a ${userToDelete.name}? Esta acción es permanente.`)) {
+            // Validar contraseña si se ha ingresado una nueva
+            if (newPassword && validatePassword(newPassword)) {
+                setMessage(`Error de contraseña: ${validatePassword(newPassword)}`);
                 return;
             }
 
             try {
-                // Llamada al backend para eliminar el usuario (ruta definida en backend: /api/users/<pk>/delete/)
-                await api.delete(`/users/${userId}/delete/`);
+                const payload = {
+                    username: editingUser.name,
+                    email: editingUser.email,
+                    // Enviar role_id si es posible (el serializer espera role_id para update)
+                    // Buscamos el id del rol seleccionado en `roles` (roles puede ser array de objetos o strings)
+                    // Si no encontramos id, como fallback enviamos el nombre en `role_name` para compatibilidad.
+                };
 
-                // Recargar usuarios desde el backend para mantener consistencia cross-browser
-                await loadUsersFromBackend();
-
-                setMessage('✅ Usuario eliminado exitosamente en el servidor.');
-            } catch (error) {
-                console.error('Error eliminando usuario:', error);
-                if (error.response && error.response.status === 403) {
-                    setMessage('No tienes permisos para eliminar este usuario.');
-                } else if (error.response && error.response.status === 404) {
-                    setMessage('Usuario no encontrado en el servidor.');
-                } else {
-                    setMessage('Error eliminando usuario. Revisa la conexión o los permisos.');
+                // Añadir contraseña al payload solo si se ha ingresado una nueva
+                if (newPassword) {
+                    payload.password = newPassword;
                 }
+
+                // Resolver role -> role_id
+                try {
+                    const roleObj = (roles || []).find(r => (typeof r === 'string' ? r === editingUser.role : (r.name === editingUser.role)));
+                    if (roleObj) {
+                        // Si roleObj es string no tiene id; si es objeto, usar id
+                        if (typeof roleObj === 'object' && roleObj.id) {
+                            payload.role_id = roleObj.id;
+                        } else if (typeof roleObj === 'string') {
+                            // fallback: enviar role_name para que el backend lo maneje si lo soporta
+                            payload.role_name = roleObj;
+                        }
+                    } else if (editingUser.role) {
+                        // No encontramos el rol en la lista; enviar role_name como fallback
+                        payload.role_name = editingUser.role;
+                    }
+
+                    await api.patch(`/users/${editingUser.id}/`, payload);
+                } catch (err) {
+                    console.error('Error resolviendo role_id antes de actualizar usuario:', err);
+                    await api.patch(`/users/${editingUser.id}/`, payload);
+                }
+                await loadUsersFromBackend();
+                setEditingUser(null);
+                setNewPassword(''); // Limpiar el campo de contraseña
+                setMessage('✅ Datos del usuario actualizados.');
+            } catch (error) {
+                setMessage('Error: No se pudo actualizar el usuario.');
+                console.error("Update user error:", error.response?.data || error.message);
             }
         };
+
+        const handleDeleteUser = async (userId) => {
+            const userToDelete = users.find(u => u.id === userId);
+            if (!userToDelete || (userToDelete.role === 'Gerente') || !window.confirm(`¿Seguro que quieres eliminar a ${userToDelete.name}?`)) return;
+            try {
+                await api.delete(`/users/${userId}/`);
+                await loadUsersFromBackend();
+                setMessage('✅ Usuario eliminado.');
+            } catch (error) {
+                setMessage('Error eliminando usuario.');
+            }
+        };
+
+        const startEditing = (user) => {
+            setEditingUser({ ...user });
+            setNewPassword('');
+            setShowAddUser(false);
+        };
+
+        const editUserForm = () => (
+            <form className="form-container" onSubmit={handleUpdateUser}>
+                <h3>Editando a {editingUser.name}</h3>
+                <input type="text" value={editingUser.name} onChange={e => setEditingUser({ ...editingUser, name: e.target.value })} placeholder="Nombre Completo" required />
+                <input type="email" value={editingUser.email} onChange={e => setEditingUser({ ...editingUser, email: e.target.value })} placeholder="Email" required />
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Nueva Contraseña (dejar en blanco para no cambiar)" />
+                <select
+                    value={editingUser.role || ''}
+                    onChange={e => setEditingUser({ ...editingUser, role: e.target.value })}
+                >
+                    <option value="" disabled>Seleccionar rol...</option>
+                    {(() => {
+                        const parsed = (roles || []).map(r => (typeof r === 'string' ? r : (r.name || r)));
+                        if (editingUser && editingUser.role && !parsed.includes(editingUser.role)) {
+                            parsed.unshift(editingUser.role);
+                        }
+                        return parsed.map(name => <option key={name} value={name}>{name}</option>);
+                    })()}
+                </select>
+                <div className="button-group">
+                    <button type="submit" className="action-button primary">Actualizar Datos</button>
+                    <button type="button" className="action-button secondary" onClick={() => { setEditingUser(null); setNewPassword(''); }}>Cancelar</button>
+                </div>
+            </form>
+        );
+
+        const addUserForm = () => (
+            <form className="form-container" onSubmit={handleAddUser}>
+                <h3>Registrar Usuario</h3>
+                <input type="text" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} placeholder="Nombre Completo" required />
+                <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="Email" required />
+                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Contraseña" required />
+                <select
+                    value={newUser.role}
+                    onChange={e => setNewUser({ ...newUser, role: e.target.value })}
+                >
+                    {(() => {
+                        const parsed = (roles || []).map(r => (typeof r === 'string' ? r : (r.name || r)));
+                        return parsed.filter(n => n !== 'Gerente').map(name => (
+                            <option key={name} value={name}>{name}</option>
+                        ));
+                    })()}
+                </select>
+                <div className="button-group">
+                    <button type="submit" className="action-button primary">Crear Usuario</button>
+                    <button type="button" className="action-button secondary" onClick={() => setShowAddUser(false)}>Cancelar</button>
+                </div>
+            </form>
+        );
 
         return (
             <div className="management-container">
                 <h2>Gestión de Usuarios</h2>
                 {message && <p className="message">{message}</p>}
-                {!showAddUser ? (
-                    <button className="main-button" onClick={() => setShowAddUser(true)}>Registrar Nuevo Usuario</button>
-                ) : (
-                    <form className="form-container" onSubmit={handleAddUser}>
-                        <h3>Registrar Usuario con Roles</h3>
-                        <input 
-                            type="text" 
-                            value={newUser.name} 
-                            onChange={e => setNewUser({ ...newUser, name: e.target.value })} 
-                            placeholder="Nombre Completo" 
-                            required 
-                        />
-                        <input 
-                            type="email" 
-                            value={newUser.email} 
-                            onChange={e => setNewUser({ ...newUser, email: e.target.value })} 
-                            placeholder="Email" 
-                            required 
-                        />
-                        <input 
-                            type="password" 
-                            value={newUser.password} 
-                            onChange={e => setNewUser({ ...newUser, password: e.target.value })} 
-                            placeholder="Contraseña (mín. 8 caracteres, mayúscula, minúscula, número)" 
-                            required 
-                        />
-                        <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}>
-                            {roles.filter(r => r !== 'Gerente').map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                        <div className="button-group">
-                            <button type="submit" className="action-button primary">Crear Usuario</button>
-                            <button type="button" className="action-button secondary" onClick={() => setShowAddUser(false)}>Cancelar</button>
-                        </div>
-                    </form>
-                )}
-
+                {editingUser ? editUserForm() : (showAddUser ? addUserForm() : <button className="main-button" onClick={() => setShowAddUser(true)}>Registrar Nuevo Usuario</button>)}
                 <h3>Usuarios Existentes ({users.length})</h3>
                 <ul className="list-container">
                     {users.map(user => (
@@ -1111,7 +1262,10 @@ const App = () => {
                                 <div><strong>{user.name}</strong> ({user.role})</div>
                                 <div className="user-email">{user.email}</div>
                             </div>
-                            <button onClick={() => handleDeleteUser(user.id)} className="delete-button">Eliminar</button>
+                            <div className="button-group">
+                                <button onClick={() => startEditing(user)} className="edit-button">Editar</button>
+                                <button onClick={() => handleDeleteUser(user.id)} className="delete-button">Eliminar</button>
+                            </div>
                         </li>
                     ))}
                 </ul>
@@ -1120,46 +1274,74 @@ const App = () => {
     };
 
     // Componente de la interfaz de consulta y registro de inventario.
+    // Usa react-select para búsqueda y un modal de confirmación para salidas excepcionales.
     const InventoryView = () => {
         const [showChangeForm, setShowChangeForm] = useState(false);
-        const [change, setChange] = useState({ product: '', quantity: '', reason: '' });
+        // productId en vez de nombre, quantity como string hasta validar, reason texto
+        const [change, setChange] = useState({ productId: '', quantity: '', reason: '' });
+        const [confirmOpen, setConfirmOpen] = useState(false);
 
-        const handleRegisterChange = async (e) => {
-            e.preventDefault();
-            const productName = change.product;
-            const quantity = parseInt(change.quantity);
-            const reason = change.reason;
-
-            const product = inventory.find(p => p.name === productName);
-            if (!product) {
-                alert('Producto no encontrado.');
+        const handleRegisterChange = (e) => {
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            // Validaciones previas: producto seleccionado y cantidad válida
+            const qty = parseInt(change.quantity, 10);
+            if (!change.productId) {
+                alert('Debes seleccionar un producto.');
+                return;
+            }
+            if (isNaN(qty) || qty <= 0) {
+                alert('La cantidad debe ser un número positivo (ej: 3). El sistema lo tomará como una salida excepcional.');
                 return;
             }
 
-            if (quantity < 0 && Math.abs(quantity) > product.stock) {
+            // Abrir modal de confirmación en vez de enviar directamente
+            setConfirmOpen(true);
+        };
+
+        const doRegisterChange = async () => {
+            // Ejecutar la acción tras confirmación
+            const product = inventory.find(p => p.id === change.productId || String(p.id) === String(change.productId));
+            // Tomar cantidad como valor absoluto (si el usuario escribió -3 o 3)
+            const quantity = Math.abs(parseInt(change.quantity, 10));
+            const reason = change.reason;
+            if (!product) {
+                alert('Producto no encontrado.');
+                setConfirmOpen(false);
+                return;
+            }
+
+            if (isNaN(quantity) || quantity <= 0) {
+                alert('La cantidad debe ser un número mayor a cero.');
+                setConfirmOpen(false);
+                return;
+            }
+
+            if (quantity > product.stock) {
                 alert('No hay suficiente stock para esta salida.');
+                setConfirmOpen(false);
                 return;
             }
 
             const payload = {
-                type: quantity >= 0 ? 'Entrada' : 'Salida',
+                type: 'Salida',
                 product: product.id,
-                quantity: Math.abs(quantity),
+                quantity: quantity,
                 reason,
             };
 
             try {
                 await api.post('/inventory-changes/', payload);
-                
                 // Recargar productos desde backend para mantener sincronización con PostgreSQL
                 await loadProducts();
-                
-                setChange({ product: '', quantity: '', reason: '' });
+
+                setChange({ productId: '', quantity: '', reason: '' });
                 setShowChangeForm(false);
+                setConfirmOpen(false);
                 console.log('✅ Cambio de inventario registrado y datos recargados desde PostgreSQL');
             } catch (err) {
                 console.error('Error registrando cambio de inventario:', err);
                 alert('No se pudo registrar el cambio de inventario.');
+                setConfirmOpen(false);
             }
         };
 
@@ -1174,18 +1356,10 @@ const App = () => {
                         {inventory
                             .filter(item => item.type === 'Producto')
                             .map(item => {
-                                // Encontrar el producto correspondiente para obtener su umbral personalizado
-                                const productDetails = products.find(p => p.name === item.name);
-                                const threshold = productDetails ? productDetails.lowStockThreshold || 10 : 10;
-                                const isLowStock = item.stock <= threshold;
-                                
                                 return (
                                     <li key={item.id} className="list-item">
-                                        <span>{item.name}</span>
-                                        <span>Stock: {item.stock}</span>
-                                        <span className={isLowStock ? "stock-alert" : ""}>
-                                            {isLowStock ? `⚠️ Stock Bajo (Umbral: ${threshold})` : ""}
-                                        </span>
+                                        <span className="inventory-name">{item.name}</span>
+                                        <span className="inventory-stock">{item.stock} unidades</span>
                                     </li>
                                 );
                             })}
@@ -1196,42 +1370,66 @@ const App = () => {
                         {inventory
                             .filter(item => item.type === 'Insumo')
                             .map(item => {
-                                // Encontrar el insumo correspondiente para obtener su umbral personalizado
-                                const productDetails = products.find(p => p.name === item.name);
-                                const threshold = productDetails ? productDetails.lowStockThreshold || 10 : 10;
-                                const isLowStock = item.stock <= threshold;
-                                
                                 return (
                                     <li key={item.id} className="list-item">
-                                        <span>{item.name}</span>
-                                        <span>Stock: {item.stock}</span>
-                                        <span className={isLowStock ? "stock-alert" : ""}>
-                                            {isLowStock ? `⚠️ Stock Bajo (Umbral: ${threshold})` : ""}
-                                        </span>
+                                        <span className="inventory-name">{item.name}</span>
+                                        <span className="inventory-stock">{item.stock} kilogramos</span>
                                     </li>
                                 );
                             })}
                     </ul>
                 </div>
                 <hr />
-                {['Gerente', 'Encargado', 'Panadero', 'Cajero'].includes(userRole) && (
+                {userRole === 'Gerente' && (
                     <div className="inventory-change-section">
                         <h3>Registrar Cambios en el Inventario</h3>
                         {!showChangeForm ? (
-                            <button className="main-button" onClick={() => setShowChangeForm(true)}>Registrar Entrada/Salida</button>
+                            <button className="main-button" onClick={() => setShowChangeForm(true)}>Registrar Salida (Excepcional)</button>
                         ) : (
+                            <>
                             <form className="form-container" onSubmit={handleRegisterChange}>
-                                <select value={change.product} onChange={e => setChange({ ...change, product: e.target.value })} required>
-                                    <option value="">Selecciona un producto/insumo</option>
-                                    {inventory.map(item => <option key={item.id} value={item.name}>{item.name}</option>)}
-                                </select>
-                                <input type="number" value={change.quantity} onChange={e => setChange({ ...change, quantity: parseInt(e.target.value) })} placeholder="Cantidad (Positivo para entrada, negativo para salida)" required />
-                                <input type="text" value={change.reason} onChange={e => setChange({ ...change, reason: e.target.value })} placeholder="Motivo (ej: Desperdicio, Reposición)" required />
+                                {/* select buscable local (sustituye react-select) */}
+                                {/* Selector con búsqueda usando react-select */}
+                                <Select
+                                    className="searchable-select"
+                                    classNamePrefix="searchable"
+                                    isClearable
+                                    placeholder="Buscar producto/insumo..."
+                                    // map inventory a opciones con value como string para consistencia
+                                    options={inventory.map(it => ({ value: String(it.id), label: `${it.name} — Stock: ${it.stock}` }))}
+                                    // value debe ser la opción completa o null
+                                    value={(() => {
+                                        const val = change.productId || '';
+                                        if (!val) return null;
+                                        return inventory
+                                            .map(it => ({ value: String(it.id), label: `${it.name} — Stock: ${it.stock}` }))
+                                            .find(opt => opt.value === String(val)) || null;
+                                    })()}
+                                    onChange={(selected) => setChange({ ...change, productId: selected ? selected.value : '' })}
+                                />
+                                <input type="number" value={change.quantity} onChange={e => setChange({ ...change, quantity: e.target.value })} placeholder="Cantidad (ej: 3) - será tomada como salida" required />
+                                <input type="text" value={change.reason} onChange={e => setChange({ ...change, reason: e.target.value })} placeholder="Motivo (ej: Desperdicio, Contaminación)" required />
                                 <div className="button-group">
-                                    <button type="submit" className="action-button primary">Guardar Cambio</button>
-                                    <button type="button" className="action-button secondary" onClick={() => setShowChangeForm(false)}>Cancelar</button>
+                                    <button type="submit" className="action-button primary" disabled={!change.productId || isNaN(parseInt(change.quantity, 10)) || parseInt(change.quantity, 10) <= 0}>Guardar Salida</button>
+                                    <button type="button" className="action-button secondary" onClick={() => { setShowChangeForm(false); setChange({ productId: '', quantity: '', reason: '' }); }}>Cancelar</button>
                                 </div>
                             </form>
+                            {/* Confirm modal */}
+                            {confirmOpen && (
+                                <div className="modal-overlay">
+                                    <div className="modal-content">
+                                        <h3>Confirmar salida excepcional</h3>
+                                        <p>
+                                            ¿Confirmás aplicar la salida de <strong>-{Math.abs(change.quantity || 0)}</strong> del producto <strong>{(inventory.find(it => String(it.id) === String(change.productId)) || {}).name || '---'}</strong>?
+                                        </p>
+                                        <div className="modal-actions">
+                                            <button className="action-button primary" onClick={doRegisterChange}>Confirmar</button>
+                                            <button className="action-button secondary" onClick={() => setConfirmOpen(false)}>Cancelar</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                            </>
                         )}
                     </div>
                 )}
@@ -1239,102 +1437,130 @@ const App = () => {
         );
     };
 
-    // Componente de la interfaz combinada de ventas y caja.
     const SalesView = () => {
-        const [selectedProducts, setSelectedProducts] = useState({});
+        const [cartItems, setCartItems] = useState([]);
         const [total, setTotal] = useState(0);
         const [showMovementForm, setShowMovementForm] = useState(false);
         const [newMovement, setNewMovement] = useState({ type: 'Entrada', amount: '', description: '' });
         const [message, setMessage] = useState('');
         const [activeTab, setActiveTab] = useState('ventas'); // 'ventas' o 'caja'
+        const [selectedProduct, setSelectedProduct] = useState(null);
+        const [quantity, setQuantity] = useState(1);
+        const [paymentMethod, setPaymentMethod] = useState('');
 
-        // Función para obtener el precio de un producto desde la lista de products
-        const getProductPrice = (productName) => {
-            const product = products.find(p => p.name === productName);
-            return product ? product.price : 0;
-        };
+        const availableProducts = products.filter(product => 
+            product.category === 'Producto' && product.stock > 0
+        );
 
-        // Función para obtener el stock de un producto
-        const getProductStock = (productName) => {
-            const product = products.find(p => p.name === productName);
-            return product ? product.stock : 0;
-        };
+        const productOptions = availableProducts.map(p => ({ value: p.id, label: `${p.name} (${p.price}) - Stock: ${p.stock}` }));
 
-        // Manejar la selección de productos.
-        const handleProductSelect = (productName) => {
-            const newSelectedProducts = { ...selectedProducts };
-            if (newSelectedProducts[productName]) {
-                newSelectedProducts[productName] += 1;
-            } else {
-                newSelectedProducts[productName] = 1;
-            }
-            setSelectedProducts(newSelectedProducts);
-            calculateTotal(newSelectedProducts);
-        };
-
-        // Calcular el total de la venta.
-        const calculateTotal = (selectedProductsState) => {
-            let newTotal = 0;
-            for (const name in selectedProductsState) {
-                newTotal += getProductPrice(name) * selectedProductsState[name];
-            }
-            setTotal(newTotal);
-        };
-
-        // Registrar la venta.
-        const handleRegisterSale = async () => {
-            // Verificar stock antes de procesar la venta
-            const canSell = Object.keys(selectedProducts).every(name => {
-                const productStock = getProductStock(name);
-                return productStock >= selectedProducts[name];
-            });
-
-            if (!canSell) {
-                alert('No hay suficiente stock para completar la venta.');
+        const addToCart = () => {
+            if (!selectedProduct) {
+                setMessage('Por favor, selecciona un producto.');
                 return;
             }
 
-            const description = `Venta: ${Object.entries(selectedProducts).map(([name, qty]) => `${name} x${qty}`).join(', ')}`;
+            const productToAdd = products.find(p => p.id === selectedProduct.value);
+            if (!productToAdd) {
+                setMessage('Producto no encontrado.');
+                return;
+            }
 
-            // Preparar los items de la venta para enviar al backend
-            const saleItems = Object.entries(selectedProducts).map(([productName, quantity]) => {
-                const product = products.find(p => p.name === productName);
-                return {
-                    product_id: product.id,
-                    product_name: productName, // Para referencia
-                    quantity: quantity,
-                    price: product.price
-                };
+            if (quantity > productToAdd.stock) {
+                setMessage('No hay suficiente stock para la cantidad solicitada.');
+                return;
+            }
+
+            setCartItems(prevItems => {
+                const existingItem = prevItems.find(item => item.product.id === productToAdd.id);
+                if (existingItem) {
+                    const newQuantity = existingItem.quantity + quantity;
+                    if (newQuantity > productToAdd.stock) {
+                        setMessage('La cantidad total en el carrito supera el stock disponible.');
+                        return prevItems;
+                    }
+                    return prevItems.map(item =>
+                        item.product.id === productToAdd.id
+                            ? { ...item, quantity: newQuantity }
+                            : item
+                    );
+                } else {
+                    return [...prevItems, { product: productToAdd, quantity: quantity }];
+                }
             });
+            setSelectedProduct(null);
+            setQuantity(1);
+        };
 
-            // Persistir en backend: venta y movimiento de caja
+        const updateQuantity = (productId, newQuantity) => {
+            const product = products.find(p => p.id === productId);
+            if (newQuantity > product.stock) {
+                setMessage(`No puedes vender más de ${product.stock} unidades de ${product.name}.`);
+                return;
+            }
+
+            setCartItems(prevItems =>
+                prevItems.map(item =>
+                    item.product.id === productId
+                        ? { ...item, quantity: newQuantity }
+                        : item
+                )
+            );
+        };
+
+        const removeFromCart = (productId) => {
+            setCartItems(prevItems => prevItems.filter(item => item.product.id !== productId));
+        };
+
+        useEffect(() => {
+            const newTotal = cartItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+            setTotal(newTotal);
+        }, [cartItems]);
+
+        const handleRegisterSale = async () => {
+            if (cartItems.length === 0) {
+                setMessage('El carrito está vacío.');
+                return;
+            }
+
+            if (!paymentMethod) {
+                setMessage('Por favor, selecciona un método de pago.');
+                return;
+            }
+
+            const description = `Venta: ${cartItems.map(item => `${item.product.name} x${item.quantity}`).join(', ')}`;
+
+            const saleItems = cartItems.map(item => ({
+                product_id: item.product.id,
+                product_name: item.product.name,
+                quantity: item.quantity,
+                price: item.product.price
+            }));
+
             try {
                 await api.post('/sales/', {
                     total_amount: total,
-                    payment_method: 'Efectivo',
-                    items: saleItems // ← Enviar los productos vendidos
+                    payment_method: paymentMethod,
+                    items: saleItems
                 });
                 await api.post('/cash-movements/', {
                     type: 'Entrada',
                     amount: total,
                     description,
+                    payment_method: paymentMethod
                 });
                 
-                // Recargar TODOS los datos desde PostgreSQL para mantener sincronización
-                await loadProducts(); // Actualiza stock después de la venta
-                await loadCashMovements(); // Actualiza movimientos de caja
+                await loadProducts();
+                await loadCashMovements();
                 
-                setSelectedProducts({});
-                setTotal(0);
+                setCartItems([]);
                 setMessage('✅ Venta registrada con éxito, stock actualizado y entrada de caja registrada.');
-                console.log('🔄 Datos recargados desde PostgreSQL después de la venta');
             } catch (err) {
                 console.error('Error registrando venta:', err);
                 setMessage('❌ No se pudo registrar la venta en el servidor.');
             }
         };
 
-        // Registrar movimiento de caja manual
         const handleRegisterMovement = async (e) => {
             e.preventDefault();
             const amount = parseFloat(newMovement.amount);
@@ -1354,41 +1580,23 @@ const App = () => {
             try {
                 await api.post('/cash-movements/', payload);
                 
-                // Recargar movimientos de caja desde PostgreSQL para mantener sincronización
                 await loadCashMovements();
                 
                 setNewMovement({ type: 'Entrada', amount: '', description: '' });
                 setShowMovementForm(false);
                 setMessage('✅ Movimiento registrado exitosamente.');
-                console.log('🔄 Movimientos de caja recargados desde PostgreSQL');
             } catch (err) {
                 console.error('Error registrando movimiento de caja:', err);
                 setMessage('❌ No se pudo registrar el movimiento de caja.');
             }
         };
-
-        // Obtener productos disponibles para la venta (solo productos con stock > 0 y categoría "Producto")
-        const availableProducts = products.filter(product => 
-            product.category === 'Producto' && product.stock > 0
-        );
         
-        // Calcular saldo con debug detallado
-        console.log('🔍 Calculando saldo de caja...');
-        console.log('📊 Total de movimientos disponibles:', cashMovements.length);
-        
-        const currentBalance = cashMovements.reduce((sum, m, index) => {
-            const amount = m.type === 'Entrada' ? m.amount : -m.amount;
-            console.log(`[${index}] ${m.type}: $${m.amount} | Acumulado: $${sum + amount}`);
-            return sum + amount;
-        }, 0);
-        
-        console.log(`💰 SALDO FINAL CALCULADO: $${currentBalance}`);
+        const currentBalance = cashMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : -m.amount), 0);
 
         return (
             <div className="sales-container">
                 <h2>Registrar Venta</h2>
                 
-                {/* Tabs de navegación */}
                 <div className="tab-navigation">
                     <button 
                         className={`tab-button ${activeTab === 'ventas' ? 'active' : ''}`}
@@ -1406,46 +1614,67 @@ const App = () => {
 
                 {message && <p className="message">{message}</p>}
 
-                {/* Tab de Ventas */}
                 {activeTab === 'ventas' && (
                     <div className="tab-content">
                         <div className="product-selection">
                             <h3>Selecciona Productos</h3>
-                            {availableProducts.length === 0 ? (
-                                <p>No hay productos disponibles para venta (productos con stock mayor a 0)</p>
-                            ) : (
-                                availableProducts.map(product => (
-                                    <button 
-                                        key={product.id} 
-                                        className="product-button" 
-                                        onClick={() => handleProductSelect(product.name)}
-                                        disabled={product.stock === 0}
-                                    >
-                                        {product.name} (${product.price}) - Stock: {product.stock}
-                                    </button>
-                                ))
-                            )}
+                            <Select
+                                options={productOptions}
+                                value={selectedProduct}
+                                onChange={setSelectedProduct}
+                                placeholder="Buscar producto..."
+                                isClearable
+                                className="searchable-select"
+                            />
+                            <input
+                                type="number"
+                                value={quantity}
+                                onChange={(e) => setQuantity(parseInt(e.target.value, 10))}
+                                min="1"
+                            />
+                            <button onClick={addToCart} className="action-button primary">Agregar al Carrito</button>
                         </div>
                         <div className="cart-summary">
                             <h3>Resumen de Venta</h3>
                             <ul className="list-container">
-                                {Object.entries(selectedProducts).map(([name, quantity]) => (
-                                    <li key={name} className="list-item">
-                                        {name} x {quantity} = ${quantity * getProductPrice(name)}
+                                {cartItems.map(item => (
+                                    <li key={item.product.id} className="list-item">
+                                        <span>{item.product.name}</span>
+                                        <input
+                                            type="number"
+                                            value={item.quantity}
+                                            onChange={(e) => updateQuantity(item.product.id, parseInt(e.target.value, 10))}
+                                            min="1"
+                                        />
+                                        <span>${(item.product.price * item.quantity).toFixed(2)}</span>
+                                        <button onClick={() => removeFromCart(item.product.id)} className="delete-button">Quitar</button>
                                     </li>
                                 ))}
                             </ul>
-                            <div className="total-display">
-                                <strong>Total: ${total}</strong>
+                            <div className="form-group">
+                                <label>Método de Pago:</label>
+                                <select 
+                                    value={paymentMethod} 
+                                    onChange={e => setPaymentMethod(e.target.value)} 
+                                    required
+                                >
+                                    <option value="">Seleccionar método de pago</option>
+                                    <option value="efectivo">Efectivo</option>
+                                    <option value="debito">Débito</option>
+                                    <option value="credito">Crédito</option>
+                                    <option value="transferencia">Transferencia</option>
+                                </select>
                             </div>
-                            <button className="checkout-button" onClick={handleRegisterSale} disabled={total === 0}>
+                            <div className="total-display">
+                                <strong>Total: ${total.toFixed(2)}</strong>
+                            </div>
+                            <button className="checkout-button" onClick={handleRegisterSale} disabled={cartItems.length === 0}>
                                 Confirmar Venta
                             </button>
                         </div>
                     </div>
                 )}
 
-                {/* Tab de Caja */}
                 {activeTab === 'caja' && (
                     <div className="tab-content">
                         <div className="balance-display">
@@ -1479,7 +1708,7 @@ const App = () => {
                         <ul className="list-container">
                             {cashMovements.map(movement => (
                                 <li key={movement.id} className="list-item">
-                                    <span>{movement.date} - {movement.description}</span>
+                                    <span>{movement.date} - {movement.description} {movement.payment_method && `(${movement.payment_method})`}</span>
                                     <span className={movement.type === 'Entrada' ? 'positive' : 'negative'}>
                                         {movement.type === 'Entrada' ? '+' : '-'} ${movement.amount}
                                     </span>
@@ -1506,7 +1735,7 @@ const App = () => {
 
             // Regla de negocio: Si es una salida, validar saldo.
             if (newMovement.type === 'Salida' && amount > currentBalance) {
-                setMessage('�� Saldo insuficiente para registrar esta salida.');
+                setMessage(' Saldo insuficiente para registrar esta salida.');
                 return;
             }
 
@@ -1593,7 +1822,7 @@ const App = () => {
                 }
                 
                 if (newProduct.stock < 0) {
-                    setMessage('�� Error: El stock no puede ser negativo.');
+                    setMessage(' Error: El stock no puede ser negativo.');
                     return;
                 }
                 
@@ -1746,9 +1975,12 @@ const App = () => {
             );
         };
 
+        
+
         // Componente de la interfaz de gestión de proveedores (solo para Gerente).
         const SupplierManagement = () => {
             const [showAddSupplier, setShowAddSupplier] = useState(false);
+            const [editingSupplier, setEditingSupplier] = useState(null); // Nuevo estado para edición
             const [newSupplier, setNewSupplier] = useState({ 
                 name: '', 
                 cuit: '', 
@@ -1758,102 +1990,150 @@ const App = () => {
             });
             const [message, setMessage] = useState('');
     
-    // Validar CUIT (11 dígitos)
-    const validateCUIT = (cuit) => /^\d{11}$/.test(cuit);
-    // Validar teléfono (mínimo 8 dígitos, solo números)
-    const validatePhone = (phone) => /^\d{8,}$/.test(phone);
+            const validateCUIT = (cuit) => /^\d{11}$/.test(cuit);
+            const validatePhone = (phone) => /^\d{8,}$/.test(phone);
 
-    // Agregar proveedor usando API
-    const handleAddSupplier = async (e) => {
-        e.preventDefault();
-        if (!newSupplier.name.trim()) {
-            setMessage('🚫 Error: El nombre es obligatorio.');
-            return;
-        }
-        if (!validateCUIT(newSupplier.cuit)) {
-            setMessage('🚫 Error: El CUIT debe ser un número de 11 dígitos.');
-            return;
-        }
-        if (!validatePhone(newSupplier.phone)) {
-            setMessage('🚫 Error: El teléfono debe contener solo números, con un mínimo de 8 dígitos.');
-            return;
-        }
-        try {
-            const token = getInMemoryToken();
-            const response = await fetch('/api/suppliers/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(newSupplier)
-            });
-            if (!response.ok) throw new Error('Error al agregar proveedor');
-            const created = await response.json();
-            setSuppliers(prev => [...prev, created]);
-            setMessage('Proveedor agregado correctamente.');
-            setShowAddSupplier(false);
-            setNewSupplier({ name: '', cuit: '', address: '', phone: '', products: '' });
-        } catch (error) {
-            setMessage('Error al agregar proveedor.');
-        }
-    };
+            const fetchSuppliers = async () => {
+                try {
+                    const response = await api.get('/suppliers/');
+                    setSuppliers(response.data);
+                } catch (error) {
+                    console.error('Error cargando proveedores:', error);
+                    setMessage('Error al cargar la lista de proveedores.');
+                }
+            };
 
-    // Eliminar proveedor usando API
-    const handleDeleteSupplier = async (supplierId) => {
-        try {
-            const token = getInMemoryToken();
-            const response = await fetch(`/api/suppliers/${supplierId}/`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (!response.ok) throw new Error('Error al eliminar proveedor');
-            setSuppliers(prev => prev.filter(s => s.id !== supplierId));
-            setMessage('Proveedor eliminado correctamente.');
-        } catch (error) {
-            setMessage('Error al eliminar proveedor.');
-        }
-    };
+            const handleAddSupplier = async (e) => {
+                e.preventDefault();
+                if (!newSupplier.name.trim()) {
+                    setMessage('🚫 Error: El nombre es obligatorio.');
+                    return;
+                }
+                if (!validateCUIT(newSupplier.cuit)) {
+                    setMessage('🚫 Error: El CUIT debe ser un número de 11 dígitos.');
+                    return;
+                }
+                if (!validatePhone(newSupplier.phone)) {
+                    setMessage('🚫 Error: El teléfono debe contener solo números, con un mínimo de 8 dígitos.');
+                    return;
+                }
+                try {
+                    await api.post('/suppliers/', newSupplier);
+                    await fetchSuppliers(); // Recargar lista
+                    setMessage('Proveedor agregado correctamente.');
+                    setShowAddSupplier(false);
+                    setNewSupplier({ name: '', cuit: '', address: '', phone: '', products: '' });
+                } catch (error) {
+                    setMessage('Error al agregar proveedor.');
+                }
+            };
 
-    return (
-        <div className="management-container">
-            <h2>Gestión de Proveedores</h2>
-            {message && <p className="message">{message}</p>}
-            {!showAddSupplier ? (
-                <button className="main-button" onClick={() => setShowAddSupplier(true)}>Registrar Nuevo Proveedor</button>
-            ) : (
-                <form className="form-container" onSubmit={handleAddSupplier}>
-                    <h3>Registrar Proveedor</h3>
-                    <input type="text" value={newSupplier.name} onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} placeholder="Nombre del Proveedor" required />
-                    <input type="text" value={newSupplier.cuit} onChange={e => setNewSupplier({ ...newSupplier, cuit: e.target.value })} placeholder="CUIT (11 dígitos)" required />
-                    <input type="text" value={newSupplier.address} onChange={e => setNewSupplier({ ...newSupplier, address: e.target.value })} placeholder="Dirección" required />
-                    <input type="text" value={newSupplier.phone} onChange={e => setNewSupplier({ ...newSupplier, phone: e.target.value })} placeholder="Teléfono" required />
-                    <input type="text" value={newSupplier.products} onChange={e => setNewSupplier({ ...newSupplier, products: e.target.value })} placeholder="Productos que provee" />
-                    <div className="button-group">
-                        <button type="submit" className="action-button primary">Registrar</button>
-                        <button type="button" className="action-button secondary" onClick={() => setShowAddSupplier(false)}>Cancelar</button>
-                    </div>
-                </form>
-            )}
-            <h3>Proveedores Registrados</h3>
-            <ul className="list-container">
-                {suppliers.map(supplier => (
-                    <li key={supplier.id} className="list-item">
-                        <div className="supplier-info-container">
-                            <div><strong>{supplier.name}</strong> (CUIT: {supplier.cuit})</div>
-                            <div>{supplier.address} | Tel: {supplier.phone}</div>
-                            <div>Productos: {supplier.products}</div>
-                        </div>
-                        <button onClick={() => handleDeleteSupplier(supplier.id)} className="delete-button">Eliminar</button>
-                    </li>
-                ))}
-            </ul>
-        </div>
-    );
-}
+            const handleUpdateSupplier = async (e) => {
+                e.preventDefault();
+                if (!editingSupplier) return;
+
+                if (!validateCUIT(editingSupplier.cuit)) {
+                    setMessage('🚫 Error: El CUIT debe ser un número de 11 dígitos.');
+                    return;
+                }
+                if (!validatePhone(editingSupplier.phone)) {
+                    setMessage('🚫 Error: El teléfono debe contener solo números, con un mínimo de 8 dígitos.');
+                    return;
+                }
+
+                try {
+                    await api.put(`/suppliers/${editingSupplier.id}/`, editingSupplier);
+                    await fetchSuppliers(); // Recargar lista
+                    setEditingSupplier(null);
+                    setMessage('✅ Proveedor actualizado exitosamente.');
+                } catch (error) {
+                    console.error('Error actualizando proveedor:', error.response?.data || error.message);
+                    setMessage('Error al actualizar el proveedor.');
+                }
+            };
+
+            const handleDeleteSupplier = async (supplierId) => {
+                if (!window.confirm('¿Estás seguro de que quieres eliminar este proveedor?')) return;
+                try {
+                    await api.delete(`/suppliers/${supplierId}/`);
+                    await fetchSuppliers(); // Recargar lista
+                    setMessage('Proveedor eliminado correctamente.');
+                } catch (error) {
+                    setMessage('Error al eliminar proveedor.');
+                }
+            };
+
+            const startEditing = (supplier) => {
+                setEditingSupplier({ ...supplier });
+                setShowAddSupplier(false);
+            };
+
+            const renderContent = () => {
+                if (editingSupplier) {
+                    return (
+                        <form className="form-container" onSubmit={handleUpdateSupplier}>
+                            <h3>Editando a {editingSupplier.name}</h3>
+                            <input type="text" value={editingSupplier.name} onChange={e => setEditingSupplier({ ...editingSupplier, name: e.target.value })} placeholder="Nombre del Proveedor" required />
+                            <input type="text" value={editingSupplier.cuit} onChange={e => setEditingSupplier({ ...editingSupplier, cuit: e.target.value })} placeholder="CUIT (11 dígitos)" required />
+                            <input type="text" value={editingSupplier.address} onChange={e => setEditingSupplier({ ...editingSupplier, address: e.target.value })} placeholder="Dirección" required />
+                            <input type="text" value={editingSupplier.phone} onChange={e => setEditingSupplier({ ...editingSupplier, phone: e.target.value })} placeholder="Teléfono" required />
+                            <input type="text" value={editingSupplier.products} onChange={e => setEditingSupplier({ ...editingSupplier, products: e.target.value })} placeholder="Productos que provee" />
+                            <div className="button-group">
+                                <button type="submit" className="action-button primary">Guardar Cambios</button>
+                                <button type="button" className="action-button secondary" onClick={() => setEditingSupplier(null)}>Cancelar</button>
+                            </div>
+                        </form>
+                    );
+                }
+
+                if (showAddSupplier) {
+                    return (
+                        <form className="form-container" onSubmit={handleAddSupplier}>
+                            <h3>Registrar Proveedor</h3>
+                            <input type="text" value={newSupplier.name} onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} placeholder="Nombre del Proveedor" required />
+                            <input type="text" value={newSupplier.cuit} onChange={e => setNewSupplier({ ...newSupplier, cuit: e.target.value })} placeholder="CUIT (11 dígitos)" required />
+                            <input type="text" value={newSupplier.address} onChange={e => setNewSupplier({ ...newSupplier, address: e.target.value })} placeholder="Dirección" required />
+                            <input type="text" value={newSupplier.phone} onChange={e => setNewSupplier({ ...newSupplier, phone: e.target.value })} placeholder="Teléfono" required />
+                            <input type="text" value={newSupplier.products} onChange={e => setNewSupplier({ ...newSupplier, products: e.target.value })} placeholder="Productos que provee" />
+                            <div className="button-group">
+                                <button type="submit" className="action-button primary">Registrar</button>
+                                <button type="button" className="action-button secondary" onClick={() => setShowAddSupplier(false)}>Cancelar</button>
+                            </div>
+                        </form>
+                    );
+                }
+
+                return <button className="main-button" onClick={() => setShowAddSupplier(true)}>Registrar Nuevo Proveedor</button>;
+            };
+
+            return (
+                <div className="management-container">
+                    <h2>Gestión de Proveedores</h2>
+                    {message && <p className="message">{message}</p>}
+                    {renderContent()}
+                    <h3>Proveedores Registrados</h3>
+                    <ul className="list-container">
+                        {suppliers.map(supplier => (
+                            <li key={supplier.id} className="list-item">
+                                <div className="supplier-info-container">
+                                    <div><strong>{supplier.name}</strong> (CUIT: {supplier.cuit})</div>
+                                    <div>{supplier.address} | Tel: {supplier.phone}</div>
+                                    <div>Productos: {supplier.products}</div>
+                                </div>
+                                <div className="button-group">
+                                    <button onClick={() => startEditing(supplier)} className="edit-button">Editar</button>
+                                    <button onClick={() => handleDeleteSupplier(supplier.id)} className="delete-button">Eliminar</button>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            );
+        }
     
         // Componente de la interfaz de gestión de compras (para Gerente, Encargado, Cajero, Panadero).
-        const PurchaseManagement = () => {
+        const PurchaseManagementInternal = () => {
+            const [activeTab, setActiveTab] = useState('compras'); // 'compras' o 'solicitudes'
             const [showAddPurchase, setShowAddPurchase] = useState(false);
             const [newPurchase, setNewPurchase] = useState({
                 date: '',
@@ -1915,20 +2195,13 @@ const App = () => {
             const handleAddPurchase = async (e) => {
                 e.preventDefault();
                 
-                // Validaciones según la especificación
-              /*  if (!validateDate(newPurchase.date)) {
-                    setMessage('🚫 Error: La fecha debe estar en formato dd/mm/aaaa.');
-                    return;
-                }*/
-                
                 if (!newPurchase.supplierId) {
                     setMessage('Debe seleccionar un proveedor.');
                     return;
                 }
                 
-                // Validar que todos los items tengan datos válidos
                 const invalidItems = newPurchase.items.some(item => 
-                    !item.productName.trim() || item.quantity <= 0 || item.unitPrice <= 0
+                    (!(item.productId || (item.productName && item.productName.trim()))) || item.quantity <= 0 || item.unitPrice <= 0
                 );
                 
                 if (invalidItems) {
@@ -1936,19 +2209,17 @@ const App = () => {
                     return;
                 }
                 
-                // Verificar que el proveedor existe
                 const selectedSupplier = suppliers.find(s => s.id === parseInt(newPurchase.supplierId));
                 if (!selectedSupplier) {
                     setMessage('🚫 Error: El proveedor seleccionado no existe.');
                     return;
                 }
                 
-                // Crear la nueva compra (persistida en el backend)
-                // Asegurarnos de calcular el total desde quantity * unitPrice para evitar campos stale
                 const itemsForPayload = newPurchase.items.map(item => {
                     const quantity = Number(item.quantity) || 0;
                     const unitPrice = Number(item.unitPrice) || 0;
                     return {
+                        product_id: item.productId ?? getProductIdByName(inventory, item.productName),
                         productName: item.productName,
                         quantity,
                         unitPrice,
@@ -1958,51 +2229,45 @@ const App = () => {
 
                 const totalAmount = itemsForPayload.reduce((sum, it) => sum + it.total, 0);
 
+                const status = userRole === 'Encargado' ? 'Pendiente' : 'Completada';
+
                 const purchasePayload = {
                     date: newPurchase.date,
                     supplier: selectedSupplier.name,
-                    supplier_id: parseInt(newPurchase.supplierId), // backend campo snake_case
+                    supplier_id: parseInt(newPurchase.supplierId),
                     items: itemsForPayload,
                     total_amount: totalAmount,
-                    status: 'Completada'
+                    status: status
                 };
 
                 try {
-                    // Actualizar inventario con los productos comprados (también en el backend)
-                    for (const item of newPurchase.items) {
-                        // Buscar si el producto ya existe en el backend
-                        const existingProduct = products.find(p => p.name === item.productName);
-                        
-                        if (existingProduct) {
-                            // Si existe, actualizar el stock en el backend
-                            const updatedProduct = {
-                                ...existingProduct,
-                                stock: existingProduct.stock + item.quantity
-                            };
-                            await api.put(`/products/${existingProduct.id}/`, updatedProduct);
-                            console.log(`✅ Stock actualizado para ${item.productName}: +${item.quantity}`);
-                        } else {
-                            // Si no existe, crear nuevo producto/insumo en el backend
-                            const newProduct = {
-                                name: item.productName,
-                                price: item.unitPrice,
-                                category: 'Insumo',
-                                stock: item.quantity,
-                                description: `Agregado automáticamente desde una compra (${new Date().toLocaleString()})`,
-                                low_stock_threshold: 10
-                            };
-                            await api.post('/products/', newProduct);
-                            console.log(`✅ Nuevo insumo creado: ${item.productName} con stock ${item.quantity}`);
+                    if (userRole === 'Gerente') {
+                        for (const item of newPurchase.items) {
+                            const existingProduct = products.find(p => p.name === item.productName);
+                            
+                            if (existingProduct) {
+                                const updatedProduct = {
+                                    ...existingProduct,
+                                    stock: existingProduct.stock + item.quantity
+                                };
+                                await api.put(`/products/${existingProduct.id}/`, updatedProduct);
+                            } else {
+                                const newProduct = {
+                                    name: item.productName,
+                                    price: item.unitPrice,
+                                    category: 'Insumo',
+                                    stock: item.quantity,
+                                    description: `Agregado automáticamente desde una compra (${new Date().toLocaleString()})`,
+                                    low_stock_threshold: 10
+                                };
+                                await api.post('/products/', newProduct);
+                            }
                         }
                     }
                     
-                    // Persistir la compra en el backend
                     const resp = await api.post('/purchases/', purchasePayload);
-
-                    // Recargar productos y sincronizar estado
                     await loadProducts();
 
-                    // Añadir la compra retornada por el servidor al estado local (normalizar campos)
                     const savedPurchaseRaw = resp.data;
                     const savedPurchase = normalizePurchaseFromServer(savedPurchaseRaw);
                     setPurchases(prev => [...prev, savedPurchase]);
@@ -2013,10 +2278,10 @@ const App = () => {
                         items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }]
                     });
                     setShowAddPurchase(false);
-                    setMessage('✅ Compra registrada exitosamente y guardada en el servidor.');
+                    setMessage(userRole === 'Encargado' ? '✅ Solicitud de compra enviada para aprobación.' : '✅ Compra registrada exitosamente y guardada en el servidor.');
                 } catch (error) {
-                    console.error('❌ Error procesando compra:', error);
-                    setMessage('❌ Error: No se pudo procesar la compra. Inténtalo nuevamente.');
+                    console.error('❌ Error procesando compra/solicitud:', error);
+                    setMessage('❌ Error: No se pudo procesar la solicitud. Inténtalo nuevamente.');
                 }
             };
 
@@ -2024,19 +2289,16 @@ const App = () => {
             const handleDeletePurchase = async (purchaseId) => {
                 if (confirmDelete === purchaseId) {
                     try {
-                        // Intentar eliminar en backend
                         await api.delete(`/purchases/${purchaseId}/`);
+                        const updatedPurchases = purchases.filter(purchase => purchase.id !== purchaseId);
+                        setPurchases(updatedPurchases);
+                        setConfirmDelete(null);
+                        setMessage('✅ Compra eliminada del historial exitosamente.');
                     } catch (error) {
-                        console.warn('⚠️ No se pudo eliminar compra en backend, se procederá a eliminar localmente:', error);
+                        console.warn('⚠️ No se pudo eliminar compra en backend:', error);
+                        setMessage('Error al eliminar la compra.');
                     }
-
-                    // Confirmar eliminación local
-                    const updatedPurchases = purchases.filter(purchase => purchase.id !== purchaseId);
-                    setPurchases(updatedPurchases);
-                    setConfirmDelete(null);
-                    setMessage('✅ Compra eliminada del historial exitosamente.');
                 } else {
-                    // Mostrar confirmación
                     setConfirmDelete(purchaseId);
                     setMessage('⚠️ ¿Estás seguro de que deseas eliminar esta compra del historial? Haz clic nuevamente en "Eliminar" para confirmar.');
                 }
@@ -2052,44 +2314,476 @@ const App = () => {
                 <div className="management-container">
                     <h2>Gestión de Compras</h2>
                     {message && <p className="message">{message}</p>}
-                    {!showAddPurchase ? (
-                        <button className="main-button" onClick={() => setShowAddPurchase(true)}>Registrar Nueva Compra</button>
+
+                    <div className="tab-navigation">
+                        <button 
+                            className={`tab-button ${activeTab === 'compras' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('compras')}
+                        >
+                            Registrar Compra
+                        </button>
+                        {userRole === 'Gerente' && (
+                            <button 
+                                className={`tab-button ${activeTab === 'solicitudes' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('solicitudes')}
+                            >
+                                Solicitudes de Compra
+                            </button>
+                        )}
+                    </div>
+
+                    {activeTab === 'compras' && (
+                        <>
+                            {!showAddPurchase ? (
+                                <button className="main-button" onClick={() => setShowAddPurchase(true)}>
+                                    {userRole === 'Encargado' ? 'Solicitar Nueva Compra' : 'Registrar Nueva Compra'}
+                                </button>
+                            ) : (
+                                <form className="form-container" onSubmit={handleAddPurchase}>
+                                    <h3>{userRole === 'Encargado' ? 'Solicitar Compra' : 'Registrar Compra'}</h3>
+                                    
+                                    <input 
+                                        type="date" 
+                                        value={newPurchase.date} 
+                                        onChange={e => setNewPurchase({ ...newPurchase, date: e.target.value })} 
+                                        placeholder="Fecha (dd/mm/aaaa)" 
+                                        required 
+                                    />
+                                    
+                                    <select 
+                                        value={newPurchase.supplierId} 
+                                        onChange={e => setNewPurchase({ ...newPurchase, supplierId: e.target.value })} 
+                                        required
+                                    >
+                                        <option value="">Seleccionar Proveedor</option>
+                                        {suppliers.map(supplier => (
+                                            <option key={supplier.id} value={supplier.id}>
+                                                {supplier.name} - {supplier.cuit}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    
+                                    <h4>Productos de la Compra</h4>
+                                    {newPurchase.items.map((item, index) => (
+                                        <div key={index} className="purchase-item">
+                                            <div className="item-row">
+                                                <Select
+                                                    options={inventory.map(p => ({ value: p.id, label: p.name }))}
+                                                    value={inventory.map(p => ({ value: p.id, label: p.name })).find(opt => opt.value === item.productId) || null}
+                                                    onChange={(opt) => {
+                                                        const updatedItems = [...newPurchase.items];
+                                                        const current = { ...updatedItems[index] };
+                                                        if (!opt) {
+                                                            current.productId = '';
+                                                            current.productName = '';
+                                                        } else {
+                                                            current.productId = opt.value;
+                                                            current.productName = opt.label;
+                                                            const p = (products || []).find(pr => String(pr.id) === String(opt.value)) || (inventory || []).find(pr => String(pr.id) === String(opt.value));
+                                                            if (p && p.price !== undefined) current.unitPrice = p.price;
+                                                        }
+                                                        const qty = Number(current.quantity) || 0;
+                                                        const up = Number(current.unitPrice) || 0;
+                                                        current.total = qty * up;
+                                                        updatedItems[index] = current;
+                                                        setNewPurchase({ ...newPurchase, items: updatedItems });
+                                                    }}
+                                                    placeholder="Seleccionar producto..."
+                                                    isClearable={true}
+                                                />
+                                                <input 
+                                                    type="number" 
+                                                    value={item.quantity || ''} 
+                                                    onChange={e => {
+                                                        const value = e.target.value === '' ? 0 : parseInt(e.target.value);
+                                                        updateItem(index, 'quantity', isNaN(value) ? 0 : value);
+                                                    }}
+                                                    placeholder="Cantidad" 
+                                                    min="1"
+                                                    required 
+                                                />
+                                                <input 
+                                                    type="number" 
+                                                    value={item.unitPrice || ''} 
+                                                    onChange={e => {
+                                                        const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                                        updateItem(index, 'unitPrice', isNaN(value) ? 0 : value);
+                                                    }}
+                                                    placeholder="Precio Unitario" 
+                                                    min="0.01"
+                                                    step="0.01"
+                                                    required 
+                                                />
+                                                <span className="item-total">${safeToFixed(item.total)}</span>
+                                                {newPurchase.items.length > 1 && (
+                                                    <button 
+                                                        type="button" 
+                                                        onClick={() => removeItem(index)}
+                                                        className="remove-item-button"
+                                                    >
+                                                        ❌
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                            
+                            <button type="button" onClick={addItem} className="add-item-button">
+                                ➕ Agregar Producto
+                            </button>
+                            
+                            <div className="purchase-total">
+                                <strong>Total de la Compra: ${safeToFixed(calculatePurchaseTotal())}</strong>
+                            </div>
+                            
+                            <div className="button-group">
+                                <button type="submit" className="action-button primary">{userRole === 'Encargado' ? 'Enviar Solicitud' : 'Registrar Compra'}</button>
+                                <button type="button" className="action-button secondary" onClick={() => setShowAddPurchase(false)}>Cancelar</button>
+                            </div>
+                        </form>
+                    )}
+    
+                    <h3>Historial de Compras</h3>
+                    <ul className="list-container">
+                        {purchases.filter(p => ['Aprobada', 'Completada'].includes(p.status)).map(purchase => (
+                            <li key={purchase.id} className="purchase-list-item">
+                                <div className="purchase-header">
+                                    <strong>Compra #{purchase.id} - {purchase.date}</strong>
+                                    <div className="purchase-actions">
+                                        <span className="purchase-status">{purchase.status}</span>
+                                        {userRole === 'Gerente' && (
+                                            <div className="delete-controls">
+                                                {confirmDelete === purchase.id ? (
+                                                    <div className="confirm-delete">
+                                                        <button 
+                                                            className="action-button danger small"
+                                                            onClick={() => handleDeletePurchase(purchase.id)}
+                                                        >
+                                                            ✓ Confirmar
+                                                        </button>
+                                                        <button 
+                                                            className="action-button secondary small"
+                                                            onClick={handleCancelDelete}
+                                                        >
+                                                            ✕ Cancelar
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button 
+                                                        className="action-button danger small"
+                                                        onClick={() => handleDeletePurchase(purchase.id)}
+                                                    >
+                                                        🗑️ Eliminar
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="purchase-supplier">
+                                    <strong>Proveedor:</strong> {purchase.supplierName}
+                                </div>
+                                <div className="purchase-items">
+                                    <strong>Productos:</strong>
+                                    <ul>
+                                        {purchase.items.map((item, index) => (
+                                            <li key={index}>
+                                                {item.productName} - {item.quantity} x ${item.unitPrice} = ${safeToFixed(item.total)}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                                <div className="purchase-total-display">
+                                    <strong>Total: ${safeToFixed(purchase.totalAmount)}</strong>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </>
+            )}
+            {activeTab === 'solicitudes' && userRole === 'Gerente' && (
+                <PurchaseRequests />
+            )}
+        </div>
+    );
+};
+
+// Componente para mostrar y gestionar solicitudes de compra
+const PurchaseRequests = () => {
+    const [requests, setRequests] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        const fetchRequests = async () => {
+            try {
+                const response = await api.get('/purchases/pending-approval/');
+                setRequests(response.data);
+            } catch (err) {
+                setError('No se pudieron cargar las solicitudes de compra.');
+                console.error('Error fetching purchase requests:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchRequests();
+    }, []);
+
+    const handleApprove = async (requestId) => {
+        try {
+            await api.patch(`/purchases/${requestId}/`, { status: 'Completada' });
+            setRequests(requests.filter(r => r.id !== requestId));
+        } catch (err) {
+            setError('Error al aprobar la solicitud.');
+            console.error('Error approving request:', err);
+        }
+    };
+
+    const handleReject = async (requestId) => {
+        try {
+            await api.patch(`/purchases/${requestId}/`, { status: 'Rechazada' });
+            setRequests(requests.filter(r => r.id !== requestId));
+        } catch (err) {
+            setError('Error al rechazar la solicitud.');
+            console.error('Error rejecting request:', err);
+        }
+    };
+
+    if (loading) return <div>Cargando solicitudes...</div>;
+    if (error) return <div className="error-message">{error}</div>;
+
+    return (
+        <div className="management-container">
+            <h3>Solicitudes de Compra Pendientes</h3>
+            <ul className="list-container">
+                {requests.map(request => (
+                    <li key={request.id} className="purchase-list-item">
+                        <div className="purchase-header">
+                            <strong>Solicitud #{request.id} - {request.date}</strong>
+                        </div>
+                        <div className="purchase-supplier">
+                            <strong>Proveedor:</strong> {request.supplierName}
+                        </div>
+                        <div className="purchase-items">
+                            <strong>Productos:</strong>
+                            <ul>
+                                {request.items.map((item, index) => (
+                                    <li key={index}>
+                                        {item.productName} - {item.quantity} x ${item.unitPrice} = ${safeToFixed(item.total)}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                        <div className="purchase-total-display">
+                            <strong>Total: ${safeToFixed(request.totalAmount)}</strong>
+                        </div>
+                        <div className="button-group">
+                            <button onClick={() => handleApprove(request.id)} className="action-button primary">Aprobar</button>
+                            <button onClick={() => handleReject(request.id)} className="action-button delete">Rechazar</button>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+};
+    
+        // Componente de la interfaz de gestión de pedidos de clientes.
+        const OrderManagementComponent = () => {
+            const [showAddOrder, setShowAddOrder] = useState(false);
+            const [newOrder, setNewOrder] = useState({
+                customerName: '',
+                date: new Date().toISOString().split('T')[0], // Fecha actual por defecto
+                paymentMethod: '',
+                items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }],
+                notes: ''
+            });
+            const [message, setMessage] = useState('');
+            const [showAddPurchase, setShowAddPurchase] = useState(false);
+            const [confirmDelete, setConfirmDelete] = useState(null);
+
+            const calculatePurchaseTotal = () => {
+                return newOrder.items.reduce((sum, item) => sum + (item.total || 0), 0);
+            };
+
+            const handleDeletePurchase = async (purchaseId) => {
+                console.warn('Attempted to delete purchase from a deprecated component.');
+            };
+
+            const handleCancelDelete = () => {
+                setConfirmDelete(null);
+            };
+    
+            // Función para agregar un nuevo item al pedido
+            const addItem = () => {
+                setNewOrder({
+                    ...newOrder,
+                    items: [...newOrder.items, { productName: '', quantity: 1, unitPrice: 0, total: 0 }]
+                });
+            };
+    
+            // Función para eliminar un item del pedido
+            const removeItem = (index) => {
+                if (newOrder.items.length > 1) {
+                    const updatedItems = newOrder.items.filter((_, i) => i !== index);
+                    setNewOrder({ ...newOrder, items: updatedItems });
+                }
+            };
+    
+            // Función para actualizar un item
+            const updateItem = (index, field, value) => {
+                const updatedItems = [...newOrder.items];
+                updatedItems[index] = { ...updatedItems[index], [field]: value };
+                
+                // Si se cambia el nombre del producto, buscar su precio en la lista de productos
+                if (field === 'productName') {
+                    const selectedProduct = products.find(p => p.name === value);
+                    if (selectedProduct) {
+                        updatedItems[index].unitPrice = selectedProduct.price;
+                        updatedItems[index].total = (updatedItems[index].quantity || 0) * selectedProduct.price;
+                    }
+                }
+                
+                // Recalcular el total del item si se cambia cantidad o precio
+                if (field === 'quantity' || field === 'unitPrice') {
+                    const quantity = field === 'quantity' ? (value || 0) : (updatedItems[index].quantity || 0);
+                    const unitPrice = field === 'unitPrice' ? (value || 0) : (updatedItems[index].unitPrice || 0);
+                    updatedItems[index].total = quantity * unitPrice;
+                }
+                
+                setNewOrder({ ...newOrder, items: updatedItems });
+            };
+
+            // Función para calcular el total del pedido
+            const calculateOrderTotal = () => {
+                return newOrder.items.reduce((sum, item) => sum + (item.total || 0), 0);
+            };
+    
+            const handleAddOrder = async (e) => {
+                e.preventDefault();
+                
+                // Validaciones
+                if (!newOrder.customerName.trim()) {
+                    setMessage('🚫 Error: Debe ingresar el nombre del cliente.');
+                    return;
+                }
+                
+                if (!newOrder.paymentMethod) {
+                    setMessage('🚫 Error: Debe seleccionar un método de pago.');
+                    return;
+                }
+                
+                // Validar que al menos un producto tenga cantidad mayor a 0 y precio válido
+                const validItems = newOrder.items.filter(item => 
+                    item.productName.trim() && item.quantity > 0 && item.unitPrice > 0
+                );
+                
+                if (validItems.length === 0) {
+                    setMessage('🚫 Error: Debe seleccionar al menos un producto con cantidad y precio válidos.');
+                    return;
+                }
+                
+                // Enviar pedido al backend para persistencia cross-browser
+                try {
+                    const payload = {
+                        customer_name: newOrder.customerName,
+                        date: newOrder.date,
+                        payment_method: newOrder.paymentMethod,
+                        items: validItems.map(i => ({ product_name: i.productName, quantity: Number(i.quantity), unit_price: Number(i.unitPrice), total: Number(i.total) })),
+                        notes: newOrder.notes
+                    };
+
+                    const res = await api.post('/orders/', payload);
+                    if (res && res.data) {
+                        // Insertar el pedido devuelto por el servidor
+                        const created = res.data;
+                        const createdNormalized = {
+                            id: created.id,
+                            date: created.date,
+                            customerName: created.customer_name || created.customerName || '',
+                            paymentMethod: created.payment_method || created.paymentMethod || '',
+                            items: Array.isArray(created.items) ? created.items.map(it => ({ productName: it.product_name || it.productName || '', quantity: it.quantity, unitPrice: it.unit_price || it.unitPrice || 0, total: it.total || 0 })) : [],
+                            totalAmount: created.total_amount || created.totalAmount || 0,
+                            status: created.status || 'Pendiente',
+                            notes: created.notes || ''
+                        };
+
+                        setOrders(prev => [...prev, createdNormalized]);
+                        setNewOrder({ customerName: '', date: new Date().toISOString().split('T')[0], paymentMethod: '', items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }], notes: '' });
+                        setShowAddOrder(false);
+                        setMessage('✅ Pedido de cliente registrado exitosamente.');
+                    } else {
+                        setMessage('⚠️ Pedido creado localmente, pero no se obtuvo confirmación del servidor.');
+                    }
+                } catch (err) {
+                    console.error('Error enviando pedido al backend:', err, err.response && err.response.data);
+                    setMessage('❌ Error guardando el pedido en el servidor. Revisar consola.');
+                }
+            };
+    
+            const handleUpdateOrderStatus = (orderId, newStatus) => {
+                setOrders(orders.map(order => 
+                    order.id === orderId 
+                        ? { ...order, status: newStatus }
+                        : order
+                ));
+            };
+    
+            return (
+                <div className="management-container">
+                    <h2>Gestión de Pedidos de Clientes</h2>
+                    {message && <p className="message">{message}</p>}
+                    {!showAddOrder ? (
+                        <button className="main-button" onClick={() => setShowAddOrder(true)}>Registrar Nuevo Pedido de Cliente</button>
                     ) : (
-                        <form className="form-container" onSubmit={handleAddPurchase}>
-                            <h3>Registrar Compra</h3>
+                        <form className="form-container" onSubmit={handleAddOrder}>
+                            <h3>Registrar Pedido de Cliente</h3>
+                            
+                            <input 
+                                type="text" 
+                                value={newOrder.customerName} 
+                                onChange={e => setNewOrder({ ...newOrder, customerName: e.target.value })} 
+                                placeholder="Nombre del cliente" 
+                                required
+                            />
                             
                             <input 
                                 type="date" 
-                                value={newPurchase.date} 
-                                onChange={e => setNewPurchase({ ...newPurchase, date: e.target.value })} 
-                                placeholder="Fecha (dd/mm/aaaa)" 
-                                required 
+                                value={newOrder.date} 
+                                onChange={e => setNewOrder({ ...newOrder, date: e.target.value })} 
+                                required
                             />
                             
                             <select 
-                                value={newPurchase.supplierId} 
-                                onChange={e => setNewPurchase({ ...newPurchase, supplierId: e.target.value })} 
+                                value={newOrder.paymentMethod} 
+                                onChange={e => setNewOrder({ ...newOrder, paymentMethod: e.target.value })} 
                                 required
                             >
-                                <option value="">Seleccionar Proveedor</option>
-                                {suppliers.map(supplier => (
-                                    <option key={supplier.id} value={supplier.id}>
-                                        {supplier.name} - {supplier.cuit}
-                                    </option>
-                                ))}
+                                <option value="">Seleccionar método de pago</option>
+                                <option value="efectivo">Efectivo</option>
+                                <option value="debito">Débito</option>
+                                <option value="credito">Crédito</option>
+                                <option value="transferencia">Transferencia</option>
                             </select>
                             
-                            <h4>Productos de la Compra</h4>
-                            {newPurchase.items.map((item, index) => (
-                                <div key={index} className="purchase-item">
+                            <h4>Productos del Pedido</h4>
+                            
+                            {newOrder.items.map((item, index) => (
+                                <div key={index} className="order-item">
                                     <div className="item-row">
                                         <input 
                                             type="text" 
                                             value={item.productName} 
                                             onChange={e => updateItem(index, 'productName', e.target.value)} 
-                                            placeholder="Nombre del Producto" 
-                                            required 
+                                            placeholder="Nombre del producto" 
+                                            list="products-list"
+                                            required
                                         />
+                                        <datalist id="products-list">
+                                            {products.map((product, idx) => (
+                                                <option key={idx} value={product.name} />
+                                            ))}
+                                        </datalist>
                                         <input 
                                             type="number" 
                                             value={item.quantity || ''} 
@@ -2114,7 +2808,7 @@ const App = () => {
                                             required 
                                         />
                                         <span className="item-total">${safeToFixed(item.total)}</span>
-                                        {newPurchase.items.length > 1 && (
+                                        {newOrder.items.length > 1 && (
                                             <button 
                                                 type="button" 
                                                 onClick={() => removeItem(index)}
@@ -2371,19 +3065,13 @@ const App = () => {
                             {newOrder.items.map((item, index) => (
                                 <div key={index} className="order-item">
                                     <div className="item-row">
-                                        <input 
-                                            type="text" 
-                                            value={item.productName} 
-                                            onChange={e => updateItem(index, 'productName', e.target.value)} 
-                                            placeholder="Nombre del producto" 
-                                            list="products-list"
-                                            required
+                                        <Select
+                                            options={products.map(p => ({ value: p.name, label: p.name }))}
+                                            value={products.map(p => ({ value: p.name, label: p.name })).find(opt => opt.value === item.productName) || null}
+                                            onChange={selectedOption => updateItem(index, 'productName', selectedOption ? selectedOption.value : '')}
+                                            placeholder="Buscar y seleccionar producto..."
+                                            isClearable
                                         />
-                                        <datalist id="products-list">
-                                            {products.map((product, idx) => (
-                                                <option key={idx} value={product.name} />
-                                            ))}
-                                        </datalist>
                                         <input 
                                             type="number" 
                                             value={item.quantity || ''} 
@@ -2536,6 +3224,7 @@ const App = () => {
             'customer_name': 'Cliente',
             'paymentMethod': 'Método de Pago',
             'payment_method': 'Método de Pago',
+            'payment_method': 'Método de Pago',
             'products': 'Productos',
             'units': 'Unidades',
             'totalMovements': 'Total de Movimientos',
@@ -2589,62 +3278,53 @@ const App = () => {
     
             // Función para seleccionar un producto para editar
             const selectProductForEdit = (product) => {
-                // Verificar que el producto no tenga ventas registradas
-                if (product.hasSales) {
-                    setMessage('⚠️ Error: No se puede editar un producto que ya tiene ventas registradas.');
+                if (!product) {
+                    setMessage('⚠️ Producto no encontrado.');
                     return;
                 }
-    
                 setSelectedProduct(product);
                 setEditingProduct({
-                    name: product.name,
-                    price: product.price,
-                    category: product.category,
-                    stock: product.stock,
+                    name: product.name || '',
+                    price: product.price || 0,
+                    category: product.category || 'Producto',
+                    stock: product.stock || 0,
                     description: product.description || '',
-                    lowStockThreshold: product.lowStockThreshold || 10
+                    lowStockThreshold: product.lowStockThreshold ?? product.low_stock_threshold ?? 10
                 });
                 setMessage('');
             };
-    
-            // Función para guardar los cambios
+
+            // Función para guardar cambios del producto seleccionado
             const handleSaveChanges = async (e) => {
-                e.preventDefault();
-    
-                // Validaciones según la especificación
-                if (!validateProductName(editingProduct.name)) {
-                    setMessage('🚫 Error: El nombre del producto debe ser un texto no vacío con un máximo de 100 caracteres.');
-                    return;
-                }
-    
+                if (e && typeof e.preventDefault === 'function') e.preventDefault();
+                if (!selectedProduct) return;
+
                 if (!validatePrice(editingProduct.price)) {
                     setMessage('🚫 Error: El precio debe ser un número decimal positivo mayor a cero.');
                     return;
                 }
-    
+
                 if (!validateCategory(editingProduct.category)) {
                     setMessage('🚫 Error: La categoría debe existir en la lista de categorías registradas.');
                     return;
                 }
-    
+
                 if (!validateStock(editingProduct.stock)) {
                     setMessage('🚫 Error: El stock inicial debe ser un número entero positivo o cero.');
                     return;
                 }
-                
+
                 if (!validateLowStockThreshold(editingProduct.lowStockThreshold)) {
                     setMessage('🚫 Error: El umbral de stock bajo debe ser un número entero positivo o cero.');
                     return;
                 }
 
-                // Verificar que no se eliminen datos obligatorios
                 if (!editingProduct.name.trim() || editingProduct.price <= 0 || !editingProduct.category) {
                     setMessage('🚫 Error: No se pueden eliminar datos obligatorios (nombre, precio, categoría).');
                     return;
                 }
 
                 try {
-                    // Actualizar el producto en el backend primero
                     const updatedProduct = {
                         name: editingProduct.name,
                         price: editingProduct.price,
@@ -2655,10 +3335,8 @@ const App = () => {
                     };
 
                     await api.put(`/products/${selectedProduct.id}/`, updatedProduct);
-                    
-                    // Si se actualiza correctamente en el backend, recargar productos desde el servidor
                     await loadProducts();
-                    
+
                     setSelectedProduct(null);
                     setEditingProduct({
                         name: '',
@@ -2924,6 +3602,113 @@ const App = () => {
             </div>
         )};
 
+        const LowStockReport = () => {
+            const [productId, setProductId] = useState('');
+            const [message, setMessage] = useState('');
+            const [notification, setNotification] = useState('');
+        
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!productId || !message) {
+                    setNotification('Por favor, selecciona un producto y escribe un mensaje.');
+                    return;
+                }
+                try {
+                    await api.post('/low-stock-reports/create/', {
+                        product: productId,
+                        message: message,
+                    });
+                    setNotification('Reporte enviado con éxito.');
+                    setProductId('');
+                    setMessage('');
+                } catch (error) {
+                    setNotification('Error al enviar el reporte.');
+                    console.error('Error submitting low stock report:', error);
+                }
+            };
+        
+            return (
+                <div className="management-container">
+                    <h2>Reportar Faltantes o Bajo Stock</h2>
+                    {notification && <p className="message">{notification}</p>}
+                    <form onSubmit={handleSubmit} className="form-container">
+                        <Select
+                            options={products.map(p => ({ value: p.id, label: `${p.name} (Stock: ${p.stock})` }))}
+                            onChange={(option) => setProductId(option ? option.value : '')}
+                            placeholder="Selecciona un producto"
+                            isClearable
+                        />
+                        <textarea
+                            value={message}
+                            onChange={(e) => setMessage(e.target.value)}
+                            placeholder="Mensaje para el gerente (ej: se necesita con urgencia, se acabó, etc.)"
+                            rows="4"
+                            required
+                        />
+                        <button type="submit" className="action-button primary">Enviar Reporte</button>
+                    </form>
+                </div>
+            );
+        };
+        
+        const ViewLowStockReports = () => {
+            const [reports, setReports] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState('');
+        
+            useEffect(() => {
+                const fetchReports = async () => {
+                    try {
+                        const response = await api.get('/low-stock-reports/');
+                        setReports(response.data);
+                    } catch (err) {
+                        setError('No se pudieron cargar los reportes.');
+                        console.error('Error fetching low stock reports:', err);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+                fetchReports();
+            }, []);
+        
+            const handleResolve = async (reportId) => {
+                try {
+                    await api.patch(`/low-stock-reports/${reportId}/update/`, { is_resolved: true });
+                    setReports(reports.map(r => r.id === reportId ? { ...r, is_resolved: true } : r));
+                } catch (err) {
+                    setError('Error al marcar como resuelto.');
+                    console.error('Error resolving report:', err);
+                }
+            };
+        
+            if (loading) return <div>Cargando reportes...</div>;
+            if (error) return <div className="error-message">{error}</div>;
+
+            return (
+                <div className="management-container">
+                    <h2>Reportes de Faltantes y Bajo Stock</h2>
+                    <ul className="list-container">
+                        {reports.map(report => (
+                            <li key={report.id} className={`list-item ${report.is_resolved ? 'resolved' : ''}`}>
+                                <div className="report-info">
+                                    <strong>Producto:</strong> {report.product_name} <br />
+                                    <strong>Reportado por:</strong> {report.reported_by} el {new Date(report.created_at).toLocaleString()} <br />
+                                    <strong>Mensaje:</strong> {report.message}
+                                </div>
+                                <div className="report-actions">
+                                    {report.is_resolved ? (
+                                        <span>Resuelto</span>
+                                    ) : (
+                                        <button onClick={() => handleResolve(report.id)} className="action-button primary">Marcar como Resuelto</button>
+                                    )}
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            );
+        };
+
     // Renderiza el componente de la página actual según el estado.
     const renderPage = () => {
         if (!isLoggedIn) {
@@ -2932,7 +3717,7 @@ const App = () => {
 
         // Defensive: ensure currentPage is a known page when logged in to avoid falling
         // into the default case which renders the "Página no encontrada." message
-        const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas','editar productos','login']);
+        const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'editar productos','login', 'reportar faltantes', 'ver reportes de faltantes']);
         let pageToRender = currentPage;
         if (!validPages.has(String(currentPage))) {
             console.warn('⚠️ currentPage inválido detectado, forzando a dashboard:', currentPage);
@@ -2946,6 +3731,7 @@ const App = () => {
                 return <InventoryView />;
             case 'ventas':
                 return <SalesView />;
+          
             case 'productos':
                 return userRole === 'Gerente' ? <ProductCreationView /> : <div>Acceso Denegado</div>;
             case 'gestión de usuarios':
@@ -2953,28 +3739,40 @@ const App = () => {
             case 'proveedores':
                 return userRole === 'Gerente' ? <SupplierManagement /> : <div>Acceso Denegado</div>;
             case 'compras':
-                return userRole === 'Gerente' || userRole === 'Encargado' || userRole === 'Cajero' || userRole === 'Panadero' ? <PurchaseManagement /> : <div>Acceso Denegado</div>;
+                return ['Gerente', 'Encargado'].includes(userRole) ? 
+                    <PurchaseManagement 
+                        userRole={userRole} 
+                        inventory={inventory}
+                        suppliers={suppliers}
+                        products={products}
+                        purchases={purchases}
+                        reloadPurchases={fetchPurchases}
+                    /> : <div>Acceso Denegado</div>;
             case 'pedidos':
                 return userRole === 'Gerente' ? <OrderManagement /> : <div>Acceso Denegado</div>;
             case 'consultas':
-                return userRole === 'Gerente' ? (
-                    <DataConsultation
-                        getInMemoryToken={getInMemoryToken}
-                        api={api}
-                        loadSales={loadSales}
-                        loadCashMovements={loadCashMovements}
-                        inventory={inventory}
-                        suppliers={suppliers}
-                        purchases={purchases}
-                        orders={orders}
-                        cashMovements={cashMovements}
-                        sales={sales}
-                        headerTranslationMap={headerTranslationMap}
-                        safeToFixed={safeToFixed}
-                    />
-                ) : <div>Acceso Denegado</div>;
+                return <DataConsultation 
+                    api={api}
+                    getInMemoryToken={getInMemoryToken}
+                    loadSales={loadSales}
+                    loadCashMovements={loadCashMovements}
+                    inventory={inventory}
+                    suppliers={suppliers}
+                    purchases={purchases}
+                    orders={orders}
+                    cashMovements={cashMovements}
+                    sales={sales}
+                    headerTranslationMap={headerTranslationMap}
+                    safeToFixed={safeToFixed}
+                />;
+            case 'datos de mi usuario':
+                return <MyUserData />;
             case 'editar productos':
                 return userRole === 'Gerente' ? <EditNewProducts /> : <div>Acceso Denegado</div>;
+            case 'reportar faltantes':
+                return <LowStockReport />;
+            case 'ver reportes de faltantes':
+                return userRole === 'Gerente' ? <ViewLowStockReports /> : <div>Acceso Denegado</div>;
             default:
                 return <div>Página no encontrada.</div>;
         }
@@ -3212,6 +4010,6 @@ const App = () => {
             {renderPage()}
         </div>
     );
-};
+    };
 
 export default App;

@@ -3,18 +3,72 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier
+from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport
 from django.conf import settings
+from django.utils import timezone
 from .serializers import (
     UserSerializer, UserCreateSerializer, ProductSerializer,
     CashMovementSerializer, InventoryChangeSerializer, SaleSerializer,
-    UserQuerySerializer, SupplierSerializer, UserStorageSerializer
+    UserQuerySerializer, SupplierSerializer, UserStorageSerializer, RoleSerializer, UserUpdateSerializer,
+    LowStockReportSerializer, InventoryChangeAuditSerializer
 )
 from .models import UserStorage
-# ViewSet para almacenamiento tipo localStorage por usuario
+from datetime import datetime, timedelta
+
+
+# Permiso personalizado para rol de Gerente
+class IsGerente(BasePermission):
+    """
+    Permiso personalizado para permitir acceso solo a usuarios con el rol 'Gerente'.
+    """
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and getattr(request.user, 'role', None) and request.user.role.name == 'Gerente'
+
+class CurrentUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
+
+class IsCajeroOrPanadero(BasePermission):
+    """
+    Custom permission to only allow users with the 'Cajero' or 'Panadero' role.
+    """
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated and hasattr(request.user, 'role') and request.user.role):
+            return False
+        return request.user.role.name in ['Cajero', 'Panadero']
+
+class LowStockReportCreateView(generics.CreateAPIView):
+    queryset = LowStockReport.objects.all()
+    serializer_class = LowStockReportSerializer
+    permission_classes = [IsAuthenticated, IsCajeroOrPanadero]
+
+    def perform_create(self, serializer):
+        serializer.save(reported_by=self.request.user)
+
+class LowStockReportListView(generics.ListAPIView):
+    queryset = LowStockReport.objects.all().order_by('-created_at')
+    serializer_class = LowStockReportSerializer
+    permission_classes = [IsAuthenticated, IsGerente]
+
+class LowStockReportUpdateView(generics.UpdateAPIView):
+    queryset = LowStockReport.objects.all()
+    serializer_class = LowStockReportSerializer
+    permission_classes = [IsAuthenticated, IsGerente]
+
+# ViewSet para Roles (solo lectura)
+class RoleViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Role.objects.all()
+    serializer_class = RoleSerializer
+    permission_classes = [IsAuthenticated]
+
+# Vista para obtener datos del usuario autenticado (/api/users/me/)
 class UserStorageViewSet(viewsets.ModelViewSet):
     serializer_class = UserStorageSerializer
     permission_classes = [IsAuthenticated]
@@ -60,11 +114,23 @@ class UserStorageViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Key requerida'}, status=400)
         deleted, _ = UserStorage.objects.filter(user=request.user, key=key).delete()
         return Response({'success': True, 'deleted': bool(deleted), 'key': key})
+
 # ViewSet para la gestión de proveedores (CRUD)
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
-    permission_classes = [IsAuthenticated]
+    
+    def get_permissions(self):
+        """
+        - Gerente puede hacer todo (CRUD).
+        - Otros usuarios autenticados solo pueden leer (list, retrieve).
+        """
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            self.permission_classes = [IsGerente]
+        else:
+            self.permission_classes = [IsAuthenticated]
+        return super().get_permissions()
+
 from .models import Purchase
 from .serializers import PurchaseSerializer
 from .models import Order
@@ -280,21 +346,40 @@ class UserDestroy(generics.DestroyAPIView):
     serializer_class = UserSerializer
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
     serializer_class = UserSerializer
+
+    def get_queryset(self):
+        """
+        - Gerentes ven a todos los usuarios.
+        - Otros usuarios autenticados solo se ven a sí mismos.
+        """
+        user = self.request.user
+        if user.is_authenticated:
+            try:
+                if user.role and user.role.name == 'Gerente':
+                    return User.objects.all()
+            except (AttributeError, Role.DoesNotExist):
+                return User.objects.filter(pk=user.pk)
+            return User.objects.filter(pk=user.pk)
+        return User.objects.none()
+
+    def get_permissions(self):
+        """
+        - `create`, `update`, `partial_update`, `destroy` solo para Gerente.
+        - `list`, `retrieve` para cualquier usuario autenticado (la consulta se filtra en get_queryset).
+        """
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            self.permission_classes = [IsGerente]
+        else:
+            self.permission_classes = [IsAuthenticated]
+        return super().get_permissions()
 
     def get_serializer_class(self):
         if self.action == 'create':
             return UserCreateSerializer
+        if self.action in ['update', 'partial_update']:
+            return UserUpdateSerializer
         return UserSerializer
-
-    def get_permissions(self):
-        # Permitir el registro de usuarios (create) a cualquiera por ahora, en un sistema real esto estaría restringido al Gerente
-        if self.action == 'create':
-            self.permission_classes = [AllowAny]
-        else:
-            self.permission_classes = [IsAuthenticated]
-        return super(UserViewSet, self).get_permissions()
     
     def destroy(self, request, *args, **kwargs):
         # Excepción: un usuario no puede eliminarse a sí mismo
@@ -313,59 +398,201 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
+class IsEncargado(BasePermission):
+    """
+    Permiso personalizado para permitir acceso solo a usuarios con el rol 'Encargado'.
+    """
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and getattr(request.user, 'role', None) and request.user.role.name == 'Encargado'
+
+
+class IsGerenteOrEncargado(BasePermission):
+    """
+    Custom permission to only allow users with 'Gerente' or 'Encargado' role.
+    """
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated and hasattr(request.user, 'role') and request.user.role):
+            return False
+        return request.user.role.name in ['Gerente', 'Encargado']
+
+
 # ViewSet para compras
 class PurchaseViewSet(viewsets.ModelViewSet):
-    queryset = Purchase.objects.all()
+    queryset = Purchase.objects.all().order_by('-created_at')
     serializer_class = PurchaseSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            # Gerente sees all purchases
+            if hasattr(user, 'role') and user.role and user.role.name == 'Gerente':
+                return Purchase.objects.all()
+            # Encargado sees all approved purchases (history) and their own pending ones
+            if hasattr(user, 'role') and user.role and user.role.name == 'Encargado':
+                from django.db.models import Q
+                return Purchase.objects.filter(Q(status='Aprobada') | Q(user=user, status='Pendiente'))
+        return Purchase.objects.none()
+
+    def get_permissions(self):
+        if self.action == 'create':
+            self.permission_classes = [IsAuthenticated, IsGerenteOrEncargado]
+        elif self.action in ['update', 'partial_update', 'destroy', 'approve', 'reject', 'pending_approval']:
+            self.permission_classes = [IsAuthenticated, IsGerente]
+        else: # list, retrieve, history
+            self.permission_classes = [IsAuthenticated, IsGerenteOrEncargado]
+        return super().get_permissions()
+
     def perform_create(self, serializer):
-        # Asociar usuario si está autenticado y asegurar que total_amount se calcule correctamente
-        # Calculamos el total a partir de los items si el cliente no lo proveyó o lo dejó en 0
-        items = None
-        try:
-            items = serializer.validated_data.get('items')
-        except Exception:
-            # validated_data no disponible aún, intentar leer de request.data
-            items = self.request.data.get('items')
+        from django.db import transaction
+
+        user = self.request.user
+        role_name = user.role.name if hasattr(user, 'role') and user.role else None
+
+        items = serializer.validated_data.get('items', self.request.data.get('items'))
 
         computed_total = Decimal('0')
-        if items and isinstance(items, (list, tuple)):
+        if items and isinstance(items, list):
             for item in items:
-                # item puede venir con diferentes nombres de campo
-                qty = item.get('quantity') or item.get('qty') or 0
-                unit = item.get('unitPrice') or item.get('unit_price') or item.get('price') or 0
-                item_total = item.get('total') if item.get('total') is not None else (item.get('totalAmount') if item.get('totalAmount') is not None else item.get('total_amount') if item.get('total_amount') is not None else None)
-                try:
-                    if item_total is not None:
-                        item_total_dec = Decimal(str(item_total))
-                    else:
-                        item_total_dec = Decimal(str(qty)) * Decimal(str(unit))
-                except Exception:
-                    item_total_dec = Decimal('0')
-                computed_total += item_total_dec
+                qty = item.get('quantity', 0)
+                price = item.get('price', 0)
+                computed_total += Decimal(str(qty)) * Decimal(str(price))
 
-        # Revisar si el cliente proveyó un total válido
-        provided_total = None
-        try:
-            provided_total = serializer.validated_data.get('total_amount')
-        except Exception:
-            provided_total = self.request.data.get('total_amount')
+        final_total = serializer.validated_data.get('total_amount') or self.request.data.get('total_amount') or computed_total
 
-        provided_total_dec = None
-        try:
-            if provided_total is not None:
-                provided_total_dec = Decimal(str(provided_total))
-        except Exception:
-            provided_total_dec = None
+        is_manager = role_name == 'Gerente'
+        final_status = 'Aprobada' if is_manager else 'Pendiente'
+        approved_by = user if is_manager else None
+        approved_at = timezone.now() if is_manager else None
 
-        final_total = provided_total_dec if (provided_total_dec is not None and provided_total_dec > 0) else computed_total
+        supplier_id = self.request.data.get('supplier_id')
+        supplier_name = None
+        if supplier_id:
+            try:
+                supplier = Supplier.objects.get(id=supplier_id)
+                supplier_name = supplier.name
+            except Supplier.DoesNotExist:
+                pass # Se podría manejar un error si el proveedor no existe
 
         try:
-            serializer.save(user=self.request.user if self.request.user.is_authenticated else None, total_amount=final_total)
+            with transaction.atomic():
+                purchase = serializer.save(
+                    user=user,
+                    total_amount=final_total,
+                    status=final_status,
+                    approved_by=approved_by,
+                    approved_at=approved_at,
+                    supplier=supplier_name  # Guardar el nombre del proveedor
+                )
+
+                if is_manager and isinstance(purchase.items, list):
+                    for item in purchase.items:
+                        product_id = item.get('product_id')
+                        quantity = item.get('quantity')
+                        if product_id and quantity:
+                            try:
+                                product = Product.objects.select_for_update().get(id=product_id)
+                                product.stock += quantity
+                                product.save()
+                            except Product.DoesNotExist:
+                                # This will roll back the transaction
+                                raise Exception(f"El producto con ID {product_id} no fue encontrado.")
         except Exception as e:
-            print(f"[PurchaseViewSet.perform_create] Error guardando compra: {e}")
-            raise
+            raise e
+
+    @action(detail=False, methods=['get'], url_path='pending-approval')
+    def pending_approval(self, request):
+        """
+        Endpoint para que los Gerentes vean todas las solicitudes de compra pendientes.
+        """
+        pending_purchases = Purchase.objects.filter(status='Pendiente').order_by('-created_at')
+        
+        page = self.paginate_queryset(pending_purchases)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(pending_purchases, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='history')
+    def history(self, request):
+        """
+        Endpoint para que Gerentes y Encargados vean el historial de compras aprobadas y completadas.
+        """
+        # Gerentes y Encargados pueden ver todas las compras aprobadas y completadas
+        from django.db.models import Q
+        completed_purchases = Purchase.objects.filter(
+            Q(status='Aprobada') | Q(status='Completada')
+        ).order_by('-created_at')
+        
+        page = self.paginate_queryset(completed_purchases)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(completed_purchases, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """
+        Approve a purchase request. Only for 'Gerente'.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        from django.db import transaction
+
+        purchase = self.get_object()
+        logger.info(f'Approving purchase {purchase.id}, current status: {purchase.status}')
+
+        if purchase.status != 'Pendiente':
+            return Response({'error': 'This purchase is not pending approval.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            with transaction.atomic():
+                # Update product stock
+                if isinstance(purchase.items, list):
+                    for item in purchase.items:
+                        try:
+                            product_id = item.get('product_id') or item.get('productId')
+                            if not product_id:
+                                logger.error(f"No product_id found in item: {item}")
+                                raise Exception(f"No product_id found in item: {item}")
+                            
+                            product = Product.objects.get(id=product_id)
+                            quantity = item.get('quantity', 0)
+                            product.stock += quantity
+                            product.save()
+                            logger.info(f"Updated product {product.id} stock: +{quantity}, new stock: {product.stock}")
+                        except Product.DoesNotExist:
+                            logger.error(f"Product with id {product_id} not found during approval of purchase {purchase.id}.")
+                            raise Exception(f"Product with id {product_id} not found during approval.")
+
+                purchase.status = 'Aprobada'
+                purchase.approved_by = request.user
+                purchase.approved_at = timezone.now()
+                purchase.save()
+                logger.info(f'Purchase {purchase.id} status updated to {purchase.status}')
+        except Exception as e:
+            logger.error(f'Error during approval process for purchase {purchase.id}: {str(e)}')
+            return Response({'error': f'Error during approval process: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response(self.get_serializer(purchase).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """
+        Reject and delete a purchase request. Only for 'Gerente'.
+        """
+        purchase = self.get_object()
+        if purchase.status != 'Pendiente':
+            return Response({'error': 'This purchase is not pending approval.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        purchase.delete()
+        
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ViewSet para pedidos de clientes
@@ -384,10 +611,36 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 # ViewSet para la gestión de movimientos de caja (CRUD)
 class CashMovementViewSet(viewsets.ModelViewSet):
-    queryset = CashMovement.objects.all()
+    #queryset = CashMovement.objects.all()
     serializer_class = CashMovementSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        """
+        Filtra por el campo 'timestamp' (no 'date'), comparando solo la parte de la fecha
+        para ser compatible con la zona horaria (timezone-aware).
+        """
+        queryset = CashMovement.objects.all()
+        start_date_str = self.request.query_params.get('start_date', None)
+        end_date_str = self.request.query_params.get('end_date', None)
+
+        try:
+            if start_date_str:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                # CORRECCIÓN: Usar timestamp__date__gte
+                queryset = queryset.filter(timestamp__date__gte=start_date)
+
+            if end_date_str:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                # CORRECCIÓN: Usar timestamp__date__lte
+                queryset = queryset.filter(timestamp__lte=f"{end_date} 23:59:59")
+        except (ValueError, TypeError):
+            # Si el formato de fecha es inválido, no hacemos nada para evitar un crash.
+            print(f"ADVERTENCIA: Se recibió un formato de fecha inválido. Se ignora el filtro.")
+            pass
+        
+        return queryset.order_by('-timestamp')
+    
     def perform_create(self, serializer):
         try:
             # Log minimal info for diagnostics (no token values)
@@ -405,6 +658,9 @@ class CashMovementViewSet(viewsets.ModelViewSet):
         except Exception as e:
             print(f"[CashMovementViewSet.list] Error checking cookies: {e}")
         return super().list(request, *args, **kwargs)
+    
+    
+    
 
 # ViewSet para la gestión de cambios de inventario (CRUD)
 class InventoryChangeViewSet(viewsets.ModelViewSet):
@@ -413,23 +669,91 @@ class InventoryChangeViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
-        # Actualizamos el stock del producto al registrar el cambio
+        # Realizar la operación de cambio de inventario de forma atómica
+        from django.db import transaction
+        from django.shortcuts import get_object_or_404
+
         product = serializer.validated_data['product']
         quantity = serializer.validated_data['quantity']
         change_type = serializer.validated_data['type']
 
-        if change_type == 'Entrada':
-            product.stock += quantity
-        elif change_type == 'Salida':
-            if product.stock < quantity:
-                return Response(
-                    {"detail": "La salida supera el stock disponible."},
-                    status=status.HTTP_400_BAD_REQUEST
+        # Enforce server-side permission: solo usuarios con role 'Gerente' pueden crear cambios
+        role_name = None
+        try:
+            role_name = self.request.user.role.name if getattr(self.request.user, 'role', None) else None
+        except Exception:
+            role_name = None
+
+        if role_name != 'Gerente':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied(detail='Permiso denegado: se requiere rol Gerente para modificar inventario')
+
+        with transaction.atomic():
+            # Lock the product row to avoid race conditions
+            p = Product.objects.select_for_update().get(pk=product.pk)
+            previous_stock = p.stock
+
+            if change_type == 'Entrada':
+                new_stock = previous_stock + quantity
+            else:  # Salida
+                if previous_stock < quantity:
+                    from rest_framework.exceptions import ValidationError
+                    raise ValidationError({'detail': 'La salida supera el stock disponible.'})
+                new_stock = previous_stock - quantity
+
+            # Apply stock change
+            p.stock = new_stock
+            p.save()
+
+            # Save the InventoryChange record with current user
+            inv_change = serializer.save(user=self.request.user)
+
+            # Crear registro de auditoría
+            try:
+                from .models import InventoryChangeAudit
+                InventoryChangeAudit.objects.create(
+                    inventory_change=inv_change,
+                    product=p,
+                    user=self.request.user if self.request.user.is_authenticated else None,
+                    role=role_name,
+                    change_type=change_type,
+                    quantity=quantity,
+                    previous_stock=previous_stock,
+                    new_stock=new_stock,
+                    reason=inv_change.reason if hasattr(inv_change, 'reason') else ''
                 )
-            product.stock -= quantity
-        
-        product.save()
-        serializer.save(user=self.request.user)
+            except Exception as e:
+                print(f"[InventoryChangeViewSet] Error creando audit record: {e}")
+
+
+
+# ViewSet para auditoría de cambios de inventario (solo lectura)
+class InventoryChangeAuditViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = getattr(__import__('api.models', fromlist=['InventoryChangeAudit']), 'InventoryChangeAudit').objects.all()
+    serializer_class = InventoryChangeAuditSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # Filtrado opcional por producto, usuario, tipo o rango de fechas
+        product_id = self.request.query_params.get('product')
+        user_id = self.request.query_params.get('user')
+        change_type = self.request.query_params.get('type')
+        start = self.request.query_params.get('start')
+        end = self.request.query_params.get('end')
+
+        if product_id:
+            qs = qs.filter(product_id=product_id)
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+        if change_type:
+            qs = qs.filter(change_type=change_type)
+        if start:
+            qs = qs.filter(timestamp__gte=start)
+        if end:
+            qs = qs.filter(timestamp__lte=end)
+
+        return qs
 
 # ViewSet para la gestión de ventas (CRUD)
 class SaleViewSet(viewsets.ModelViewSet):
@@ -651,6 +975,7 @@ class ExportDataView(APIView):
                 precio_str,
                 item.get('status', '')
             ])
+            
         table = Table(table_data)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
@@ -734,29 +1059,56 @@ class ExportDataView(APIView):
         return table
 
     def _generate_cash_movements_table(self, data):
-        # Mostrar ID, Fecha, Tipo, Monto, Descripción y Usuario
-        table_data = [['ID', 'Fecha', 'Tipo', 'Monto', 'Descripción', 'Usuario']]
+        styles = getSampleStyleSheet()
+        normal_style = styles['Normal']
+        normal_style.fontSize = 8
+        
+        # Encabezados
+        headers = ['ID', 'Fecha', 'Tipo', 'Monto', 'Método de Pago', 'Descripción', 'Usuario']
+        table_data = [headers]
+
         for item in data:
-            # Soportar varias formas de nombrar al usuario que pueden venir desde el frontend/backend
-            usuario = item.get('user') or item.get('user_username') or item.get('user_name') or item.get('username') or ''
-            table_data.append([
-                item.get('id', ''),
-                item.get('date', ''),
-                item.get('type', ''),
-                f"${item.get('amount', 0)}",
-                item.get('description', ''),
-                usuario
-            ])
-        table = Table(table_data)
+            # Obtener y formatear datos de forma segura
+            description_text = item.get('description', '')
+            user_text = item.get('user') or item.get('user_username') or ''
+            payment_method_text = item.get('payment_method') if item.get('payment_method') else 'N/A'
+            
+            date_str = item.get('date', '')
+            if date_str and '.' in date_str:
+                date_str = date_str.split('.')[0]
+
+            try:
+                amount = float(item.get('amount', 0))
+                amount_str = f"${amount:.2f}"
+            except (ValueError, TypeError):
+                amount_str = str(item.get('amount', ''))
+
+            # Crear Paragraphs para permitir el ajuste de línea
+            row = [
+                Paragraph(str(item.get('id', '')), normal_style),
+                Paragraph(date_str, normal_style),
+                Paragraph(item.get('type', ''), normal_style),
+                Paragraph(amount_str, normal_style),
+                Paragraph(payment_method_text, normal_style),
+                Paragraph(description_text, normal_style),
+                Paragraph(user_text, normal_style)
+            ]
+            table_data.append(row)
+
+        # Definir anchos de columna para controlar el desbordamiento
+        col_widths = [30, 100, 50, 60, 80, 135, 60]
+
+        table = Table(table_data, colWidths=col_widths)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
         ]))
         return table
 

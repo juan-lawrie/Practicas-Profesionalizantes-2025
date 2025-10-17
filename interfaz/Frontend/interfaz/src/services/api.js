@@ -108,7 +108,41 @@ const backendLogout = async () => {
   return api.post('/logout/');
 };
 
+// Función para obtener los datos del usuario actual
+const getCurrentUserData = async () => {
+    const response = await api.get('/users/me/');
+    return response.data;
+};
+
+// Funciones para la gestión de solicitudes de compra
+const getPendingPurchases = () => {
+  return api.get('/purchases/pending-approval/');
+};
+
+const approvePurchase = (id) => {
+  return api.post(`/purchases/${id}/approve/`);
+};
+
+const rejectPurchase = (id) => {
+  return api.post(`/purchases/${id}/reject/`);
+};
+
+const getPurchaseHistory = () => {
+  return api.get('/purchases/history/');
+};
+
 export default api;
 
 // Exportar los helpers públicos (incluyendo setters para el token en memoria)
-export { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken };
+export { 
+  backendLogin, 
+  backendLogout, 
+  setInMemoryToken, 
+  clearInMemoryToken, 
+  getInMemoryToken, 
+  getCurrentUserData,
+  getPendingPurchases,
+  approvePurchase,
+  rejectPurchase,
+  getPurchaseHistory
+};

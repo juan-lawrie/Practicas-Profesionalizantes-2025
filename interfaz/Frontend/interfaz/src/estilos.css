@@ -197,21 +197,6 @@ h1 {
 }
 
 /* Mejoras para el formulario de creación de productos */
-.form-container select {
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 16px;
-  transition: border-color 0.3s;
-  background-color: white;
-  margin-bottom: 15px;
-  width: 100%;
-}
-
-.form-container select:focus {
-  border-color: #007bff;
-  outline: none;
-}
 
 .form-container p {
   margin-bottom: 5px;
@@ -223,13 +208,10 @@ h1 {
 .dashboard-alerts {
   margin: 20px 0;
   padding: 15px;
-  background-color: #fff3cd;
-  border-left: 5px solid #ffc107;
   border-radius: 5px;
 }
 
 .dashboard-alerts h3 {
-  color: #856404;
   margin-top: 0;
 }
 

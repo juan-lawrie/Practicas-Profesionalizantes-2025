@@ -206,23 +206,54 @@ export default function DataConsultation(props) {
     };
 
     const executeCashMovementsQuery = async () => {
-        if (!cashMovements || cashMovements.length === 0) {
-            try { await loadCashMovements(); } catch (e) { console.warn('⚠️ No se pudo recargar movimientos desde backend:', e && e.message); }
+
+        
+        
+        let movementsToProcess = cashMovements;
+        if (!movementsToProcess || movementsToProcess.length === 0) {
+            try {
+                const freshMovements = await loadCashMovements();
+                movementsToProcess = freshMovements;
+            } catch (e) {
+                console.warn('⚠️ No se pudo recargar movimientos desde backend:', e && e.message);
+                movementsToProcess = [];
+            }
         }
-        const normalized = (cashMovements || []).map(m => { const rawDate = m.date || m.timestamp || m.created_at || m.date_iso || ''; let type = (m.type || '').toString(); const tLower = type.toLowerCase(); if (tLower.startsWith('e') || tLower.includes('entrada') || tLower === 'in') type = 'Entrada'; else if (tLower.startsWith('s') || tLower.includes('salida') || tLower === 'out') type = 'Salida'; else type = m.type || type; const amount = (() => { const a = m.amount; const num = typeof a === 'number' ? a : parseFloat(a); return isNaN(num) ? 0 : num; })(); return { id: m.id, date: rawDate, type, amount, description: m.description || '', user: m.user || (m.user_username || m.user_name) || 'Sistema', _raw: m }; });
+
+        const normalized = (movementsToProcess || []).map(m => {
+            const rawDate = m.date || m.timestamp || m.created_at || m.date_iso || '';
+            let type = (m.type || '').toString();
+            const tLower = type.toLowerCase();
+            if (tLower.startsWith('e') || tLower.includes('entrada') || tLower === 'in') type = 'Entrada';
+            else if (tLower.startsWith('s') || tLower.includes('salida') || tLower === 'out') type = 'Salida';
+            else type = m.type || type;
+            const amount = (() => { const a = m.amount; const num = typeof a === 'number' ? a : parseFloat(a); return isNaN(num) ? 0 : num; })();
+            return { id: m.id, date: rawDate, type, amount, description: m.description || '', user: m.user || (m.user_username || m.user_name) || 'Sistema', payment_method: m.payment_method || '', _raw: m };
+        });
+
         const filteredMovements = normalized.filter(movement => {
             if (startDate && endDate) {
                 const movementDate = parseAnyDate(movement.date);
                 const start = parseAnyDate(startDate);
                 const end = parseAnyDate(endDate);
+
+                // Adjust end date to include the entire day
+             
+
                 if (!movementDate || !start || !end) return false;
                 return movementDate >= start && movementDate <= end;
             }
+            if (startDate && !endDate) {
+                setMessage('Por favor, ingrese una fecha de fin.');
+                return false;
+            }
             return true;
         });
+
         const totalIncome = filteredMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : 0), 0);
         const totalExpenses = filteredMovements.reduce((sum, m) => sum + (m.type === 'Salida' ? m.amount : 0), 0);
-        const results = { title: 'Reporte de Movimientos de Caja', summary: { totalMovements: filteredMovements.length, totalIncome: safeToFixed(totalIncome), totalExpenses: safeToFixed(totalExpenses), period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos' }, data: filteredMovements.map(movement => ({ id: movement.id, date: movement.date, type: movement.type, amount: movement.amount, description: movement.description, user: movement.user })) };
+        const results = { title: 'Reporte de Movimientos de Caja', summary: { totalMovements: filteredMovements.length, totalIncome: safeToFixed(totalIncome), totalExpenses: safeToFixed(totalExpenses), period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos' }, data: filteredMovements.map(movement => ({ id: movement.id, date: movement.date, type: movement.type, amount: movement.amount, description: movement.description, user: movement.user, payment_method: movement.payment_method })) };
+        
         setQueryResults(results);
         return results;
     };
@@ -356,6 +387,15 @@ export default function DataConsultation(props) {
                                     return (
                                         <table>
                                             <thead><tr>{cols.map(key=> <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>)}</tr></thead>
+                                            <tbody>{queryResults.data.map((row, index) => (<tr key={index}>{cols.map((k, ci) => (<td key={ci}>{renderCellValue(row[k])}</td>))}</tr>))}</tbody>
+                                        </table>
+                                    );
+                                }
+                                if (selectedQuery === 'movimientos_caja') {
+                                    const cols = ['id', 'date', 'type', 'amount', 'payment_method', 'description', 'user'];
+                                    return (
+                                        <table>
+                                            <thead><tr>{cols.map(key=> <th key={key}>{headerTranslationMap[key] || key.replace(/_/g, ' ').replace(/^./, str => str.toUpperCase())}</th>)}</tr></thead>
                                             <tbody>{queryResults.data.map((row, index) => (<tr key={index}>{cols.map((k, ci) => (<td key={ci}>{renderCellValue(row[k])}</td>))}</tr>))}</tbody>
                                         </table>
                                     );
