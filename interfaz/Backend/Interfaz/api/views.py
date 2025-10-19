@@ -17,8 +17,6 @@ from .serializers import (
     LowStockReportSerializer, InventoryChangeAuditSerializer
 )
 from .models import UserStorage
-from datetime import datetime, timedelta
-
 
 # Permiso personalizado para rol de Gerente
 class IsGerente(BasePermission):
@@ -611,36 +609,10 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 # ViewSet para la gestión de movimientos de caja (CRUD)
 class CashMovementViewSet(viewsets.ModelViewSet):
-    #queryset = CashMovement.objects.all()
+    queryset = CashMovement.objects.all()
     serializer_class = CashMovementSerializer
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        """
-        Filtra por el campo 'timestamp' (no 'date'), comparando solo la parte de la fecha
-        para ser compatible con la zona horaria (timezone-aware).
-        """
-        queryset = CashMovement.objects.all()
-        start_date_str = self.request.query_params.get('start_date', None)
-        end_date_str = self.request.query_params.get('end_date', None)
-
-        try:
-            if start_date_str:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-                # CORRECCIÓN: Usar timestamp__date__gte
-                queryset = queryset.filter(timestamp__date__gte=start_date)
-
-            if end_date_str:
-                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
-                # CORRECCIÓN: Usar timestamp__date__lte
-                queryset = queryset.filter(timestamp__lte=f"{end_date} 23:59:59")
-        except (ValueError, TypeError):
-            # Si el formato de fecha es inválido, no hacemos nada para evitar un crash.
-            print(f"ADVERTENCIA: Se recibió un formato de fecha inválido. Se ignora el filtro.")
-            pass
-        
-        return queryset.order_by('-timestamp')
-    
     def perform_create(self, serializer):
         try:
             # Log minimal info for diagnostics (no token values)
@@ -658,9 +630,6 @@ class CashMovementViewSet(viewsets.ModelViewSet):
         except Exception as e:
             print(f"[CashMovementViewSet.list] Error checking cookies: {e}")
         return super().list(request, *args, **kwargs)
-    
-    
-    
 
 # ViewSet para la gestión de cambios de inventario (CRUD)
 class InventoryChangeViewSet(viewsets.ModelViewSet):

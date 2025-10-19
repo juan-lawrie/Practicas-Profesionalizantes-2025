@@ -116,6 +116,7 @@ class ProductSerializer(serializers.ModelSerializer):
         return value
 # Serializer para el modelo de movimiento de caja
 class CashMovementSerializer(serializers.ModelSerializer):
+   
     user = serializers.ReadOnlyField(source='user.username')
     
     class Meta:
@@ -248,7 +249,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
             return total
         return obj.total_amount
 
-
+#Serializador para  un solo articulo dentro de un pedido
 class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem

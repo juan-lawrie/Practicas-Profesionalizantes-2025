@@ -3187,11 +3187,12 @@ const PurchaseRequests = () => {
     
         // Mapeo de traducción para encabezados de tablas
         const headerTranslationMap = {
-            'name': 'Producto/Insumo',
+            
+            'name': 'Nombre',
             'cuit': 'CUIT',
             'phone': 'Teléfono',
             'address': 'Dirección',
-            'products': 'Productos',
+            'products': 'Producto',
             'items': 'Insumo/Producto',
             'id': 'ID',
             'date': 'Fecha',
@@ -3225,7 +3226,7 @@ const PurchaseRequests = () => {
             'paymentMethod': 'Método de Pago',
             'payment_method': 'Método de Pago',
             'payment_method': 'Método de Pago',
-            'products': 'Productos',
+            'products': 'Producto/Insumo',
             'units': 'Unidades',
             'totalMovements': 'Total de Movimientos',
             'totalIncome': 'Ingresos Totales',
@@ -3756,12 +3757,11 @@ const PurchaseRequests = () => {
                     getInMemoryToken={getInMemoryToken}
                     loadSales={loadSales}
                     loadCashMovements={loadCashMovements}
-                    inventory={inventory}
-                    suppliers={suppliers}
-                    purchases={purchases}
-                    orders={orders}
-                    cashMovements={cashMovements}
-                    sales={sales}
+                            inventory={inventory}
+                            suppliers={suppliers}
+                            purchases={purchaseHistory}
+                            orders={orders}
+                            cashMovements={cashMovements}                    sales={sales}
                     headerTranslationMap={headerTranslationMap}
                     safeToFixed={safeToFixed}
                 />;
