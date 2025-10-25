@@ -131,6 +131,35 @@ const getPurchaseHistory = () => {
   return api.get('/purchases/history/');
 };
 
+// Funciones para la gestión de recetas
+const getRecipe = (productId) => {
+  return api.get(`/recipe-ingredients/?product_id=${productId}`);
+};
+
+const addRecipeIngredient = (ingredientData) => {
+  return api.post('/recipe-ingredients/', ingredientData);
+};
+
+const updateRecipeIngredient = (ingredientId, ingredientData) => {
+  return api.patch(`/recipe-ingredients/${ingredientId}/`, ingredientData);
+};
+
+const deleteRecipeIngredient = (ingredientId) => {
+  return api.delete(`/recipe-ingredients/${ingredientId}/`);
+};
+
+const getIngredients = () => {
+  return api.get('/products/?is_ingredient=true');
+};
+
+const produceProduct = (productId, quantity) => {
+  return api.post('/products/produce/', { product_id: productId, quantity });
+};
+
+const getIngredientsWithSuggestedUnit = () => {
+  return api.get('/ingredients/suggested-units/');
+};
+
 export default api;
 
 // Exportar los helpers públicos (incluyendo setters para el token en memoria)
@@ -144,5 +173,12 @@ export {
   getPendingPurchases,
   approvePurchase,
   rejectPurchase,
-  getPurchaseHistory
+  getPurchaseHistory,
+  getRecipe,
+  addRecipeIngredient,
+  updateRecipeIngredient,
+  deleteRecipeIngredient,
+  getIngredients,
+  getIngredientsWithSuggestedUnit,
+  produceProduct
 };

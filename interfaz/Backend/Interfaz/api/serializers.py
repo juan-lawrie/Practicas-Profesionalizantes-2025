@@ -1,7 +1,16 @@
 # backend/api/serializers.py
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Product, CashMovement, InventoryChange, Sale, SaleItem, Role, UserQuery, Supplier, UserStorage, LowStockReport
+import math
+from .models import (
+    Product, CashMovement, InventoryChange, Sale, SaleItem, Role, 
+    UserQuery, Supplier, UserStorage, LowStockReport, RecipeIngredient, LossRecord
+)
+from .models import Purchase
+from .models import Order, OrderItem
+
+User = get_user_model()  # Usa el modelo de usuario personalizado
+
 # Serializer para el modelo de proveedor
 class SupplierSerializer(serializers.ModelSerializer):
     class Meta:
@@ -13,10 +22,6 @@ class UserStorageSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserStorage
         fields = ['id', 'key', 'value', 'updated_at']
-from .models import Purchase
-from .models import Order, OrderItem
-
-User = get_user_model()  # Usa el modelo de usuario personalizado
 
 class RoleSerializer(serializers.ModelSerializer):
     class Meta:
@@ -79,15 +84,49 @@ class UserCreateSerializer(serializers.ModelSerializer):
         )
         return user
 
+# Serializer para los ingredientes de una receta
+class RecipeIngredientSerializer(serializers.ModelSerializer):
+    ingredient_name = serializers.CharField(source='ingredient.name', read_only=True)
+
+    class Meta:
+        model = RecipeIngredient
+        fields = ['id', 'product', 'ingredient', 'ingredient_name', 'quantity', 'unit']
+        read_only_fields = ['product']
+
+# Serializer for writing recipe ingredients
+class RecipeIngredientWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecipeIngredient
+        fields = ['ingredient', 'quantity', 'unit']
+
 # Serializer para el modelo de producto
 class ProductSerializer(serializers.ModelSerializer):
     estado = serializers.SerializerMethodField()
+    recipe = RecipeIngredientSerializer(many=True, read_only=True)
+    recipe_ingredients = RecipeIngredientWriteSerializer(many=True, write_only=True, required=False)
 
     class Meta:
         model = Product
-        fields = '__all__'
-        # Agregamos 'estado' como campo extra
-        extra_fields = ['estado']
+        fields = ['id', 'name', 'description', 'price', 'stock', 'recipe_yield', 'loss_rate', 'low_stock_threshold', 'category', 'is_ingredient', 'unit', 'recipe', 'recipe_ingredients', 'estado']
+
+    def validate_recipe_yield(self, value):
+        try:
+            v = int(value)
+        except Exception:
+            raise serializers.ValidationError('Rendimiento de la receta inválido')
+        if v < 1:
+            raise serializers.ValidationError('Rendimiento de la receta debe ser al menos 1')
+        # Verificar que el valor se está procesando correctamente
+        return v
+
+    def validate_loss_rate(self, value):
+        try:
+            v = float(value)
+        except Exception:
+            raise serializers.ValidationError('Tasa de pérdida inválida')
+        if v < 0 or v > 1:
+            raise serializers.ValidationError('Tasa de pérdida debe estar entre 0% y 100% (0.0 - 1.0)')
+        return value
 
     def get_estado(self, obj):
         # Lógica: Activo si stock > 0, Inactivo si stock == 0
@@ -114,6 +153,95 @@ class ProductSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("El umbral de stock bajo no puede ser negativo.")
         return value
+
+    def create(self, validated_data):
+        from django.db import transaction
+        
+        recipe_data = validated_data.pop('recipe_ingredients', [])
+        initial_stock = validated_data.get('stock', 0)
+
+        with transaction.atomic():
+            product = Product.objects.create(**validated_data)
+
+            # Create recipe links
+            for item_data in recipe_data:
+                RecipeIngredient.objects.create(product=product, **item_data)
+
+            # If the created product has an initial stock, deduct ingredients from inventory
+            if initial_stock > 0 and recipe_data:
+                # Determine recipe_yield (units per lote)
+                try:
+                    recipe_yield = int(validated_data.get('recipe_yield', 1))
+                    if recipe_yield < 1:
+                        recipe_yield = 1
+                except Exception:
+                    recipe_yield = 1
+
+                # Calcular cuánto de cada insumo se necesita proporcionalmente
+                # Si initial_stock < recipe_yield se usa la fracción (initial_stock / recipe_yield)
+                try:
+                    initial_stock_float = float(initial_stock)
+                except Exception:
+                    initial_stock_float = 0.0
+
+                multiplier = (initial_stock_float / recipe_yield) if recipe_yield and initial_stock_float > 0 else 0.0
+
+                for item_data in recipe_data:
+                    ingredient = item_data.get('ingredient')
+                    quantity_per_lot = item_data.get('quantity')
+                    unit = item_data.get('unit') or ''
+
+                    if not ingredient or not quantity_per_lot or quantity_per_lot <= 0:
+                        continue
+
+                    # Cantidad proporcional requerida
+                    total_needed = float(quantity_per_lot) * float(multiplier)
+
+                    # Para unidades indivisibles, redondear hacia arriba
+                    if str(unit).lower() in ['unidades', 'unidad', 'u', 'uds']:
+                        required_to_deduct = float(math.ceil(total_needed))
+                    else:
+                        required_to_deduct = float(total_needed)
+
+                    # Lock ingredient for update and deduct stock
+                    ingredient_to_update = Product.objects.select_for_update().get(pk=ingredient.pk)
+
+                    if float(ingredient_to_update.stock) < required_to_deduct:
+                        raise serializers.ValidationError(
+                            f"No hay suficiente stock para el insumo '{ingredient.name}'. "
+                            f"Necesario: {required_to_deduct}, Disponible: {ingredient_to_update.stock}"
+                        )
+
+                    ingredient_to_update.stock = float(ingredient_to_update.stock) - required_to_deduct
+                    ingredient_to_update.save()
+
+        return product
+
+    def update(self, instance, validated_data):
+        recipe_data = validated_data.pop('recipe_ingredients', None)
+        
+        # Actualizar cada campo manualmente para asegurar que se guarde
+        instance.name = validated_data.get('name', instance.name)
+        instance.price = validated_data.get('price', instance.price)
+        instance.category = validated_data.get('category', instance.category)
+        instance.stock = validated_data.get('stock', instance.stock)
+        instance.description = validated_data.get('description', instance.description)
+        instance.low_stock_threshold = validated_data.get('low_stock_threshold', instance.low_stock_threshold)
+        instance.recipe_yield = validated_data.get('recipe_yield', instance.recipe_yield)
+        instance.loss_rate = validated_data.get('loss_rate', instance.loss_rate)
+        instance.is_ingredient = validated_data.get('is_ingredient', instance.is_ingredient)
+        instance.unit = validated_data.get('unit', instance.unit)
+        
+        instance.save()
+        
+        # Solo procesar ingredientes si se enviaron explícitamente
+        if recipe_data is not None:
+            # Si se envían ingredientes nuevos, agregarlos sin borrar los existentes
+            for recipe_item_data in recipe_data:
+                RecipeIngredient.objects.create(product=instance, **recipe_item_data)
+        
+        return instance
+
 # Serializer para el modelo de movimiento de caja
 class CashMovementSerializer(serializers.ModelSerializer):
    
@@ -135,25 +263,26 @@ class InventoryChangeSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         # Normalize quantity: accept negative for 'Salida' but store positive
+        from decimal import Decimal, InvalidOperation
         change_type = attrs.get('type') or getattr(self.instance, 'type', None)
         qty = attrs.get('quantity')
         if qty is None:
             raise serializers.ValidationError({'quantity': 'La cantidad es requerida.'})
 
         try:
-            qty_int = int(qty)
-        except (TypeError, ValueError):
+            qty_decimal = Decimal(str(qty))
+        except InvalidOperation:
             raise serializers.ValidationError({'quantity': 'Cantidad inválida.'})
 
-        if change_type == 'Salida' and qty_int > 0:
+        if change_type == 'Salida' and qty_decimal > 0:
             # allow frontend to send negative; but accept positive and interpret as exit
             # we will treat quantity as absolute value when applying
             pass
 
-        if qty_int < 0:
-            qty_int = abs(qty_int)
+        if qty_decimal < 0:
+            qty_decimal = abs(qty_decimal)
 
-        attrs['quantity'] = qty_int
+        attrs['quantity'] = qty_decimal
         return attrs
 
 
@@ -289,6 +418,68 @@ class InventoryChangeAuditSerializer(serializers.ModelSerializer):
         model = getattr(__import__('api.models', fromlist=['InventoryChangeAudit']), 'InventoryChangeAudit')
         fields = ('id', 'inventory_change', 'product', 'product_name', 'user', 'role', 'change_type', 'quantity', 'previous_stock', 'new_stock', 'reason', 'timestamp')
         read_only_fields = ('id', 'inventory_change', 'product_name', 'user', 'previous_stock', 'new_stock', 'timestamp')
+
+# Serializer para registros de pérdidas
+class LossRecordSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    user_name = serializers.CharField(source='user.username', read_only=True)
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+
+    class Meta:
+        model = LossRecord
+        fields = ['id', 'product', 'product_name', 'quantity', 'category', 'category_display', 'description', 'cost_estimate', 'timestamp', 'user', 'user_name']
+        read_only_fields = ['id', 'timestamp', 'user', 'cost_estimate']
+
+    def validate(self, data):
+        product = data.get('product')
+        category = data.get('category')
+        
+        if product and category:
+            try:
+                from .models import Product
+                if product.category == 'Insumo':
+                    valid_categories = ['empaque_danado', 'sobreuso_receta', 'vencimiento', 'cadena_frio']
+                else:
+                    valid_categories = ['accidente_fisico', 'contaminacion', 'vencimiento', 'cadena_frio']
+                
+                if category not in valid_categories:
+                    raise serializers.ValidationError(f'Categoría inválida para este tipo de producto')
+            except Exception as e:
+                raise serializers.ValidationError(f'Error validando producto: {str(e)}')
+        
+        return data
+
+    def create(self, validated_data):
+        from django.db import transaction
+        
+        # Calcular costo estimado automáticamente
+        product = validated_data['product']
+        quantity = validated_data['quantity']
+        validated_data['cost_estimate'] = float(product.price) * float(quantity)
+        
+        with transaction.atomic():
+            # Crear registro de pérdida
+            loss_record = super().create(validated_data)
+            
+            # Actualizar stock del producto (restar la cantidad perdida)
+            product.stock = float(product.stock) - float(quantity)
+            if product.stock < 0:
+                product.stock = 0
+            product.save()
+            
+            return loss_record
+            
+            # Crear registro en InventoryChange para auditoría
+            from .models import InventoryChange
+            InventoryChange.objects.create(
+                product=product,
+                type='Salida',
+                quantity=quantity,
+                reason=f'Pérdida: {loss_record.get_category_display()} - {loss_record.description or "Sin descripción"}',
+                user=validated_data.get('user')
+            )
+            
+        return loss_record
 
 class LowStockReportSerializer(serializers.ModelSerializer):
     reported_by = serializers.ReadOnlyField(source='reported_by.username')

@@ -58,9 +58,9 @@ export default function DataConsultation(props) {
             }
         } catch (error) {
             if (error.response?.status === 404) {
-                console.log('No hay ninguna consulta guardada para este usuario.');
+                // No hay consulta guardada
             } else {
-                console.warn('Error cargando consulta activa (no se limpiarán resultados):', error?.response?.data || error?.message || error);
+                // Error cargando consulta activa
             }
         } finally { setIsLoading(false); }
     };
@@ -73,24 +73,24 @@ export default function DataConsultation(props) {
             if (items && items.length > 0) {
                 const existing = items[0];
                 const id = existing.id;
-                try { const patchResp = await api.patch(`/user-queries/${id}/`, payload); if (patchResp?.data) return; } catch (patchErr) { console.warn('⚠️ Error parchando consulta existente, fallback a POST', patchErr?.message || patchErr); }
+                try { const patchResp = await api.patch(`/user-queries/${id}/`, payload); if (patchResp?.data) return; } catch (patchErr) { /* Error parchando consulta existente, fallback a POST */ }
             }
             const postResp = await api.post('/user-queries/', payload);
             if (postResp?.data) return;
         } catch (error) {
-            console.warn('Advertencia al guardar consulta, intentando recuperación:', error?.response?.data || error?.message || error);
+            // Advertencia al guardar consulta, intentando recuperación
             try {
                 const listResp2 = await api.get(`/user-queries/?query_type=${encodeURIComponent(queryType)}`);
                 const items2 = Array.isArray(listResp2.data) ? listResp2.data : (listResp2.data?.results || []);
                 if (items2 && items2.length > 0) {
                     const existing = items2[0]; const id = existing.id; const patchResp2 = await api.patch(`/user-queries/${id}/`, payload); if (patchResp2?.data) return;
                 }
-            } catch (recErr) { console.error('Error intentando recuperar/actualizar consulta después de fallo:', recErr?.message || recErr); }
-            console.error('Error final guardando consulta (no creada ni actualizada).');
+            } catch (recErr) { /* Error intentando recuperar/actualizar consulta después de fallo */ }
+            // Error final guardando consulta
         }
     };
 
-    const clearActiveQuery = async () => { try { await api.post('/user-queries/clear_active_query/'); console.log('🧹 Consulta activa limpiada del backend'); } catch (error) { console.error('Error limpiando consulta:', error?.response?.data || error?.message); } };
+    const clearActiveQuery = async () => { try { await api.post('/user-queries/clear_active_query/'); /* Consulta activa limpiada */ } catch (error) { /* Error limpiando consulta */ } };
 
     const parseAnyDate = (dateStr) => {
         if (!dateStr) return null;
@@ -126,10 +126,102 @@ export default function DataConsultation(props) {
             return; // Detiene la ejecución si faltan fechas
     }
         const lowStockItems = inventory.filter(item => item.stock < 10);
+        
+        // Formatear unidades correctamente - convertir de unidades base a unidades de visualización
+        const formatStockWithUnit = (stock, unit) => {
+            const stockNum = parseFloat(stock) || 0;
+            
+            if (!unit || unit === 'u' || unit === 'unidades' || unit === 'Unidades') {
+                return `${stockNum}U`;
+            } else if (unit === 'g' || unit === 'gramos') {
+                // Convertir gramos a kilogramos
+                const kg = (stockNum / 1000).toFixed(3);
+                return `${parseFloat(kg)}Kg`;
+            } else if (unit === 'ml' || unit === 'mililitros') {
+                // Convertir mililitros a litros
+                const liters = (stockNum / 1000).toFixed(3);
+                return `${parseFloat(liters)}L`;
+            }
+            return `${stockNum}${unit}`;
+        };
+
+        // Calcular totales de stock por categoría y unidad
+        const calculateTotalStock = () => {
+            const totals = {
+                productos: { kg: 0, l: 0, u: 0 },
+                insumos: { kg: 0, l: 0, u: 0 }
+            };
+            
+            inventory.forEach(item => {
+                const stockNum = parseFloat(item.stock) || 0;
+                const category = (item.type || item.category || '').toLowerCase();
+                const unit = item.unit || 'u';
+                
+                if (category === 'producto') {
+                    if (unit === 'g') {
+                        totals.productos.kg += stockNum / 1000;
+                    } else if (unit === 'ml') {
+                        totals.productos.l += stockNum / 1000;
+                    } else {
+                        totals.productos.u += stockNum;
+                    }
+                } else if (category === 'insumo') {
+                    if (unit === 'g') {
+                        totals.insumos.kg += stockNum / 1000;
+                    } else if (unit === 'ml') {
+                        totals.insumos.l += stockNum / 1000;
+                    } else {
+                        totals.insumos.u += stockNum;
+                    }
+                }
+            });
+            
+            // Formatear los totales
+            const formatTotal = (value, unit) => {
+                if (value === 0) return null;
+                return `${value.toFixed(2)}${unit}`;
+            };
+            
+            const productTotals = [
+                formatTotal(totals.productos.kg, 'Kg'),
+                formatTotal(totals.productos.l, 'L'),
+                formatTotal(totals.productos.u, 'U')
+            ].filter(Boolean);
+            
+            const insumoTotals = [
+                formatTotal(totals.insumos.kg, 'Kg'),
+                formatTotal(totals.insumos.l, 'L'),
+                formatTotal(totals.insumos.u, 'U')
+            ].filter(Boolean);
+            
+            return {
+                productos: productTotals.length > 0 ? productTotals.join(' + ') : '0',
+                insumos: insumoTotals.length > 0 ? insumoTotals.join(' + ') : '0'
+            };
+        };
+        
+        const stockTotals = calculateTotalStock();
+
+        // Calcular totales separados por categoría
+        const productos = inventory.filter(item => (item.type || item.category || '').toLowerCase() === 'producto');
+        const insumos = inventory.filter(item => (item.type || item.category || '').toLowerCase() === 'insumo');
+
         const results = {
             title: 'Estado del Stock',
-            summary: { totalProducts: inventory.length, lowStockItems: lowStockItems.length, totalStock: inventory.reduce((s,i)=>s+(i.stock||0),0) },
-            data: inventory.map(item => ({ id: item.id, name: item.name, stock: item.stock, type: item.type, price: item.price, status: item.stock < 10 ? 'Stock Bajo' : item.stock < 20 ? 'Stock Medio' : 'Stock Alto' }))
+            summary: { 
+                totalProducts: productos.length, 
+                totalInsumos: insumos.length,
+                lowStockItems: lowStockItems.length,
+                totalStock: `Productos: ${stockTotals.productos} | Insumos: ${stockTotals.insumos}`
+            },
+            data: inventory.map(item => ({ 
+                id: item.id, 
+                name: item.name, 
+                stock: formatStockWithUnit(item.stock, item.unit), 
+                type: item.type || item.category, 
+                price: item.price, 
+                status: item.stock < 10 ? 'Stock Bajo' : item.stock < 20 ? 'Stock Medio' : 'Stock Alto' 
+            }))
         };
         return results;
     };
@@ -144,7 +236,7 @@ export default function DataConsultation(props) {
 
         let allSales = Array.isArray(sales) ? sales : [];
         if ((!Array.isArray(allSales) || allSales.length === 0)) {
-            try { const loaded = await loadSales(); allSales = Array.isArray(loaded) && loaded.length > 0 ? loaded : (Array.isArray(sales) ? sales : []); } catch (e) { console.debug('⚠️ No se pudieron cargar ventas desde backend en executeSalesQuery:', e && e.message); allSales = Array.isArray(sales) ? sales : []; }
+            try { const loaded = await loadSales(); allSales = Array.isArray(loaded) && loaded.length > 0 ? loaded : (Array.isArray(sales) ? sales : []); } catch (e) { /* No se pudieron cargar ventas desde backend */ allSales = Array.isArray(sales) ? sales : []; }
         }
         const rows = [];
         for (const s of allSales) {
@@ -208,7 +300,7 @@ export default function DataConsultation(props) {
             const itemsNames = itemsArray.map(i => i.productName).filter(Boolean).join(', ');
             const detectedTypes = Array.from(new Set(itemsArray.map(i => (i.category || '').toString().toLowerCase()).filter(Boolean)));
             let purchaseType = 'Producto'; if (detectedTypes.length === 0) purchaseType = 'Producto'; else if (detectedTypes.length === 1) purchaseType = detectedTypes[0].includes('insumo') ? 'Insumo' : (detectedTypes[0].includes('producto') ? 'Producto' : 'Producto'); else purchaseType = 'Mixto';
-            return { id: purchase.id, date: purchase.date, supplier: supplierName, items: itemsNames, total: totalAmount, status: purchase.status || 'Completada', type: purchaseType };
+            return { id: purchase.id, date: purchase.date, supplier: supplierName, items: itemsArray, total: totalAmount, status: purchase.status || 'Completada', type: purchaseType };
         });
         const results = { title: 'Reporte de Compras', summary: { totalPurchases: normalized.length, totalAmount: normalized.reduce((sum, p) => sum + (Number(p.total) || 0), 0), period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos' }, data: normalized };
         setQueryResults(results);
@@ -250,7 +342,7 @@ export default function DataConsultation(props) {
                 const freshMovements = await loadCashMovements();
                 movementsToProcess = freshMovements;
             } catch (e) {
-                console.warn('⚠️ No se pudo recargar movimientos desde backend:', e && e.message);
+                // No se pudo recargar movimientos desde backend
                 movementsToProcess = [];
             }
         }
@@ -321,7 +413,7 @@ export default function DataConsultation(props) {
             }
             if (results) {
                 setQueryResults(results);
-                try { await saveQueryToBackend(selectedQuery, startDate, endDate, results); } catch (e) { console.warn('Advertencia: no se pudo guardar la consulta en backend, pero los resultados se muestran localmente.', e?.message || e); }
+                try { await saveQueryToBackend(selectedQuery, startDate, endDate, results); } catch (e) { /* No se pudo guardar la consulta en backend, pero los resultados se muestran localmente */ }
                 setQueryResults(results);
             }
         } catch (error) { setMessage('🚫 Error ejecutando la consulta: ' + (error.message || error)); }
@@ -364,7 +456,9 @@ export default function DataConsultation(props) {
                     <div className="results-summary">
                         {Object.entries(queryResults.summary).map(([key, value]) => (
                             <div key={key} className="summary-item">
-                                <strong>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</strong> {value}
+                                <strong>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</strong> {
+                                    typeof value === 'number' ? value.toLocaleString() : value
+                                }
                             </div>
                         ))}
                     </div>
@@ -435,6 +529,50 @@ export default function DataConsultation(props) {
                                         </table>
                                     );
                                 }
+                                if (selectedQuery === 'compras') {
+                                    const cols = ['id', 'date', 'supplier', 'items', 'total', 'status', 'type'];
+                                    const renderCompraItems = (items) => {
+                                        if (Array.isArray(items)) {
+                                            return items.map(item => {
+                                                if (typeof item === 'object' && item.productName && item.quantity) {
+                                                    // Simular lo que hace el backend: determinar unidad basada en tipo de producto
+                                                    const productName = item.productName || item.product_name || item.name || '';
+                                                    const quantity = item.quantity || 0;
+                                                    
+                                                    // Buscar el producto en inventory para obtener su unidad
+                                                    const foundProduct = inventory.find(p => 
+                                                        p && p.name && p.name.toLowerCase() === productName.toLowerCase()
+                                                    );
+                                                    
+                                                    if (foundProduct && quantity > 0) {
+                                                        const unit = foundProduct.unit;
+                                                        if (unit === 'g') {
+                                                            return `${productName} ${quantity}Kg`;
+                                                        } else if (unit === 'ml') {
+                                                            return `${productName} ${quantity}L`;
+                                                        } else {
+                                                            return `${productName} ${quantity}U`;
+                                                        }
+                                                    } else {
+                                                        return `${productName} ${quantity}U`;
+                                                    }
+                                                } else if (typeof item === 'object' && item.productName) {
+                                                    return item.productName || item.product_name || item.name || '';
+                                                } else {
+                                                    return String(item || '');
+                                                }
+                                            }).filter(Boolean).join(', ');
+                                        }
+                                        return String(items || '');
+                                    };
+                                    return (
+                                        <table>
+                                            <thead><tr>{cols.map(key=> <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>)}</tr></thead>
+                                            <tbody>{queryResults.data.map((row, index) => (<tr key={index}>{cols.map((k, ci) => (<td key={ci}>{k === 'items' ? renderCompraItems(row[k]) : renderCellValue(row[k])}</td>))}</tr>))}</tbody>
+                                        </table>
+                                    );
+                                }
+
                                 const keys = Object.keys(sample);
                                 return (
                                     <table>

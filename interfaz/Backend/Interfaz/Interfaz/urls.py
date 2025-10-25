@@ -25,7 +25,9 @@ from api.views import (
     InventoryChangeViewSet, SaleViewSet, SaleCreate,
     UserListCreate, UserDestroy, login_view, ExportDataView,
     UserQueryViewSet, SupplierViewSet, UserStorageViewSet, CurrentUserView,
-    LowStockReportCreateView, LowStockReportListView, LowStockReportUpdateView
+    LowStockReportCreateView, LowStockReportListView, LowStockReportUpdateView,
+    RecipeIngredientViewSet, ProductProductionView, LossRecordViewSet,
+    get_ingredients_with_suggested_unit
 )
 from api.views import RoleViewSet
 from api.views import PurchaseViewSet, OrderViewSet, refresh_from_cookie, logout_view
@@ -51,6 +53,8 @@ router.register(r'purchases', PurchaseViewSet, basename='purchase')
 router.register(r'orders', OrderViewSet, basename='order')
 router.register(r'suppliers', SupplierViewSet, basename='supplier')
 router.register(r'inventory-change-audits', __import__('api.views', fromlist=['InventoryChangeAuditViewSet']).InventoryChangeAuditViewSet, basename='inventory-change-audit')
+router.register(r'recipe-ingredients', RecipeIngredientViewSet, basename='recipe-ingredient')
+router.register(r'loss-records', LossRecordViewSet, basename='loss-record')
 
 
 def root_redirect(request):
@@ -60,6 +64,8 @@ urlpatterns = [
     path('', root_redirect),
     path('admin/', admin.site.urls),
     # URLs específicas primero para evitar conflictos
+    path('api/products/produce/', ProductProductionView.as_view(), name='product-production'),
+    path('api/ingredients/suggested-units/', get_ingredients_with_suggested_unit, name='ingredients-suggested-units'),
     path('api/users/me/', CurrentUserView.as_view(), name='user-me'),
     path('api/users/create/', UserListCreate.as_view(), name='user-list-create'),
     path('api/users/<int:pk>/delete/', UserDestroy.as_view(), name='user-delete'),

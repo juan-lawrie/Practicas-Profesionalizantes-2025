@@ -7,16 +7,19 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport
+from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport, RecipeIngredient, LossRecord
 from django.conf import settings
 from django.utils import timezone
 from .serializers import (
     UserSerializer, UserCreateSerializer, ProductSerializer,
     CashMovementSerializer, InventoryChangeSerializer, SaleSerializer,
     UserQuerySerializer, SupplierSerializer, UserStorageSerializer, RoleSerializer, UserUpdateSerializer,
-    LowStockReportSerializer, InventoryChangeAuditSerializer
+    LowStockReportSerializer, InventoryChangeAuditSerializer, RecipeIngredientSerializer, RecipeIngredientWriteSerializer, LossRecordSerializer
 )
 from .models import UserStorage
+from django.db import transaction
+from decimal import Decimal
+from rest_framework.exceptions import ValidationError
 
 # Permiso personalizado para rol de Gerente
 class IsGerente(BasePermission):
@@ -394,6 +397,167 @@ class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [IsAuthenticated]
+    
+    def update(self, request, *args, **kwargs):
+        # Forzar update completo en lugar de partial_update
+        kwargs['partial'] = False
+        return super().update(request, *args, **kwargs)
+    
+    def partial_update(self, request, *args, **kwargs):
+        # También manejar partial_update explícitamente
+        return super().partial_update(request, *args, **kwargs)
+    
+    @action(detail=True, methods=['patch', 'put'])
+    def update_recipe_yield(self, request, pk=None):
+        """Endpoint específico para actualizar solo recipe_yield"""
+        product = self.get_object()
+        recipe_yield = request.data.get('recipe_yield')
+        
+        print(f"ENDPOINT update_recipe_yield - Recibido: {recipe_yield} (tipo: {type(recipe_yield)})")
+        
+        if recipe_yield is not None:
+            try:
+                recipe_yield = int(recipe_yield)
+                if recipe_yield < 1:
+                    return Response({'error': 'El rendimiento debe ser al menos 1'}, status=400)
+                
+                print(f"ENDPOINT update_recipe_yield - Antes: {product.recipe_yield}")
+                product.recipe_yield = recipe_yield
+                product.save()
+                print(f"ENDPOINT update_recipe_yield - Después: {product.recipe_yield}")
+                
+                # Recargar desde la BD para asegurar que se guardó
+                product.refresh_from_db()
+                print(f"ENDPOINT update_recipe_yield - Después de refresh: {product.recipe_yield}")
+                
+                serializer = self.get_serializer(product)
+                return Response(serializer.data)
+            except ValueError:
+                return Response({'error': 'Valor inválido para recipe_yield'}, status=400)
+        
+        return Response({'error': 'recipe_yield requerido'}, status=400)
+    
+    @action(detail=True, methods=['get'])
+    def diagnose_recipe_yield(self, request, pk=None):
+        """Endpoint de diagnóstico para recipe_yield"""
+        from django.db import connection
+        
+        product = self.get_object()
+        
+        # Consulta directa a la BD
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT recipe_yield FROM api_product WHERE id = %s", [pk])
+            db_value = cursor.fetchone()[0] if cursor.rowcount > 0 else None
+        
+        return Response({
+            'product_id': product.id,
+            'instance_recipe_yield': product.recipe_yield,
+            'db_recipe_yield': db_value,
+            'serializer_data': self.get_serializer(product).data
+        })
+
+
+class RecipeIngredientViewSet(viewsets.ModelViewSet):
+    serializer_class = RecipeIngredientSerializer
+    queryset = RecipeIngredient.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action in ['create', 'update', 'partial_update']:
+            return RecipeIngredientWriteSerializer
+        return RecipeIngredientSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        product_id = self.request.query_params.get('product_id')
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        # Obtener el product_id de los datos de la request
+        product_id = self.request.data.get('product')
+        serializer.save(product_id=product_id)
+
+# Vista específica para obtener ingredientes con unidad sugerida para recetas
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_ingredients_with_suggested_unit(request):
+    """
+    Retorna ingredientes disponibles con unidad sugerida automáticamente.
+    Si el producto no tiene la unidad correcta, la corrige automáticamente.
+    """
+    try:
+        ingredients = Product.objects.filter(is_ingredient=True, stock__gt=0)
+        
+        def get_smart_unit(name, current_unit):
+            """Determina la unidad más apropiada basándose en el nombre del ingrediente"""
+            name_lower = name.lower()
+            
+            # Excepciones específicas (gramos)
+            if 'dulce de leche' in name_lower or 'dulce leche' in name_lower:
+                return 'g'
+            
+            # Líquidos (mililitros)
+            if (('leche' in name_lower and 'dulce' not in name_lower) or 
+                'agua' in name_lower or 'aceite' in name_lower or 
+                'vinagre' in name_lower or 'crema' in name_lower or
+                'jugo' in name_lower or 'ml' in name_lower or 'litro' in name_lower):
+                return 'ml'
+            
+            # Unidades individuales
+            if ('huevo' in name_lower or 'sobre' in name_lower or 
+                'cubo' in name_lower or 'unidad' in name_lower):
+                return 'unidades'
+            
+            # Si ya tiene una unidad válida, mantenerla
+            if current_unit in ['g', 'ml', 'unidades']:
+                return current_unit
+                
+            # Por defecto, gramos
+            return 'g'
+        
+        ingredients_data = []
+        for ingredient in ingredients:
+            smart_unit = get_smart_unit(ingredient.name, ingredient.unit)
+            
+            ingredients_data.append({
+                'id': ingredient.id,
+                'name': ingredient.name,
+                'stock': float(ingredient.stock),
+                'unit': ingredient.unit,
+                'suggested_unit': smart_unit
+            })
+        
+        return Response({
+            'success': True,
+            'data': ingredients_data
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': f'Error al obtener ingredientes: {str(e)}'
+        }, status=500)
+
+class IsGerenteOrEncargadoForLoss(BasePermission):
+    """
+    Permite acceso solo a usuarios con rol Gerente o Encargado para gestión de pérdidas.
+    """
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        return request.user.role and request.user.role.name in ['Gerente', 'Encargado']
+
+# ViewSet para registros de pérdidas
+class LossRecordViewSet(viewsets.ModelViewSet):
+    serializer_class = LossRecordSerializer
+    permission_classes = [IsAuthenticated, IsGerenteOrEncargadoForLoss]
+
+    def get_queryset(self):
+        return LossRecord.objects.all().order_by('-timestamp')
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 
 class IsEncargado(BasePermission):
@@ -453,7 +617,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         if items and isinstance(items, list):
             for item in items:
                 qty = item.get('quantity', 0)
-                price = item.get('price', 0)
+                price = item.get('unitPrice', 0)
                 computed_total += Decimal(str(qty)) * Decimal(str(price))
 
         final_total = serializer.validated_data.get('total_amount') or self.request.data.get('total_amount') or computed_total
@@ -486,15 +650,70 @@ class PurchaseViewSet(viewsets.ModelViewSet):
                 if is_manager and isinstance(purchase.items, list):
                     for item in purchase.items:
                         product_id = item.get('product_id')
-                        quantity = item.get('quantity')
-                        if product_id and quantity:
+                        product_name = item.get('productName')
+                        try:
+                            quantity = Decimal(str(item.get('quantity', '0')))
+                            unit_price = Decimal(str(item.get('unitPrice', '0')))
+                        except:
+                            continue
+                        
+                        purchase_unit = item.get('unit', '').lower()
+
+                        if quantity <= 0:
+                            continue
+
+                        product = None
+                        if product_id:
                             try:
                                 product = Product.objects.select_for_update().get(id=product_id)
-                                product.stock += quantity
-                                product.save()
                             except Product.DoesNotExist:
-                                # This will roll back the transaction
                                 raise Exception(f"El producto con ID {product_id} no fue encontrado.")
+                        elif product_name:
+                            base_unit_for_new_product = 'u'
+                            if purchase_unit in ['kg', 'g']:
+                                base_unit_for_new_product = 'g'
+                            elif purchase_unit in ['l', 'ml']:
+                                base_unit_for_new_product = 'ml'
+
+                            product, created = Product.objects.select_for_update().get_or_create(
+                                name=product_name,
+                                defaults={
+                                    'price': unit_price,
+                                    'stock': 0,
+                                    'category': 'Insumo',
+                                    'unit': base_unit_for_new_product,
+                                    'is_ingredient': True
+                                }
+                            )
+                        
+                        if not product:
+                            continue
+
+                        if not purchase_unit:
+                            purchase_unit = product.unit.lower()
+
+                        base_quantity = quantity
+                        product_base_unit = product.unit.lower()
+
+                        # Conversión de unidades de compra a unidad base del producto
+                        if product_base_unit == 'g':
+                            if purchase_unit == 'kg':
+                                base_quantity = quantity * 1000
+                            elif purchase_unit != 'g':
+                                raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'g').")
+                        elif product_base_unit == 'ml':
+                            if purchase_unit == 'l':
+                                base_quantity = quantity * 1000
+                            elif purchase_unit != 'ml':
+                                raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'ml').")
+                        elif product_base_unit == 'u':
+                            if purchase_unit != 'u':
+                                raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'u').")
+                        elif purchase_unit != product_base_unit:
+                                raise ValueError(f"No se puede convertir de '{purchase_unit}' a '{product_base_unit}' para el producto '{product.name}'.")
+
+                        product.stock += base_quantity
+                        product.save()
         except Exception as e:
             raise e
 
@@ -555,18 +774,76 @@ class PurchaseViewSet(viewsets.ModelViewSet):
                     for item in purchase.items:
                         try:
                             product_id = item.get('product_id') or item.get('productId')
-                            if not product_id:
-                                logger.error(f"No product_id found in item: {item}")
-                                raise Exception(f"No product_id found in item: {item}")
+                            product_name = item.get('productName')
+                            try:
+                                quantity = Decimal(str(item.get('quantity', '0')))
+                                unit_price = Decimal(str(item.get('unitPrice', '0')))
+                            except:
+                                logger.warning(f"Invalid quantity or price for item {item} in purchase {purchase.id}. Skipping.")
+                                continue
                             
-                            product = Product.objects.get(id=product_id)
-                            quantity = item.get('quantity', 0)
-                            product.stock += quantity
+                            purchase_unit = item.get('unit', '').lower()
+
+                            if quantity <= 0:
+                                continue
+
+                            product = None
+                            if product_id:
+                                product = Product.objects.select_for_update().get(id=product_id)
+                            elif product_name:
+                                base_unit_for_new_product = 'u'
+                                if purchase_unit in ['kg', 'g']:
+                                    base_unit_for_new_product = 'g'
+                                elif purchase_unit in ['l', 'ml']:
+                                    base_unit_for_new_product = 'ml'
+
+                                product, created = Product.objects.select_for_update().get_or_create(
+                                    name=product_name,
+                                    defaults={
+                                        'price': unit_price,
+                                        'stock': 0,
+                                        'category': 'Insumo',
+                                        'unit': base_unit_for_new_product,
+                                        'is_ingredient': True
+                                    }
+                                )
+                            
+                            if not product:
+                                continue
+
+                            if not purchase_unit:
+                                purchase_unit = product.unit.lower()
+
+                            base_quantity = quantity
+                            product_base_unit = product.unit.lower()
+
+                            # Conversión de unidades de compra a unidad base del producto
+                            if product_base_unit == 'g':
+                                if purchase_unit == 'kg':
+                                    base_quantity = quantity * 1000
+                                elif purchase_unit != 'g':
+                                    raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'g').")
+                            elif product_base_unit == 'ml':
+                                if purchase_unit == 'l':
+                                    base_quantity = quantity * 1000
+                                elif purchase_unit != 'ml':
+                                    raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'ml').")
+                            elif product_base_unit == 'u':
+                                if purchase_unit != 'u':
+                                    raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'u').")
+                            elif purchase_unit != product_base_unit:
+                                    raise ValueError(f"No se puede convertir de '{purchase_unit}' a '{product_base_unit}' para el producto '{product.name}'.")
+
+                            product.stock += base_quantity
                             product.save()
-                            logger.info(f"Updated product {product.id} stock: +{quantity}, new stock: {product.stock}")
+                            logger.info(f"Updated product {product.id} stock: +{base_quantity} ({quantity} {purchase_unit}), new stock: {product.stock}")
+                        
                         except Product.DoesNotExist:
-                            logger.error(f"Product with id {product_id} not found during approval of purchase {purchase.id}.")
-                            raise Exception(f"Product with id {product_id} not found during approval.")
+                            logger.error(f"Product with id {item.get('product_id')} not found during approval of purchase {purchase.id}.")
+                            raise Exception(f"Product with id {item.get('product_id')} not found during approval.")
+                        except ValueError as e:
+                            logger.error(f"Error processing item {item} in purchase {purchase.id}: {str(e)}")
+                            raise e
 
                 purchase.status = 'Aprobada'
                 purchase.approved_by = request.user
@@ -646,6 +923,8 @@ class InventoryChangeViewSet(viewsets.ModelViewSet):
         quantity = serializer.validated_data['quantity']
         change_type = serializer.validated_data['type']
 
+        
+
         # Enforce server-side permission: solo usuarios con role 'Gerente' pueden crear cambios
         role_name = None
         try:
@@ -660,11 +939,18 @@ class InventoryChangeViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             # Lock the product row to avoid race conditions
             p = Product.objects.select_for_update().get(pk=product.pk)
+            
             previous_stock = p.stock
 
             if change_type == 'Entrada':
                 new_stock = previous_stock + quantity
             else:  # Salida
+               
+                # Validar que la cantidad sea un número entero si el producto no es un insumo
+                if not p.is_ingredient and quantity % 1 != 0:
+                        from rest_framework.exceptions import ValidationError
+                        raise ValidationError({'detail': 'La cantidad para productos no insumos debe ser un número entero.'})
+
                 if previous_stock < quantity:
                     from rest_framework.exceptions import ValidationError
                     raise ValidationError({'detail': 'La salida supera el stock disponible.'})
@@ -858,6 +1144,39 @@ class ExportDataView(APIView):
             else:
                 # Generar tabla según el tipo de consulta
                 if query_type in ['inventario', 'stock']:
+                    # Agregar resumen para stock si está disponible
+                    summary = data.get('summary') or {}
+                    if summary:
+                        try:
+                            total_products = int(summary.get('totalProducts') or 0)
+                            total_insumos = int(summary.get('totalInsumos') or 0)
+                            low_stock_items = int(summary.get('lowStockItems') or 0)
+                            total_stock = str(summary.get('totalStock') or '')
+                        except Exception:
+                            total_products = 0
+                            total_insumos = 0
+                            low_stock_items = 0
+                            total_stock = ''
+
+                        # Crear tabla de resumen para stock
+                        summary_data = [
+                            [Paragraph(f"<b>Total Products:</b> {total_products}", styles['Normal']), 
+                             Paragraph(f"<b>Total Insumos:</b> {total_insumos}", styles['Normal'])],
+                            [Paragraph(f"<b>Low Stock Items:</b> {low_stock_items}", styles['Normal']),
+                             Paragraph(f"<b>Total Stock:</b> {total_stock}", styles['Normal'])]
+                        ]
+                        summary_table = Table(summary_data)
+                        summary_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                            ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+                            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.white),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                            ('FONTSIZE', (0,0), (-1,-1), 10),
+                        ]))
+                        story.append(summary_table)
+                        story.append(Spacer(1,12))
+                    
                     story.append(self._generate_inventory_table(query_data))
                 elif query_type == 'ventas':
                     # Si el frontend envió un resumen (summary), renderizarlo arriba
@@ -903,12 +1222,135 @@ class ExportDataView(APIView):
                 elif query_type in ['usuarios', 'users']:
                     story.append(self._generate_users_table(query_data))
                 elif query_type == 'movimientos_caja':
+                    # Agregar resumen para movimientos de caja
+                    summary = data.get('summary') or {}
+                    if summary:
+                        try:
+                            total_movements = int(summary.get('totalMovements') or 0)
+                            total_income = str(summary.get('totalIncome') or '0.00')
+                            total_expenses = str(summary.get('totalExpenses') or '0.00')
+                            period = str(summary.get('period') or '')
+                        except Exception:
+                            total_movements = 0
+                            total_income = '0.00'
+                            total_expenses = '0.00'
+                            period = ''
+
+                        # Crear tabla de resumen para movimientos de caja
+                        summary_data = [
+                            [Paragraph(f"<b>Total de Movimientos:</b> {total_movements}", styles['Normal']), 
+                             Paragraph(f"<b>Ingresos Totales:</b> ${total_income}", styles['Normal'])],
+                            [Paragraph(f"<b>Gastos Totales:</b> ${total_expenses}", styles['Normal']),
+                             Paragraph(f"<b>Período:</b> {period}", styles['Normal'])]
+                        ]
+                        summary_table = Table(summary_data)
+                        summary_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                            ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+                            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.white),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                            ('FONTSIZE', (0,0), (-1,-1), 10),
+                        ]))
+                        story.append(summary_table)
+                        story.append(Spacer(1,12))
+                    
                     story.append(self._generate_cash_movements_table(query_data))
                 elif query_type == 'compras':
+                    # Agregar resumen para compras
+                    summary = data.get('summary') or {}
+                    if summary:
+                        try:
+                            total_purchases = int(summary.get('totalPurchases') or 0)
+                            total_amount = float(summary.get('totalAmount') or 0)
+                            period = str(summary.get('period') or '')
+                        except Exception:
+                            total_purchases = 0
+                            total_amount = 0.0
+                            period = ''
+
+                        # Crear tabla de resumen para compras
+                        summary_data = [
+                            [Paragraph(f"<b>Total de Compras:</b> {total_purchases}", styles['Normal']), 
+                             Paragraph(f"<b>Monto Total:</b> ${total_amount:.2f}", styles['Normal'])],
+                            [Paragraph(f"<b>Período:</b> {period}", styles['Normal']), '']
+                        ]
+                        summary_table = Table(summary_data)
+                        summary_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                            ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+                            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.white),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                            ('FONTSIZE', (0,0), (-1,-1), 10),
+                        ]))
+                        story.append(summary_table)
+                        story.append(Spacer(1,12))
+                    
                     story.append(self._generate_purchases_table(query_data))
                 elif query_type == 'pedidos':
+                    # Agregar resumen para pedidos
+                    summary = data.get('summary') or {}
+                    if summary:
+                        try:
+                            total_orders = int(summary.get('totalOrders') or 0)
+                            pending_orders = int(summary.get('pendingOrders') or 0)
+                            sent_orders = int(summary.get('sentOrders') or 0)
+                            period = str(summary.get('period') or '')
+                        except Exception:
+                            total_orders = 0
+                            pending_orders = 0
+                            sent_orders = 0
+                            period = ''
+
+                        # Crear tabla de resumen para pedidos
+                        summary_data = [
+                            [Paragraph(f"<b>Total de Pedidos:</b> {total_orders}", styles['Normal']), 
+                             Paragraph(f"<b>Pedidos Pendientes:</b> {pending_orders}", styles['Normal'])],
+                            [Paragraph(f"<b>Pedidos Enviados:</b> {sent_orders}", styles['Normal']),
+                             Paragraph(f"<b>Período:</b> {period}", styles['Normal'])]
+                        ]
+                        summary_table = Table(summary_data)
+                        summary_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                            ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+                            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.white),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                            ('FONTSIZE', (0,0), (-1,-1), 10),
+                        ]))
+                        story.append(summary_table)
+                        story.append(Spacer(1,12))
+                    
                     story.append(self._generate_orders_table(query_data))
                 elif query_type in ['proveedores', 'suppliers']:
+                    # Agregar resumen para proveedores
+                    summary = data.get('summary') or {}
+                    if summary:
+                        try:
+                            total_suppliers = int(summary.get('totalSuppliers') or 0)
+                            active_suppliers = int(summary.get('activeSuppliers') or 0)
+                        except Exception:
+                            total_suppliers = 0
+                            active_suppliers = 0
+
+                        # Crear tabla de resumen para proveedores
+                        summary_data = [
+                            [Paragraph(f"<b>Total de Proveedores:</b> {total_suppliers}", styles['Normal']), 
+                             Paragraph(f"<b>Proveedores Activos:</b> {active_suppliers}", styles['Normal'])]
+                        ]
+                        summary_table = Table(summary_data)
+                        summary_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                            ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+                            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.white),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                            ('FONTSIZE', (0,0), (-1,-1), 10),
+                        ]))
+                        story.append(summary_table)
+                        story.append(Spacer(1,12))
+                    
                     story.append(self._generate_suppliers_table(query_data))
                 else:
                     # Tabla genérica para tipos no reconocidos
@@ -1082,13 +1524,67 @@ class ExportDataView(APIView):
         return table
 
     def _generate_purchases_table(self, data):
+        from .models import Product
+        
         # Columns: ID, Fecha, Proveedor, Items (nombres), Total, Tipo, Estado
         table_data = [['ID', 'Fecha', 'Proveedor', 'Insumo/Producto', 'Total', 'Tipo', 'Estado']]
         for item in data:
             # items can be a comma-separated string or list
             items_field = item.get('items')
+            items_str = ''
+            
             if isinstance(items_field, (list, tuple)):
-                items_str = ', '.join([ (it.get('productName') if isinstance(it, dict) else str(it)) for it in items_field ])
+                # Procesar items con cantidades y unidades simples
+                formatted_items = []
+                for it in items_field:
+                    if isinstance(it, dict):
+                        product_name = it.get('productName') or it.get('product_name') or it.get('product') or it.get('name') or ''
+                        quantity = it.get('quantity', 0)
+                        
+                        # Limpiar el product_name si contiene multiplicaciones
+                        if ' x ' in product_name or ' = ' in product_name:
+                            # Extraer solo el nombre del producto antes de cualquier multiplicación
+                            product_name = product_name.split(' x ')[0].split(' = ')[0].strip()
+                        
+                        if product_name and quantity and quantity > 0:
+                            try:
+                                # Buscar el producto en la base de datos para obtener su unidad
+                                product = Product.objects.filter(name__iexact=product_name).first()
+                                if product:
+                                    unit = product.unit
+                                    # Formatear según la unidad directamente
+                                    if unit == 'g':
+                                        formatted_items.append(f"{product_name} {int(quantity)}Kg")
+                                    elif unit == 'ml':
+                                        formatted_items.append(f"{product_name} {int(quantity)}L")
+                                    else:  # unidades
+                                        formatted_items.append(f"{product_name} {int(quantity)}U")
+                                else:
+                                    # Si no se encuentra el producto, usar formato básico
+                                    formatted_items.append(f"{product_name} {int(quantity)}U")
+                            except Exception:
+                                # En caso de error, usar formato básico
+                                formatted_items.append(f"{product_name} {int(quantity)}U")
+                        elif product_name:
+                            formatted_items.append(product_name)
+                    elif isinstance(it, str):
+                        # Si es un string, puede contener multiplicaciones - limpiar
+                        clean_item = it.split(' x ')[0].split(' = ')[0].strip()
+                        if clean_item:
+                            formatted_items.append(clean_item)
+                    else:
+                        formatted_items.append(str(it))
+                
+                items_str = ', '.join(formatted_items)
+            elif isinstance(items_field, str):
+                # Si es string, puede contener multiplicaciones - limpiar
+                clean_items = []
+                parts = items_field.split(',')
+                for part in parts:
+                    clean_part = part.split(' x ')[0].split(' = ')[0].strip()
+                    if clean_part:
+                        clean_items.append(clean_part)
+                items_str = ', '.join(clean_items)
             else:
                 items_str = str(items_field or '')
 
@@ -1175,25 +1671,58 @@ class ExportDataView(APIView):
         return table
 
     def _generate_suppliers_table(self, data):
+        from reportlab.platypus import Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        
+        styles = getSampleStyleSheet()
+        # Crear estilo específico para celdas de texto
+        cell_style = ParagraphStyle(
+            'CellStyle',
+            parent=styles['Normal'],
+            fontSize=7,
+            alignment=1,  # Center alignment
+            wordWrap='CJK',
+            leftIndent=2,
+            rightIndent=2,
+            spaceAfter=2
+        )
+        
         table_data = [['Nombre', 'CUIT', 'Teléfono', 'Dirección', 'Productos']]
         for item in data:
+            # No truncar el texto, dejarlo completo para que se ajuste automáticamente
+            name = str(item.get('name', ''))
+            cuit = str(item.get('cuit', ''))
+            phone = str(item.get('phone', ''))
+            address = str(item.get('address', ''))
+            products = str(item.get('products', ''))
+            
             table_data.append([
-                item.get('name', ''),
-                item.get('cuit', ''),
-                item.get('phone', ''),
-                item.get('address', ''),
-                item.get('products', '')
+                Paragraph(name, cell_style),
+                Paragraph(cuit, cell_style),
+                Paragraph(phone, cell_style),
+                Paragraph(address, cell_style),
+                Paragraph(products, cell_style)
             ])
-        table = Table(table_data)
+        
+        # Ajustar anchos para dar más espacio a productos y dirección
+        col_widths = [80, 70, 60, 100, 200]  # Total: 510 puntos (más espacio para productos)
+        
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.beige, colors.lightgrey])
         ]))
         return table
 
@@ -1222,3 +1751,67 @@ class ExportDataView(APIView):
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
         return table
+
+class ProductProductionView(APIView):
+    permission_classes = [IsAuthenticated, IsGerente]
+
+    def post(self, request, *args, **kwargs):
+        product_id = request.data.get('product_id')
+        quantity = request.data.get('quantity')
+
+        if not product_id or not quantity:
+            return Response({'error': 'El ID del producto y la cantidad son requeridos.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            quantity = int(quantity)
+            if quantity <= 0:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return Response({'error': 'La cantidad debe ser un número entero positivo.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                # 1. Obtener el producto a producir
+                product_to_produce = get_object_or_404(Product.objects.select_for_update(), pk=product_id)
+
+                if product_to_produce.is_ingredient:
+                    raise ValidationError('No se pueden producir insumos, solo productos finales.')
+
+                # 2. Obtener la receta del producto
+                recipe = product_to_produce.recipe.all()
+                if not recipe.exists():
+                    raise ValidationError('El producto no tiene una receta definida y no puede ser producido.')
+
+                # 3. Verificar stock de ingredientes
+                for recipe_item in recipe:
+                    ingredient = recipe_item.ingredient
+                    required_quantity = recipe_item.quantity * quantity
+                    
+                    # Bloquear el ingrediente para la actualización
+                    ingredient_to_update = Product.objects.select_for_update().get(pk=ingredient.pk)
+
+                    if ingredient_to_update.stock < required_quantity:
+                        raise ValidationError(f'Stock insuficiente para el insumo "{ingredient.name}". Necesario: {required_quantity}, Disponible: {ingredient_to_update.stock}')
+
+                # 4. Descontar stock de ingredientes y aumentar stock del producto final
+                for recipe_item in recipe:
+                    ingredient = recipe_item.ingredient
+                    required_quantity = recipe_item.quantity * quantity
+                    
+                    # El re-fetch no es necesario gracias a select_for_update, pero es una buena práctica
+                    ingredient_to_update = Product.objects.get(pk=ingredient.pk)
+                    ingredient_to_update.stock -= required_quantity
+                    ingredient_to_update.save()
+
+                # 5. Aumentar el stock del producto producido
+                product_to_produce.stock += quantity
+                product_to_produce.save()
+
+            return Response({'success': f'Se han producido {quantity} unidades de {product_to_produce.name}.'}, status=status.HTTP_200_OK)
+
+        except ValidationError as e:
+            return Response({'error': e.detail[0]}, status=status.HTTP_400_BAD_REQUEST)
+        except Product.DoesNotExist:
+            return Response({'error': 'El producto a producir no existe.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': f'Ocurrió un error inesperado: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

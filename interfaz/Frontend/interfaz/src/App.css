@@ -1348,3 +1348,115 @@ h2 {
     gap: 5px;
     justify-content: flex-end;
 }
+
+/* Estilos para la sección de recetas */
+.recipe-section {
+    margin-top: 20px;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+}
+
+.recipe-section h4 {
+    color: #495057;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #007bff;
+    padding-bottom: 5px;
+}
+
+.recipe-section h5 {
+    color: #6c757d;
+    margin-bottom: 10px;
+    margin-top: 15px;
+}
+
+.current-ingredients {
+    margin-bottom: 20px;
+}
+
+.ingredients-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ingredient-item {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 10px;
+}
+
+.ingredient-display {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ingredient-info {
+    flex: 1;
+}
+
+.ingredient-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.edit-ingredient-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.edit-ingredient-form input,
+.edit-ingredient-form select {
+    padding: 5px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.add-ingredient-form {
+    background-color: white;
+    padding: 15px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}
+
+.form-row {
+    display: flex;
+    gap: 10px;
+    align-items: end;
+    flex-wrap: wrap;
+}
+
+.form-row .form-group {
+    flex: 1;
+    min-width: 150px;
+    margin-bottom: 0;
+}
+
+.form-row .form-group select,
+.form-row .form-group input {
+    width: 100%;
+}
+
+.action-button.small {
+    padding: 5px 10px;
+    font-size: 12px;
+    min-width: auto;
+}
+
+.action-button.primary.small {
+    background-color: #007bff;
+}
+
+.action-button.secondary.small {
+    background-color: #8CE69B;
+}
+
+.action-button.delete.small {
+    background-color: #BF3737;
+}

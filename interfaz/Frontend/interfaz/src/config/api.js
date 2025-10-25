@@ -5,8 +5,8 @@
 // Resultado: 404 Cannot POST /auth/login/.
 
 const API_CONFIG = {
-  // En desarrollo usamos el proxy del dev server (package.json -> proxy) para evitar CORS
-  baseURL: '/api',
+  // Configuración para apuntar directamente al servidor Django
+  baseURL: 'http://localhost:8000/api',
   timeout: 10000
 };
 

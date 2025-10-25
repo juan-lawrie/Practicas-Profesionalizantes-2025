@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import Select from 'react-select';
 import './App.css';
-import api, { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken, getPendingPurchases, approvePurchase, rejectPurchase, getPurchaseHistory } from './services/api';
+import api, { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken, getPendingPurchases, approvePurchase, rejectPurchase, getPurchaseHistory, getRecipe, addRecipeIngredient, updateRecipeIngredient, deleteRecipeIngredient, getIngredients, getIngredientsWithSuggestedUnit } from './services/api';
 import userStorage from './services/userStorage';
 import DataConsultation from './DataConsultation';
 import MyUserData from './components/MyUserData';
 import PurchaseManagement from './components/PurchaseManagement';
 import PurchaseRequests from './components/PurchaseRequests';
 import PurchaseHistory from './components/PurchaseHistory';
+import ProductManagement from './components/ProductManagement';
+import LossManagement from './components/LossManagement';
 
 
 
@@ -152,7 +154,7 @@ const passwordPolicy = {
 const rolePermissions = {
     'Gerente': ['Dashboard', 'Inventario', 'Gestión de Usuarios', 'Ventas', 'Pedidos', 'Productos', 'Editar Productos', 'Proveedores', 'Compras', 'Consultas', 'Ver Reportes de Faltantes'],
     'Panadero': ['Dashboard', 'Inventario', 'Ventas', 'Datos de mi Usuario', 'Reportar Faltantes'],
-    'Encargado': ['Dashboard', 'Inventario', 'Ventas', 'Compras', 'Datos de mi Usuario'],
+    'Encargado': ['Dashboard', 'Inventario', 'Ventas', 'Compras', 'Datos de mi Usuario', 'Gestión de Pérdidas'],
     'Cajero': ['Dashboard', 'Ventas', 'Inventario', 'Datos de mi Usuario', 'Reportar Faltantes'],
   };
 
@@ -657,6 +659,7 @@ const App = () => {
                     id: product.id,
                     name: product.name,
                     stock: product.stock,
+                    unit: product.unit,
                     type: product.category || 'Producto',
                     price: product.price,      // Ahora sí se incluye el precio
                     estado: product.estado     // Y el estado si viene del backend
@@ -755,7 +758,6 @@ const App = () => {
     const loadProducts = async () => {
       try {
         setIsSyncing(true);
-        console.log('🔄 Cargando productos del servidor...');
         const response = await api.get('/products/');
         const serverProducts = response.data;
         
@@ -766,10 +768,12 @@ const App = () => {
           price: product.price,
           category: product.category || 'Producto',
           stock: product.stock,
+          unit: product.unit || '',
           description: product.description || '',
           status: 'Sincronizado',
           hasSales: false,
-          lowStockThreshold: product.low_stock_threshold || 10
+          lowStockThreshold: product.low_stock_threshold || 10,
+          recipe_yield: product.recipe_yield || 1
         }));
         
         // Solo actualizar si hay diferencias para evitar re-renders innecesarios
@@ -1041,6 +1045,38 @@ const App = () => {
         const lowStockProducts = lowStockItems.filter(item => item.category === 'Producto');
         const lowStockSupplies = lowStockItems.filter(item => item.category === 'Insumo');
 
+        const formatStockDisplay = (stock, unit) => {
+            const stockNum = parseFloat(stock);
+            if (isNaN(stockNum)) {
+                return `0 unidades`;
+            }
+
+            let displayValue;
+            let displayUnit;
+
+            if (unit === 'g') {
+                displayValue = stockNum / 1000;
+                displayUnit = 'kilos';
+            } else if (unit === 'ml') {
+                displayValue = stockNum / 1000;
+                displayUnit = 'litros';
+            } else if (unit === 'kg') {
+                displayValue = stockNum;
+                displayUnit = 'kilos';
+            } else if (unit === 'l') {
+                displayValue = stockNum;
+                displayUnit = 'litros';
+            } else {
+                displayValue = stockNum;
+                displayUnit = 'unidades';
+            }
+
+            // Format number to remove trailing zeros from decimals, up to 3 decimal places
+            const formattedValue = Number(displayValue.toFixed(3));
+
+            return `${formattedValue} ${displayUnit}`;
+        };
+
         return (
             <div className="dashboard-container">
                 <h2>Dashboard de {userRole}</h2>
@@ -1055,7 +1091,7 @@ const App = () => {
                                     <ul className="alert-list">
                                         {lowStockProducts.map(item => (
                                             <li key={item.id} className="alert-item">
-                                                <strong>{item.name}</strong>: ¡Solo quedan {item.stock} unidades! (Umbral: {item.lowStockThreshold || 10})
+                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {item.lowStockThreshold || 10})
                                             </li>
                                         ))}
                                     </ul>
@@ -1068,7 +1104,7 @@ const App = () => {
                                     <ul className="alert-list">
                                         {lowStockSupplies.map(item => (
                                             <li key={item.id} className="alert-item">
-                                                <strong>{item.name}</strong>: ¡Solo quedan {item.stock} unidades! (Umbral: {item.lowStockThreshold || 10})
+                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {item.lowStockThreshold || 10})
                                             </li>
                                         ))}
                                     </ul>
@@ -1284,13 +1320,13 @@ const App = () => {
         const handleRegisterChange = (e) => {
             if (e && typeof e.preventDefault === 'function') e.preventDefault();
             // Validaciones previas: producto seleccionado y cantidad válida
-            const qty = parseInt(change.quantity, 10);
+            const qty = parseFloat(String(change.quantity).replace(',', '.'));
             if (!change.productId) {
                 alert('Debes seleccionar un producto.');
                 return;
             }
             if (isNaN(qty) || qty <= 0) {
-                alert('La cantidad debe ser un número positivo (ej: 3). El sistema lo tomará como una salida excepcional.');
+                alert('La cantidad debe ser un número positivo (ej: 3.5). El sistema lo tomará como una salida excepcional.');
                 return;
             }
 
@@ -1302,12 +1338,17 @@ const App = () => {
             // Ejecutar la acción tras confirmación
             const product = inventory.find(p => p.id === change.productId || String(p.id) === String(change.productId));
             // Tomar cantidad como valor absoluto (si el usuario escribió -3 o 3)
-            const quantity = Math.abs(parseInt(change.quantity, 10));
+            let quantity = Math.abs(parseFloat(String(change.quantity).replace(',', '.')));
             const reason = change.reason;
             if (!product) {
                 alert('Producto no encontrado.');
                 setConfirmOpen(false);
                 return;
+            }
+
+            // Convert quantity to base unit (grams or ml) if necessary
+            if (product.unit === 'g' || product.unit === 'ml') {
+                quantity = quantity * 1000;
             }
 
             if (isNaN(quantity) || quantity <= 0) {
@@ -1356,10 +1397,19 @@ const App = () => {
                         {inventory
                             .filter(item => item.type === 'Producto')
                             .map(item => {
+                                let stockDisplay;
+                                const stockNum = parseFloat(item.stock);
+                                if (item.unit === 'g') {
+                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} kilos`;
+                                } else if (item.unit === 'ml') {
+                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} litros`;
+                                } else {
+                                    stockDisplay = `${stockNum} unidades`;
+                                }
                                 return (
                                     <li key={item.id} className="list-item">
                                         <span className="inventory-name">{item.name}</span>
-                                        <span className="inventory-stock">{item.stock} unidades</span>
+                                        <span className="inventory-stock">{stockDisplay}</span>
                                     </li>
                                 );
                             })}
@@ -1370,10 +1420,19 @@ const App = () => {
                         {inventory
                             .filter(item => item.type === 'Insumo')
                             .map(item => {
+                                let stockDisplay;
+                                const stockNum = parseFloat(item.stock);
+                                if (item.unit === 'g') {
+                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} kilos`;
+                                } else if (item.unit === 'ml') {
+                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} litros`;
+                                } else {
+                                    stockDisplay = `${stockNum} unidades`;
+                                }
                                 return (
                                     <li key={item.id} className="list-item">
                                         <span className="inventory-name">{item.name}</span>
-                                        <span className="inventory-stock">{item.stock} kilogramos</span>
+                                        <span className="inventory-stock">{stockDisplay}</span>
                                     </li>
                                 );
                             })}
@@ -1407,10 +1466,10 @@ const App = () => {
                                     })()}
                                     onChange={(selected) => setChange({ ...change, productId: selected ? selected.value : '' })}
                                 />
-                                <input type="number" value={change.quantity} onChange={e => setChange({ ...change, quantity: e.target.value })} placeholder="Cantidad (ej: 3) - será tomada como salida" required />
+                                <input type="number" step="0.01" value={change.quantity} onChange={e => setChange({ ...change, quantity: e.target.value })} placeholder="Cantidad (ej: 3.5) - será tomada como salida" required />
                                 <input type="text" value={change.reason} onChange={e => setChange({ ...change, reason: e.target.value })} placeholder="Motivo (ej: Desperdicio, Contaminación)" required />
                                 <div className="button-group">
-                                    <button type="submit" className="action-button primary" disabled={!change.productId || isNaN(parseInt(change.quantity, 10)) || parseInt(change.quantity, 10) <= 0}>Guardar Salida</button>
+                                    <button type="submit" className="action-button primary" disabled={!change.productId || isNaN(parseFloat(change.quantity)) || parseFloat(change.quantity) <= 0}>Guardar Salida</button>
                                     <button type="button" className="action-button secondary" onClick={() => { setShowChangeForm(false); setChange({ productId: '', quantity: '', reason: '' }); }}>Cancelar</button>
                                 </div>
                             </form>
@@ -1796,16 +1855,65 @@ const App = () => {
 
     // Componente de la interfaz de creación de nuevos productos.
         // Componente de la interfaz de creación de nuevos productos.
-        const ProductCreationView = () => {
-            const [newProduct, setNewProduct] = useState({ 
+        const ProductCreationViewComponent = () => {
+            const [newProduct, setNewProduct] = useState({
                 name: '', 
                 description: '', 
                 price: 0, 
                 stock: 0, 
+                // Rendimiento de la receta: cuántas unidades produce una receta/lote
+                recipe_yield: 1,
                 low_stock_threshold: 10,
-                category: 'Producto' // Añadimos la categoría por defecto
+                category: 'Producto'
             });
+            const [recipeItems, setRecipeItems] = useState([{ ingredient: '', quantity: '', unit: '' }]);
             const [message, setMessage] = useState('');
+
+            const handleRecipeChange = (index, field, value) => {
+                const newRecipeItems = [...recipeItems];
+                newRecipeItems[index][field] = value;
+
+                if (field === 'ingredient') {
+                    const selectedIngredient = products.find(p => p.id === value);
+                    if (selectedIngredient) {
+                        // Normalizar variantes de unidad que vengan del backend
+                        const normalizeUnit = (u) => {
+                            if (u === null || u === undefined) return '';
+                            const s = String(u).toLowerCase().trim();
+                            // Mapear a 'g'
+                            if (['g', 'gr', 'grs', 'gramo', 'gramos', 'grams', 'gram'].includes(s)) return 'g';
+                            // Mapear a 'ml'
+                            if (['ml', 'mililitro', 'mililitros', 'milil', 'millilitro', 'millilitros'].includes(s)) return 'ml';
+                            // Mapear a 'unidades'
+                            if (['unidad', 'unidades', 'u', 'uds', 'unidad(es)'].includes(s)) return 'unidades';
+                            return '';
+                        };
+
+                        const mapped = normalizeUnit(selectedIngredient.unit || '');
+                        if (mapped) {
+                            newRecipeItems[index]['unit'] = mapped;
+                        } else {
+                            // Si no se pudo mapear, dejar vacío y loggear para debug
+                            newRecipeItems[index]['unit'] = '';
+                        }
+                    }
+                }
+
+                setRecipeItems(newRecipeItems);
+            };
+
+            const addRecipeItem = () => {
+                setRecipeItems([...recipeItems, { ingredient: '', quantity: '', unit: '' }]);
+            };
+
+            const removeRecipeItem = (index) => {
+                const newRecipeItems = recipeItems.filter((_, i) => i !== index);
+                setRecipeItems(newRecipeItems);
+            };
+
+            const ingredientOptions = products
+                .filter(p => p.category === 'Insumo')
+                .map(p => ({ value: p.id, label: p.name }));
     
             const handleCreateProduct = async (e) => {
                 e.preventDefault();
@@ -1859,17 +1967,67 @@ const App = () => {
                         setMessage('🚫 Error: Token de autenticación malformado. Por favor, vuelve a iniciar sesión.');
                         return;
                     }
+
+                    if (newProduct.category === 'Producto' && newProduct.stock > 0) {
+                        for (const item of recipeItems) {
+                            if (!item.ingredient || !item.quantity || parseFloat(item.quantity) <= 0) {
+                                setMessage('🚫 Error: Todos los insumos de la receta deben tener un ingrediente seleccionado y una cantidad válida.');
+                                return;
+                            }
+    
+                            const ingredientInStore = products.find(p => p.id === item.ingredient);
+                            if (!ingredientInStore) {
+                                setMessage(`🚫 Error: El insumo con ID ${item.ingredient} no se encuentra en el inventario.`);
+                                return;
+                            }
+    
+                            // Calcular cantidad requerida proporcionalmente según el rendimiento por lote
+                            const recipeYield = parseFloat(newProduct.recipe_yield) || 1;
+                            const stockFloat = parseFloat(newProduct.stock) || 0;
+                            const multiplier = recipeYield > 0 ? (stockFloat / recipeYield) : 0;
+                            let requiredQuantity = parseFloat(item.quantity) * multiplier;
+
+                            // Si la unidad es 'unidades' redondear hacia arriba
+                            if ((item.unit || '').toString().toLowerCase() === 'unidades') {
+                                requiredQuantity = Math.ceil(requiredQuantity);
+                            }
+
+                            if (ingredientInStore.stock < requiredQuantity) {
+                                setMessage(`🚫 Error: Stock insuficiente para el insumo "${ingredientInStore.name}". Se necesitan ${requiredQuantity} ${item.unit} para crear ${newProduct.stock} unidades del producto (rendimiento por lote: ${recipeYield}), pero solo hay ${ingredientInStore.stock} ${ingredientInStore.unit || ''} disponibles.`);
+                                return;
+                            }
+                        }
+                    }
+
+                    let recipePayload = [];
+                    if (newProduct.category === 'Producto') {
+                        recipePayload = recipeItems
+                            .filter(item => item.ingredient && parseFloat(item.quantity) > 0)
+                            .map(item => ({
+                                ingredient: item.ingredient,
+                                quantity: parseFloat(item.quantity),
+                                unit: item.unit,
+                            }));
+    
+                        if (recipeItems.some(item => item.ingredient && (!item.quantity || parseFloat(item.quantity) <= 0))) {
+                            setMessage('🚫 Error: Todos los insumos de la receta deben tener una cantidad mayor a 0.');
+                            return;
+                        }
+                    }
                     
-                    
-                    // Crear producto en el backend
-                    const response = await api.post('/products/', {
+                    const payload = {
                         name: newProduct.name.trim(),
                         description: newProduct.description.trim(),
                         price: parseFloat(newProduct.price),
                         stock: parseInt(newProduct.stock),
+                        recipe_yield: parseInt(newProduct.recipe_yield) || 1,
                         low_stock_threshold: parseInt(newProduct.low_stock_threshold),
-                        category: newProduct.category
-                    });
+                        category: newProduct.category,
+                        recipe_ingredients: recipePayload
+                    };
+                    
+                    // Crear producto en el backend
+                    const response = await api.post('/products/', payload);
 
                     // Recargar productos desde PostgreSQL para mantener sincronización
                     await loadProducts();
@@ -1880,9 +2038,12 @@ const App = () => {
                         description: '', 
                         price: 0, 
                         stock: 0, 
+                        recipe_yield: 1,
                         low_stock_threshold: 10,
                         category: 'Producto'
                     });
+                    setRecipeItems([{ ingredient: '', quantity: '', unit: '' }]);
+
                     setMessage('✅ Producto creado exitosamente y datos recargados desde PostgreSQL.');
                     console.log('🔄 Productos recargados desde PostgreSQL después de crear producto');
                 } catch (error) {
@@ -1892,7 +2053,7 @@ const App = () => {
                     if (error.response) {
                         // Error con respuesta del servidor
                         if (error.response.status === 400) {
-                            setMessage('🚫 Error: ' + (error.response.data.detail || 'Datos inválidos.'));
+                            setMessage('🚫 Error: ' + (error.response.data.detail || JSON.stringify(error.response.data)));
                         } else if (error.response.status === 401) {
                             setMessage('🚫 Error: No tienes autorización. Inicia sesión nuevamente.');
                         } else if (error.response.status === 403) {
@@ -1909,6 +2070,8 @@ const App = () => {
                     }
                 }
             };
+
+
     
             return (
                 <div className="creation-container">
@@ -1933,15 +2096,7 @@ const App = () => {
                             placeholder="Descripción del producto (opcional)"
                             rows="3"
                         />
-                        <p>Categoría</p>
-                        <select
-                            value={newProduct.category}
-                            onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
-                            required
-                        >
-                            <option value="Producto">Producto</option>
-                            <option value="Insumo">Insumo</option>
-                        </select>
+                        
                         <p>Precio</p>
                         <input 
                             type="number" 
@@ -1961,6 +2116,17 @@ const App = () => {
                             min="0"
                             required 
                         />
+
+                        <p>Rendimiento de la receta (unidades por lote)</p>
+                        <input
+                            type="number"
+                            value={newProduct.recipe_yield}
+                            onChange={e => setNewProduct({ ...newProduct, recipe_yield: parseInt(e.target.value) || 1 })}
+                            placeholder="Ej: 10 (la receta rinde 10 unidades)"
+                            min="1"
+                            required
+                        />
+
                         <p>Umbral de stock</p>
                         <input 
                             type="number" 
@@ -1969,13 +2135,48 @@ const App = () => {
                             placeholder="Umbral de Stock Bajo (por defecto: 10)" 
                             min="0"
                         />
+
+
+
+                        {newProduct.category === 'Producto' && (
+                            <div className="recipe-builder">
+                                <h4>Receta (Insumos por receta / por lote)</h4>
+                                {recipeItems.map((item, index) => (
+                                    <div key={index} className="recipe-item">
+                                        <Select
+                                            options={ingredientOptions}
+                                            value={ingredientOptions.find(opt => opt.value === item.ingredient)}
+                                            onChange={selectedOption => handleRecipeChange(index, 'ingredient', selectedOption ? selectedOption.value : '')}
+                                            placeholder="Seleccionar insumo..."
+                                        />
+                                        <input
+                                            type="number"
+                                            value={item.quantity}
+                                            onChange={e => handleRecipeChange(index, 'quantity', e.target.value)}
+                                            placeholder="Cantidad"
+                                            min="0"
+                                        />
+                                        <select
+                                            value={item.unit}
+                                            onChange={e => handleRecipeChange(index, 'unit', e.target.value)}
+                                        >
+                                            <option value="g">Gramos (g)</option>
+                                            <option value="ml">Mililitros (ml)</option>
+                                            <option value="unidades">Unidades</option>
+                                        </select>
+                                        <button type="button" onClick={() => removeRecipeItem(index)}>Eliminar</button>
+                                    </div>
+                                ))}
+                                <button type="button" onClick={addRecipeItem}>Agregar Insumo</button>
+                            </div>
+                        )}
                         <button type="submit" className="main-button">Crear Producto</button>
                     </form>
                 </div>
             );
         };
 
-        
+                
 
         // Componente de la interfaz de gestión de proveedores (solo para Gerente).
         const SupplierManagement = () => {
@@ -3240,17 +3441,50 @@ const PurchaseRequests = () => {
         // Componente de la interfaz de edición de productos nuevos (solo para Gerente).
         const EditNewProducts = () => {
             const [selectedProduct, setSelectedProduct] = useState(null);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [filteredProducts, setFilteredProducts] = useState([]);
             const [editingProduct, setEditingProduct] = useState({
                 name: '',
                 price: 0,
                 category: 'Producto',
                 stock: 0,
                 description: '',
-                lowStockThreshold: 10
+                lowStockThreshold: 10,
+                recipeYield: 1,
+                recipe_ingredients: []
             });
             const [message, setMessage] = useState('');
             const [confirmDelete, setConfirmDelete] = useState(false);
             const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
+            
+            // Estados para manejo de recetas
+            const [recipeIngredients, setRecipeIngredients] = useState([]);
+            const [availableIngredients, setAvailableIngredients] = useState([]);
+            const [newIngredients, setNewIngredients] = useState([{
+                ingredient: null,
+                quantity: '',
+                unit: 'g'
+            }]);
+            const [editingIngredient, setEditingIngredient] = useState(null);
+
+            // Cargar ingredientes disponibles al montar el componente
+            useEffect(() => {
+                loadAvailableIngredients();
+            }, []);
+
+            // Filtrar productos basado en el término de búsqueda
+            useEffect(() => {
+                if (!searchTerm.trim()) {
+                    setFilteredProducts(products);
+                } else {
+                    const filtered = products.filter(product =>
+                        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        (product.description && product.description.toLowerCase().includes(searchTerm.toLowerCase()))
+                    );
+                    setFilteredProducts(filtered);
+                }
+            }, [products, searchTerm]);
     
             // Función para validar el nombre del producto
             const validateProductName = (name) => {
@@ -3269,16 +3503,164 @@ const PurchaseRequests = () => {
     
             // Función para validar el stock
             const validateStock = (stock) => {
-                return stock >= 0 && Number.isInteger(stock);
+                const num = parseFloat(stock);
+                return !isNaN(num) && num >= 0;
             };
             
             // Función para validar el umbral de stock bajo
             const validateLowStockThreshold = (threshold) => {
-                return threshold >= 0 && Number.isInteger(threshold);
+                const num = parseInt(threshold);
+                return !isNaN(num) && num >= 0;
+            };
+
+            // Funciones para manejar recetas
+            const loadRecipe = async (productId) => {
+                try {
+                    const response = await getRecipe(productId);
+                    const ingredients = response.data || [];
+                    setRecipeIngredients(ingredients);
+                    
+                    // Actualizar también los ingredientes en editingProduct
+                    setEditingProduct(prev => ({
+                        ...prev,
+                        recipe_ingredients: ingredients
+                    }));
+                } catch (error) {
+                    setRecipeIngredients([]);
+                    setEditingProduct(prev => ({
+                        ...prev,
+                        recipe_ingredients: []
+                    }));
+                }
+            };
+
+            const loadAvailableIngredients = async () => {
+                try {
+                    const response = await getIngredientsWithSuggestedUnit();
+                    if (response.data.success) {
+                        setAvailableIngredients(response.data.data || []);
+                    } else {
+                        console.error('Error en respuesta:', response.data.error);
+                        setAvailableIngredients([]);
+                    }
+                } catch (error) {
+                    setAvailableIngredients([]);
+                }
+            };
+
+            const addIngredientsToRecipe = () => {
+                // Filtrar solo los ingredientes válidos (que tengan ingrediente y cantidad)
+                const validIngredients = newIngredients.filter(
+                    ing => ing.ingredient && ing.ingredient.value && ing.quantity && parseFloat(ing.quantity) > 0
+                );
+
+                if (validIngredients.length === 0) {
+                    setMessage('⚠️ Complete al menos un ingrediente con todos sus campos y cantidad mayor a 0.');
+                    return;
+                }
+
+                const ingredientsToAdd = validIngredients.map(ing => ({
+                    ingredient: ing.ingredient.value,
+                    ingredient_name: ing.ingredient.label.split(' (Stock:')[0], // Limpiar el texto del label
+                    quantity: parseFloat(ing.quantity),
+                    unit: ing.unit
+                }));
+
+                const currentIngredients = editingProduct.recipe_ingredients || [];
+                const updatedRecipe = [...currentIngredients, ...ingredientsToAdd];
+                
+                setEditingProduct(prev => ({
+                    ...prev,
+                    recipe_ingredients: updatedRecipe
+                }));
+
+                // También actualizar recipeIngredients para consistencia
+                setRecipeIngredients(prev => [...prev, ...ingredientsToAdd]);
+
+                // Limpiar solo los ingredientes que se agregaron y mantener uno vacío
+                setNewIngredients([{
+                    ingredient: null,
+                    quantity: '',
+                    unit: 'g'
+                }]);
+                setMessage(`✅ ${validIngredients.length} ingrediente(s) agregado(s) a la receta. Recuerde guardar los cambios del producto para confirmar.`);
+            };
+
+            const updateIngredientInRecipe = async (ingredientId, updatedData) => {
+                try {
+                    await updateRecipeIngredient(ingredientId, updatedData);
+                    await loadRecipe(selectedProduct.id);
+                    setEditingIngredient(null);
+                    setMessage('✅ Ingrediente actualizado exitosamente.');
+                } catch (error) {
+                    setMessage('❌ Error actualizando ingrediente.');
+                }
+            };
+
+            const deleteIngredientFromRecipe = async (ingredientId) => {
+                try {
+                    await deleteRecipeIngredient(ingredientId);
+                    // Actualizar estado local inmediatamente
+                    const updatedIngredients = recipeIngredients.filter(ing => ing.id !== ingredientId);
+                    setRecipeIngredients(updatedIngredients);
+                    setEditingProduct(prev => ({
+                        ...prev,
+                        recipe_ingredients: updatedIngredients
+                    }));
+                    setMessage('✅ Ingrediente eliminado de la receta exitosamente.');
+                } catch (error) {
+                    setMessage('❌ Error eliminando ingrediente de la receta.');
+                }
+            };
+
+            // Función para manejar el cambio de ingrediente - usa unidad del backend
+            const handleIngredientChange = (selectedOption, index) => {
+                const updatedIngredients = [...newIngredients];
+                if (selectedOption) {
+                    updatedIngredients[index] = {
+                        ...updatedIngredients[index],
+                        ingredient: selectedOption,
+                        unit: selectedOption.suggested_unit || 'g'
+                    };
+                } else {
+                    updatedIngredients[index] = {
+                        ...updatedIngredients[index],
+                        ingredient: null,
+                        unit: 'g'
+                    };
+                }
+                setNewIngredients(updatedIngredients);
+            };
+
+            // Función para agregar un nuevo campo de ingrediente vacío
+            const addNewIngredientField = () => {
+                setNewIngredients([...newIngredients, {
+                    ingredient: null,
+                    quantity: '',
+                    unit: 'g'
+                }]);
+            };
+
+            // Función para eliminar un campo de ingrediente
+            const removeIngredientField = (index) => {
+                if (newIngredients.length > 1) {
+                    const updatedIngredients = newIngredients.filter((_, i) => i !== index);
+                    setNewIngredients(updatedIngredients);
+                }
+            };
+
+            // Función para actualizar cantidad y unidad de un ingrediente
+            const updateIngredientField = (index, field, value) => {
+                const updatedIngredients = [...newIngredients];
+                updatedIngredients[index] = {
+                    ...updatedIngredients[index],
+                    [field]: value
+                };
+                setNewIngredients(updatedIngredients);
             };
     
             // Función para seleccionar un producto para editar
-            const selectProductForEdit = (product) => {
+            const selectProductForEdit = async (product) => {
                 if (!product) {
                     setMessage('⚠️ Producto no encontrado.');
                     return;
@@ -3290,9 +3672,15 @@ const PurchaseRequests = () => {
                     category: product.category || 'Producto',
                     stock: product.stock || 0,
                     description: product.description || '',
-                    lowStockThreshold: product.lowStockThreshold ?? product.low_stock_threshold ?? 10
+                    lowStockThreshold: product.lowStockThreshold ?? product.low_stock_threshold ?? 10,
+                    recipeYield: parseInt(product.recipe_yield) || 1,
+                    recipe_ingredients: []
                 });
                 setMessage('');
+                
+                // Cargar receta y ingredientes disponibles
+                await loadRecipe(product.id);
+                await loadAvailableIngredients();
             };
 
             // Función para guardar cambios del producto seleccionado
@@ -3326,16 +3714,63 @@ const PurchaseRequests = () => {
                 }
 
                 try {
+                    // Preparar ingredientes nuevos para enviar al backend
+                    const newIngredientsData = editingProduct.recipe_ingredients
+                        .filter(ingredient => !ingredient.id) // Solo ingredientes nuevos
+                        .map(ingredient => ({
+                            ingredient: ingredient.ingredient,
+                            quantity: parseFloat(ingredient.quantity),
+                            unit: ingredient.unit
+                        }));
+
+                    // Validar recipe_yield
+                    const recipeYieldValue = parseInt(editingProduct.recipeYield) || 1;
+                    if (recipeYieldValue < 1) {
+                        setMessage('🚫 Error: El rendimiento de la receta debe ser al menos 1.');
+                        return;
+                    }
+
                     const updatedProduct = {
                         name: editingProduct.name,
-                        price: editingProduct.price,
+                        price: parseFloat(editingProduct.price),
                         category: editingProduct.category,
-                        stock: editingProduct.stock,
+                        stock: parseFloat(editingProduct.stock),
                         description: editingProduct.description,
-                        lowStockThreshold: editingProduct.lowStockThreshold
+                        low_stock_threshold: parseInt(editingProduct.lowStockThreshold),
+                        recipe_yield: recipeYieldValue
                     };
 
-                    await api.put(`/products/${selectedProduct.id}/`, updatedProduct);
+                    // Solo incluir recipe_ingredients si hay ingredientes nuevos
+                    if (newIngredientsData.length > 0) {
+                        updatedProduct.recipe_ingredients = newIngredientsData;
+                    }
+
+                    // Primer intento: actualizar producto normal
+                    const response = await api.put(`/products/${selectedProduct.id}/`, updatedProduct);
+                    
+                    let recipeYieldUpdated = false;
+                    
+                    // Verificar si recipe_yield se guardó correctamente (convertir ambos a números para comparar)
+                    const receivedRecipeYield = parseInt(response.data.recipe_yield) || 0;
+                    
+                    if (response.data && receivedRecipeYield === recipeYieldValue) {
+                        recipeYieldUpdated = true;
+                    } else {
+                        // Segundo intento: usar endpoint específico para recipe_yield
+                        try {
+                            const recipeYieldResponse = await api.patch(`/products/${selectedProduct.id}/update_recipe_yield/`, {
+                                recipe_yield: recipeYieldValue
+                            });
+                            
+                            const receivedRecipeYieldSecond = parseInt(recipeYieldResponse.data.recipe_yield) || 0;
+                            if (recipeYieldResponse.data && receivedRecipeYieldSecond === recipeYieldValue) {
+                                recipeYieldUpdated = true;
+                            }
+                        } catch (recipeYieldError) {
+                            console.error('Error en endpoint específico:', recipeYieldError);
+                        }
+                    }
+                    
                     await loadProducts();
 
                     setSelectedProduct(null);
@@ -3345,12 +3780,39 @@ const PurchaseRequests = () => {
                         category: 'Producto',
                         stock: 0,
                         description: '',
-                        lowStockThreshold: 10
+                        lowStockThreshold: 10,
+                        recipeYield: 1,
+                        recipe_ingredients: []
                     });
-                    setMessage('✅ Producto actualizado correctamente en el servidor. Los cambios se reflejan en todas las secciones.');
+                    
+                    // Limpiar estados de recetas
+                    setRecipeIngredients([]);
+                    setNewIngredients([{
+                        ingredient: null,
+                        quantity: '',
+                        unit: 'g'
+                    }]);
+                    setEditingIngredient(null);
+                    
+                    // Mensaje final basado en el estado real
+                    if (recipeYieldUpdated) {
+                        setMessage('✅ Producto actualizado correctamente en el servidor. Los cambios se reflejan en todas las secciones.');
+                    } else {
+                        setMessage(`⚠️ Producto actualizado parcialmente. El recipe_yield no se pudo guardar (enviado: ${recipeYieldValue}, actual: ${response.data.recipe_yield}). Otros cambios sí se guardaron.`);
+                    }
                 } catch (error) {
-                    console.error('Error actualizando producto en el servidor:', error);
-                    setMessage('❌ Error: No se pudo actualizar el producto en el servidor. Los cambios no fueron guardados.');
+                    if (error.response && error.response.data) {
+                        const errorData = error.response.data;
+                        if (typeof errorData === 'string') {
+                            setMessage(`❌ Error: ${errorData}`);
+                        } else if (errorData.detail) {
+                            setMessage(`❌ Error: ${errorData.detail}`);
+                        } else {
+                            setMessage('❌ Error: No se pudo actualizar el producto. Verifique los datos.');
+                        }
+                    } else {
+                        setMessage('❌ Error: No se pudo actualizar el producto en el servidor. Los cambios no fueron guardados.');
+                    }
                 }
             };
     
@@ -3363,10 +3825,22 @@ const PurchaseRequests = () => {
                     category: 'Producto',
                     stock: 0,
                     description: '',
-                    lowStockThreshold: 10
+                    lowStockThreshold: 10,
+                    recipeYield: 1,
+                    recipe_ingredients: []
                 });
                 setMessage('');
                 setConfirmDelete(false);
+                
+                // Limpiar estados de recetas
+                setRecipeIngredients([]);
+                setNewIngredients([{
+                    ingredient: null,
+                    quantity: '',
+                    unit: 'g'
+                }]);
+                setEditingIngredient(null);
+                setEditingIngredient(null);
             };
             
             // Función para eliminar un producto
@@ -3375,14 +3849,16 @@ const PurchaseRequests = () => {
                 
                 // Si el producto tiene ventas, no se puede eliminar
                 if (selectedProduct.hasSales) {
-                    setMessage('⚠️ Error: No se puede eliminar un producto que ya tiene ventas registradas.');
+                    const itemType = selectedProduct?.category === 'Insumo' ? 'insumo' : 'producto';
+                    setMessage(`⚠️ Error: No se puede eliminar un ${itemType} que ya tiene ventas registradas.`);
                     setConfirmDelete(false);
                     return;
                 }
                 
                 if (!confirmDelete) {
                     setConfirmDelete(true);
-                    setMessage('⚠️ ¿Estás seguro de que deseas eliminar este producto? Esta acción no se puede deshacer.');
+                    const itemType = selectedProduct?.category === 'Insumo' ? 'insumo' : 'producto';
+                    setMessage(`⚠️ ¿Estás seguro de que deseas eliminar este ${itemType}? Esta acción no se puede deshacer.`);
                     return;
                 }
                 
@@ -3401,13 +3877,16 @@ const PurchaseRequests = () => {
                         category: 'Producto',
                         stock: 0,
                         description: '',
-                        lowStockThreshold: 10
+                        lowStockThreshold: 10,
+                        recipeYield: 1
                     });
                     setConfirmDelete(false);
-                    setMessage('✅ Producto eliminado correctamente del servidor y todas las secciones.');
+                    const itemType = selectedProduct?.category === 'Insumo' ? 'Insumo' : 'Producto';
+                    setMessage(`✅ ${itemType} eliminado correctamente del servidor y todas las secciones.`);
                 } catch (error) {
                     console.error('Error eliminando producto del servidor:', error);
-                    setMessage('❌ Error: No se pudo eliminar el producto del servidor. El producto permanece en el sistema.');
+                    const itemType = selectedProduct?.category === 'Insumo' ? 'insumo' : 'producto';
+                    setMessage(`❌ Error: No se pudo eliminar el ${itemType} del servidor. El ${itemType} permanece en el sistema.`);
                     setConfirmDelete(false);
                 }
             };
@@ -3416,7 +3895,7 @@ const PurchaseRequests = () => {
             const handleDeleteAllProducts = async () => {
                 if (!deleteAllConfirm) {
                     setDeleteAllConfirm(true);
-                    setMessage('⚠️ ¿Estás seguro de que deseas eliminar TODOS los productos sin ventas? Esta acción no se puede deshacer.');
+                    setMessage('⚠️ ¿Estás seguro de que deseas eliminar TODOS los productos e insumos sin ventas? Esta acción no se puede deshacer.');
                     return;
                 }
                 
@@ -3436,10 +3915,10 @@ const PurchaseRequests = () => {
                     
                     setProducts(productsWithSales);
                     setDeleteAllConfirm(false);
-                    setMessage(`✅ ${productsToDelete.length} productos eliminados correctamente del servidor y todas las secciones.`);
+                    setMessage(`✅ ${productsToDelete.length} productos e insumos eliminados correctamente del servidor y todas las secciones.`);
                 } catch (error) {
                     console.error('Error eliminando productos del servidor:', error);
-                    setMessage('❌ Error: No se pudieron eliminar todos los productos del servidor.');
+                    setMessage('❌ Error: No se pudieron eliminar todos los productos e insumos del servidor.');
                     setDeleteAllConfirm(false);
                 }
             };
@@ -3450,21 +3929,67 @@ const PurchaseRequests = () => {
             return (
                 <div className="management-container">
                     <div style={{marginBottom: '10px'}}>
-                        <h2>Editar Productos Nuevos</h2>
+                        <h2>Editar Productos e Insumos</h2>
                     </div>
                     {message && <p className="message">{message}</p>}
                     
                     <div className="products-list">
-                        <h3>Productos Disponibles para Edición</h3>
-                        <p className="info-text">
-                            Solo se muestran productos marcados como "nuevos" o sin ventas registradas.
-                        </p>
+                        <h3>Productos e Insumos Disponibles para Edición</h3>
                         
-                        {newProducts.length === 0 ? (
-                            <p className="no-products">No hay productos nuevos disponibles para editar.</p>
+                        
+                        {/* Buscador de productos */}
+                        <div className="search-container" style={{marginBottom: '20px'}}>
+                            <div style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
+                                <input
+                                    type="text"
+                                    placeholder="Buscar por nombre, categoría o descripción..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="search-input"
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 40px 10px 10px',
+                                        fontSize: '16px',
+                                        border: '1px solid #ddd',
+                                        borderRadius: '4px',
+                                        marginBottom: '10px'
+                                    }}
+                                />
+                                {searchTerm && (
+                                    <button
+                                        onClick={() => setSearchTerm('')}
+                                        style={{
+                                            position: 'absolute',
+                                            right: '10px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'none',
+                                            border: 'none',
+                                            fontSize: '18px',
+                                            cursor: 'pointer',
+                                            color: '#666',
+                                            marginBottom: '10px'
+                                        }}
+                                        title="Limpiar búsqueda"
+                                    >
+                                        ×
+                                    </button>
+                                )}
+                            </div>
+                            {searchTerm && (
+                                <p style={{fontSize: '14px', color: '#666', marginBottom: '10px'}}>
+                                    {filteredProducts.filter(p => !p.hasSales).length} resultado(s) encontrado(s) para "{searchTerm}"
+                                </p>
+                            )}
+                        </div>
+                        
+                        {filteredProducts.filter(p => !p.hasSales).length === 0 ? (
+                            <p className="no-products">
+                                {searchTerm ? 'No se encontraron productos que coincidan con la búsqueda.' : 'No hay productos nuevos disponibles para editar.'}
+                            </p>
                         ) : (
                             <ul className="list-container">
-                                {newProducts.map(product => (
+                                {filteredProducts.filter(p => !p.hasSales).map(product => (
                                     <li key={product.id} className="product-list-item">
                                         <div className="product-info">
                                             <strong>{product.name}</strong>
@@ -3558,7 +4083,10 @@ const PurchaseRequests = () => {
                                     <input 
                                         type="number" 
                                         value={editingProduct.lowStockThreshold} 
-                                        onChange={e => setEditingProduct({...editingProduct, lowStockThreshold: parseInt(e.target.value)})} 
+                                        onChange={e => {
+                                            const value = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
+                                            setEditingProduct({...editingProduct, lowStockThreshold: value});
+                                        }} 
                                         placeholder="Nivel de stock para mostrar alertas (0 o mayor)"
                                         min="0"
                                         required 
@@ -3567,6 +4095,160 @@ const PurchaseRequests = () => {
                                         Cantidad mínima de stock antes de mostrar alertas en el Dashboard
                                     </small>
                                 </div>
+
+                                {/* Campo de rendimiento solo para productos que no son insumos */}
+                                {editingProduct.category === 'Producto' && (
+                                    <div className="form-group">
+                                        <label>Rendimiento de la Receta *</label>
+                                        <input 
+                                            type="number" 
+                                            value={editingProduct.recipeYield} 
+                                            onChange={e => {
+                                                const value = e.target.value === '' ? 1 : parseInt(e.target.value) || 1;
+                                                setEditingProduct({...editingProduct, recipeYield: value});
+                                            }} 
+                                            placeholder="Unidades que produce esta receta"
+                                            min="1"
+                                            required 
+                                        />
+                                        <small className="form-helper-text">
+                                            Número de unidades que produce una ejecución completa de esta receta
+                                        </small>
+                                    </div>
+                                )}
+
+                                {/* Sección de Recetas - Solo para productos que no son insumos */}
+                                {selectedProduct && editingProduct.category === 'Producto' && (
+                                    <div className="recipe-section">
+                                        <h4>Receta del Producto</h4>
+                                        
+                                        {/* Lista de ingredientes actuales */}
+                                        <div className="current-ingredients">
+                                            <h5>Ingredientes Actuales:</h5>
+                                            {(!editingProduct.recipe_ingredients || editingProduct.recipe_ingredients.length === 0) ? (
+                                                <p>No hay ingredientes en la receta.</p>
+                                            ) : (
+                                                <div className="ingredients-list">
+                                                    {editingProduct.recipe_ingredients.map((ingredient, index) => (
+                                                        <div key={index} className="ingredient-item">
+                                                            <div className="ingredient-display">
+                                                                <span className="ingredient-info">
+                                                                    <strong>{ingredient.ingredient_name}</strong>: {ingredient.quantity} {ingredient.unit}
+                                                                </span>
+                                                                <div className="ingredient-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            // Si el ingrediente tiene ID, usar la API para eliminarlo
+                                                                            if (ingredient.id) {
+                                                                                deleteIngredientFromRecipe(ingredient.id);
+                                                                            } else {
+                                                                                // Si no tiene ID, solo quitarlo del estado local
+                                                                                const updatedIngredients = editingProduct.recipe_ingredients.filter((_, i) => i !== index);
+                                                                                setEditingProduct(prev => ({
+                                                                                    ...prev,
+                                                                                    recipe_ingredients: updatedIngredients
+                                                                                }));
+                                                                            }
+                                                                        }}
+                                                                        className="action-button delete small"
+                                                                    >
+                                                                        Eliminar
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Formulario para agregar múltiples ingredientes */}
+                                        <div className="add-ingredient-form">
+                                            <h5>Agregar Ingredientes:</h5>
+                                            {newIngredients.map((newIngredient, index) => (
+                                                <div key={index} className="form-row ingredient-row">
+                                                    <div className="form-group">
+                                                        <label>Ingrediente:</label>
+                                                        <Select
+                                                            value={newIngredient.ingredient}
+                                                            onChange={(selectedOption) => handleIngredientChange(selectedOption, index)}
+                                                            options={availableIngredients.map(ingredient => ({
+                                                                    value: ingredient.id,
+                                                                    label: `${ingredient.name} (Stock: ${ingredient.stock} ${ingredient.unit})`,
+                                                                    unit: ingredient.unit,
+                                                                    suggested_unit: ingredient.suggested_unit
+                                                                }))}
+                                                            placeholder="Buscar ingrediente..."
+                                                            isClearable
+                                                            isSearchable
+                                                            className="searchable-select"
+                                                            menuPortalTarget={document.body}
+                                                            styles={{
+                                                                menuPortal: (base) => ({ ...base, zIndex: 9999 })
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Cantidad:</label>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            placeholder="Cantidad"
+                                                            value={newIngredient.quantity}
+                                                            onChange={(e) => updateIngredientField(index, 'quantity', e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Unidad:</label>
+                                                        <select
+                                                            value={newIngredient.unit}
+                                                            onChange={(e) => updateIngredientField(index, 'unit', e.target.value)}
+                                                        >
+                                                            <option value="g">Gramos</option>
+                                                            <option value="ml">Mililitros</option>
+                                                            <option value="unidades">Unidades</option>
+                                                        </select>
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>&nbsp;</label>
+                                                        <div className="ingredient-actions">
+                                                            {index === newIngredients.length - 1 && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={addNewIngredientField}
+                                                                    className="action-button secondary small"
+                                                                    title="Agregar otro ingrediente"
+                                                                >
+                                                                    +
+                                                                </button>
+                                                            )}
+                                                            {newIngredients.length > 1 && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeIngredientField(index)}
+                                                                    className="action-button delete small"
+                                                                    title="Eliminar este ingrediente"
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div className="form-actions">
+                                                <button
+                                                    type="button"
+                                                    onClick={addIngredientsToRecipe}
+                                                    className="action-button primary"
+                                                >
+                                                    Agregar Todos los Ingredientes
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 
                                 <div className="button-group">
                                     <button type="submit" className="action-button primary">
@@ -3584,7 +4266,8 @@ const PurchaseRequests = () => {
                                         onClick={handleDeleteProduct}
                                         className="action-button delete"
                                     >
-                                        {confirmDelete ? "Confirmar Eliminación" : "Eliminar Producto"}
+                                        {confirmDelete ? "Confirmar Eliminación" : 
+                                         `Eliminar ${selectedProduct?.category === 'Insumo' ? 'Insumo' : 'Producto'}`}
                                     </button>
                                 </div>
                             </form>
@@ -3597,7 +4280,7 @@ const PurchaseRequests = () => {
                             className="action-button delete-all"
                             disabled={newProducts.length === 0}
                         >
-                            {deleteAllConfirm ? "Confirmar Eliminación de Todos" : "Eliminar Todos los Productos Sin Ventas"}
+                            {deleteAllConfirm ? "Confirmar Eliminación de Todos" : "Eliminar Todos los Productos/Insumos"}
                         </button>
                     </div>
             </div>
@@ -3718,7 +4401,7 @@ const PurchaseRequests = () => {
 
         // Defensive: ensure currentPage is a known page when logged in to avoid falling
         // into the default case which renders the "Página no encontrada." message
-        const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'editar productos','login', 'reportar faltantes', 'ver reportes de faltantes']);
+        const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'editar productos','login', 'reportar faltantes', 'ver reportes de faltantes', 'gestión de pérdidas']);
         let pageToRender = currentPage;
         if (!validPages.has(String(currentPage))) {
             console.warn('⚠️ currentPage inválido detectado, forzando a dashboard:', currentPage);
@@ -3734,7 +4417,13 @@ const PurchaseRequests = () => {
                 return <SalesView />;
           
             case 'productos':
-                return userRole === 'Gerente' ? <ProductCreationView /> : <div>Acceso Denegado</div>;
+                return userRole === 'Gerente' ? <ProductManagement 
+                    userRole={userRole}
+                    products={products}
+                    inventory={inventory}
+                    loadProducts={loadProducts}
+                    ProductCreationViewComponent={ProductCreationViewComponent}
+                /> : <ProductCreationViewComponent />;
             case 'gestión de usuarios':
                 return userRole === 'Gerente' ? <UserManagement /> : <div>Acceso Denegado</div>;
             case 'proveedores':
@@ -3748,6 +4437,7 @@ const PurchaseRequests = () => {
                         products={products}
                         purchases={purchases}
                         reloadPurchases={fetchPurchases}
+                        reloadProducts={loadProducts}
                     /> : <div>Acceso Denegado</div>;
             case 'pedidos':
                 return userRole === 'Gerente' ? <OrderManagement /> : <div>Acceso Denegado</div>;
@@ -3773,6 +4463,13 @@ const PurchaseRequests = () => {
                 return <LowStockReport />;
             case 'ver reportes de faltantes':
                 return userRole === 'Gerente' ? <ViewLowStockReports /> : <div>Acceso Denegado</div>;
+            case 'gestión de pérdidas':
+                return ['Gerente', 'Encargado'].includes(userRole) ? 
+                    <LossManagement 
+                        products={products}
+                        userRole={userRole}
+                        loadProducts={loadProducts}
+                    /> : <div>Acceso Denegado</div>;
             default:
                 return <div>Página no encontrada.</div>;
         }
