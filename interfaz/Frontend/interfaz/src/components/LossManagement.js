@@ -3,10 +3,11 @@ import Select from 'react-select';
 import api from '../services/api';
 
 const LossManagement = ({ products, userRole, loadProducts }) => {
-    const [activeSubTab, setActiveSubTab] = useState('register'); // 'register', 'history', 'configure'
+    const [activeSubTab, setActiveSubTab] = useState('register'); // 'register', 'history'
     const [lossRecords, setLossRecords] = useState([]);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+    const [showConfirmLoss, setShowConfirmLoss] = useState(false); // Confirmación para registrar pérdida
 
     // Estados para registrar pérdida
     const [newLoss, setNewLoss] = useState({
@@ -32,10 +33,25 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
         }
     }, [userRole]);
 
+    // Función para convertir y mostrar el stock en las unidades correctas
+    const getDisplayStock = (product) => {
+        const stock = parseFloat(product.stock) || 0;
+        switch (product.unit) {
+            case 'g':
+                return `${(stock / 1000).toFixed(3)} kg`; // Convertir gramos a kilos
+            case 'ml':
+                return `${(stock / 1000).toFixed(3)} l`; // Convertir mililitros a litros
+            case 'unidades':
+                return `${stock} unidades`;
+            default:
+                return `${stock} ${product.unit}`;
+        }
+    };
+
     // Opciones para el selector de productos
     const productOptions = products.map(p => ({ 
         value: p.id, 
-        label: `${p.name} (Stock: ${p.stock}) - ${p.category}`,
+        label: `${p.name} (Stock: ${getDisplayStock(p)}) - ${p.category}`,
         category: p.category
     }));
 
@@ -58,7 +74,7 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
         }
     };
 
-    // Manejar registro de nueva pérdida
+    // Manejar registro de nueva pérdida (abre modal de confirmación)
     const handleRegisterLoss = async (e) => {
         e.preventDefault();
         setMessage('');
@@ -75,7 +91,17 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
             return;
         }
 
+        // Mostrar modal de confirmación (más visible) y no enviar todavía
+        setShowConfirmLoss(true);
+    };
+
+    // Ejecuta el registro de pérdida después de confirmar
+    const confirmRegisterLoss = async () => {
+        setShowConfirmLoss(false);
+        setMessage('');
+        setError('');
         try {
+            const quantity = parseFloat(newLoss.quantity);
             const payload = {
                 product: newLoss.product.value,
                 quantity: quantity,
@@ -85,7 +111,7 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
 
             await api.post('/loss-records/', payload);
             setMessage('✅ Pérdida registrada exitosamente.');
-            
+
             // Limpiar formulario
             setNewLoss({
                 product: null,
@@ -97,7 +123,6 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
             // Recargar datos
             await loadLossRecords();
             await loadProducts();
-            
         } catch (err) {
             const errorMessage = err.response?.data?.detail || 
                                err.response?.data?.message || 
@@ -107,6 +132,13 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
         }
     };
 
+    // Función para cancelar la confirmación de pérdida
+    const handleCancelLoss = () => {
+        setShowConfirmLoss(false);
+        setMessage('');
+        setError('');
+    };
+
     // Manejar selección de producto
     const handleProductChange = (selectedProduct) => {
         setNewLoss(prev => ({
@@ -114,22 +146,6 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
             product: selectedProduct,
             category: '' // Limpiar categoría cuando cambia el producto
         }));
-    };
-
-    // Actualizar tasa de pérdida de un producto
-    const updateProductLossRate = async (productId, newRate) => {
-        try {
-            // Convertir el porcentaje ingresado a decimal para el backend
-            const decimalRate = parseFloat(newRate) / 100;
-            await api.patch(`/products/${productId}/`, {
-                loss_rate: decimalRate
-            });
-            setMessage('✅ Tasa de pérdida actualizada exitosamente.');
-            await loadProducts();
-        } catch (err) {
-            setError('Error al actualizar la tasa de pérdida.');
-            console.error('Error:', err);
-        }
     };
 
     // Verificar permisos
@@ -160,17 +176,25 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
                 >
                     Historial de Pérdidas
                 </button>
-                <button
-                    className={`sub-tab-button ${activeSubTab === 'configure' ? 'active' : ''}`}
-                    onClick={() => setActiveSubTab('configure')}
-                >
-                    Configurar Tasas
-                </button>
             </div>
 
             {/* Mensajes */}
             {message && <div className="message success-message">{message}</div>}
             {error && <div className="message error-message">{error}</div>}
+
+            {/* Modal de confirmación para registrar pérdida */}
+            {showConfirmLoss && (
+                <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000}}>
+                    <div style={{background: '#fff', padding: '20px', borderRadius: '8px', width: '90%', maxWidth: '480px', boxShadow: '0 8px 24px rgba(0,0,0,0.2)'}}>
+                        <h3 style={{marginTop: 0}}>Confirmar registro de pérdida</h3>
+                        <p>¿Estás seguro que deseas registrar esta pérdida? Se actualizará el stock del producto seleccionado.</p>
+                        <div style={{display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px'}}>
+                            <button onClick={confirmRegisterLoss} className="action-button primary">Confirmar</button>
+                            <button onClick={handleCancelLoss} className="action-button secondary">Cancelar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Contenido de sub-pestañas */}
             <div className="sub-tab-content">
@@ -193,19 +217,43 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
                             </div>
 
                             <div className="form-group">
-                                <label htmlFor="quantity">Cantidad Perdida *</label>
+                                <label htmlFor="quantity">
+                                    {newLoss.product && 
+                                        products.find(p => p.id === newLoss.product.value)?.unit === 'g' 
+                                        ? 'Cantidad Perdida (en kg) *' 
+                                        : newLoss.product && products.find(p => p.id === newLoss.product.value)?.unit === 'ml'
+                                        ? 'Cantidad Perdida (en litros) *'
+                                        : 'Cantidad Perdida *'
+                                    }
+                                </label>
                                 <input
                                     id="quantity"
                                     type="number"
                                     step="0.01"
                                     value={newLoss.quantity}
                                     onChange={(e) => setNewLoss({...newLoss, quantity: e.target.value})}
-                                    placeholder="Ej: 5.5"
-                                    min="0"
+                                    placeholder={
+                                        newLoss.product && products.find(p => p.id === newLoss.product.value)?.unit === 'g' 
+                                        ? "Ej: 2.50 (kg)" 
+                                        : newLoss.product && products.find(p => p.id === newLoss.product.value)?.unit === 'ml'
+                                        ? "Ej: 1.20 (litros)"
+                                        : "Ingrese la cantidad"
+                                    }
+                                    min="0.01"
                                     required
                                 />
                                 {newLoss.product && (
-                                    <small>Unidad: {products.find(p => p.id === newLoss.product.value)?.unit || 'unidades'}</small>
+                                    <small style={{ color: '#666', fontSize: '0.85em' }}>
+                                        {products.find(p => p.id === newLoss.product.value)?.unit === 'g' && (
+                                            <>ℹ️ Ingrese la cantidad perdida en kilos. Se descontará automáticamente del stock en gramos.</>
+                                        )}
+                                        {products.find(p => p.id === newLoss.product.value)?.unit === 'ml' && (
+                                            <>ℹ️ Ingrese la cantidad perdida en litros. Se descontará automáticamente del stock en mililitros.</>
+                                        )}
+                                        {products.find(p => p.id === newLoss.product.value)?.unit === 'unidades' && (
+                                            <>ℹ️ Ingrese la cantidad de unidades perdidas.</>
+                                        )}
+                                    </small>
                                 )}
                             </div>
 
@@ -306,60 +354,6 @@ const LossManagement = ({ products, userRole, loadProducts }) => {
                                 </table>
                             </div>
                         )}
-                    </div>
-                )}
-
-                {/* Configurar Tasas */}
-                {activeSubTab === 'configure' && (
-                    <div className="configure-rates-container">
-                        <div className="configure-rates-header">
-                            <h4>⚙️ Configurar Tasas de Pérdida Esperada</h4>
-                            <p className="configure-rates-description">
-                                Define el porcentaje de pérdida esperado para cada producto e insumo durante la producción. 
-                                Estos valores se aplicarán automáticamente al calcular las cantidades necesarias.
-                            </p>
-                        </div>
-                        
-                        <div className="rates-grid">
-                            {products.map(product => (
-                                <div key={product.id} className="rate-card">
-                                    <div className="rate-card-header">
-                                        <div className="product-details">
-                                            <h5 className="product-name">{product.name}</h5>
-                                            <span className={`category-badge ${product.category.toLowerCase()}`}>
-                                                {product.category}
-                                            </span>
-                                        </div>
-                                        <div className="stock-info">
-                                            <small>Stock: {product.stock} {product.unit}</small>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="rate-control-section">
-                                        <label className="rate-label">Tasa de Pérdida</label>
-                                        <div className="rate-input-group">
-                                            <input
-                                                type="number"
-                                                step="0.1"
-                                                min="0"
-                                                max="100"
-                                                className="rate-input"
-                                                defaultValue={((product.loss_rate || 0.02) * 100).toFixed(1)}
-                                                onBlur={(e) => {
-                                                    const newRate = parseFloat(e.target.value);
-                                                    const currentRate = ((product.loss_rate || 0.02) * 100);
-                                                    if (!isNaN(newRate) && newRate !== currentRate) {
-                                                        updateProductLossRate(product.id, newRate);
-                                                    }
-                                                }}
-                                                placeholder="0.0"
-                                            />
-                                            <span className="percentage-symbol">%</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
                     </div>
                 )}
             </div>

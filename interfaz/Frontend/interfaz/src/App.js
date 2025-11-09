@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import Select from 'react-select';
 import './App.css';
-import api, { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken, getPendingPurchases, approvePurchase, rejectPurchase, getPurchaseHistory, getRecipe, addRecipeIngredient, updateRecipeIngredient, deleteRecipeIngredient, getIngredients, getIngredientsWithSuggestedUnit } from './services/api';
+import { formatMovementDate } from './utils/date';
+import api, { backendLogin, backendLogout, setInMemoryToken, clearInMemoryToken, getInMemoryToken, getPendingPurchases, approvePurchase, rejectPurchase, getPurchaseHistory, getRecipe, addRecipeIngredient, updateRecipeIngredient, deleteRecipeIngredient, getIngredients, getIngredientsWithSuggestedUnit, updateOrderStatus } from './services/api';
 import userStorage from './services/userStorage';
 import DataConsultation from './DataConsultation';
 import MyUserData from './components/MyUserData';
+import ForgotPassword from './components/ForgotPassword';
 import PurchaseManagement from './components/PurchaseManagement';
 import PurchaseRequests from './components/PurchaseRequests';
 import PurchaseHistory from './components/PurchaseHistory';
@@ -126,6 +128,7 @@ const safeToFixed = (value, decimals = 2) => {
   return isNaN(num) ? (0).toFixed(decimals) : num.toFixed(decimals);
 };
 
+// Use shared formatMovementDate from ./utils/date
 // NOTE: validatePassword and handleLogin are defined inside the App component
 // because they need access to React state setters (setLoginError, setIsLoggedIn, ...).
 
@@ -160,6 +163,11 @@ const rolePermissions = {
 
 // Componente principal de la aplicación.
 const App = () => {
+    
+    // Capturar errores de render
+    try {
+    
+    // (cashSortOrder es manejado localmente dentro de SalesView)
     // Limpiar almacenamiento de productos y movimientos de caja: sólo si ya hay token en memoria
     // (evita llamadas backend en el montaje cuando el usuario no está autenticado)
     React.useEffect(() => {
@@ -171,10 +179,7 @@ const App = () => {
                 try {
                     const removedProducts = await removeLS('products');
                     const removedCash = await removeLS('cashMovements');
-                    console.log('🧹 Almacenamiento limpiado al iniciar (usuario autenticado):');
-                    console.log('- Productos:', removedProducts ? 'Éxito' : 'Con warnings');
-                    console.log('- Movimientos de caja:', removedCash ? 'Éxito' : 'Con warnings');
-                    console.log('✅ Datos se cargarán desde PostgreSQL');
+                    // Almacenamiento limpiado exitosamente
                 } catch (err) {
                     console.warn('Error asíncrono al limpiar almacenamiento:', err);
                 }
@@ -192,6 +197,12 @@ const App = () => {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     // Indica si ya intentamos restaurar sesión al montar (para evitar parpadeos)
     const [sessionChecked, setSessionChecked] = useState(false);
+    
+    // Monitorear cambios en sessionChecked
+    useEffect(() => {
+        // Monitor de cambios en sessionChecked
+    }, [sessionChecked]);
+    
     // Intentar restaurar el token en memoria al montar la app y cada vez que la pestaña
     // reciba foco. Esto reduce la ventana donde una nueva pestaña tiene la cookie HttpOnly
     // pero no tiene aún el token en memoria, evitando el caso en que la primera consulta
@@ -203,6 +214,7 @@ const App = () => {
             try {
                 const currentToken = getInMemoryToken();
                 if (currentToken || sessionChecked) return;
+                
                 if (console.debug) console.debug('App: intentando restaurar token en memoria al montar');
                 const restored = await ensureInMemoryToken();
                 if (restored && mounted) {
@@ -215,8 +227,10 @@ const App = () => {
             }
         };
 
-        // llamada inmediata
-        tryRestore();
+        // Solo ejecutar si sessionChecked es false (primera vez)
+        if (!sessionChecked) {
+            tryRestore();
+        }
 
         const onFocus = async () => {
             try {
@@ -231,12 +245,51 @@ const App = () => {
 
         window.addEventListener('focus', onFocus);
         return () => { mounted = false; window.removeEventListener('focus', onFocus); };
-    }, [sessionChecked]);
+    }, []); // Quitar sessionChecked de las dependencias para evitar loop
     const [loginError, setLoginError] = useState('');
-    const [failedAttempts, setFailedAttempts] = useState(0);
-    const [isLocked, setIsLocked] = useState(false);
+    const [failedAttempts, setFailedAttempts] = useState(() => {
+        const saved = sessionStorage.getItem('failedAttempts');
+        return saved ? parseInt(saved, 10) : 0;
+    });
+    const [isLocked, setIsLocked] = useState(() => {
+        const saved = sessionStorage.getItem('isLocked');
+        return saved === 'true';
+    });
     const [showModal, setShowModal] = useState(false);
+    const [currentEmail, setCurrentEmail] = useState(() => {
+        return sessionStorage.getItem('currentEmail') || '';
+    });
     const maxAttempts = 5;
+    
+    // Preservar estado crítico en sessionStorage para resistir remontajes de HMR
+    useEffect(() => {
+        sessionStorage.setItem('failedAttempts', failedAttempts.toString());
+        console.log('🔄 failedAttempts cambió a:', failedAttempts, '- Guardado en sessionStorage');
+    }, [failedAttempts]);
+    
+    useEffect(() => {
+        sessionStorage.setItem('isLocked', isLocked.toString());
+        console.log('🔒 isLocked cambió a:', isLocked, '- Guardado en sessionStorage');
+    }, [isLocked]);
+    
+    useEffect(() => {
+        sessionStorage.setItem('currentEmail', currentEmail);
+        console.log('📧 currentEmail cambió a:', currentEmail, '- Guardado en sessionStorage');
+    }, [currentEmail]);
+    
+    // Verificar si se alcanzó el máximo de intentos y bloquear automáticamente
+    useEffect(() => {
+        if (failedAttempts >= maxAttempts && !isLocked) {
+            console.log('🚫 Máximo de intentos alcanzado, bloqueando cuenta');
+            setIsLocked(true);
+            // NO mostrar modal, solo usar el texto de error en el formulario
+        }
+    }, [failedAttempts, maxAttempts, isLocked]);
+    
+    // Monitorear cambios en isLoggedIn
+    useEffect(() => {
+        console.log('🔐 isLoggedIn cambió a:', isLoggedIn);
+    }, [isLoggedIn]);
      
     // Estado para el rol del usuario actualmente autenticado.
     const [userRole, setUserRole] = useState(null);
@@ -307,13 +360,35 @@ const App = () => {
 
         // Manejo de login: realiza petición al backend, guarda token y actualiza estado
         const handleLogin = async (e, { email: userEmail, password: userPassword }) => {
-        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        // NO llamar preventDefault aquí ya que se llama en onSubmit
+        console.log('🔐 handleLogin llamado con:', { email: userEmail });
+        console.log('🔢 failedAttempts al inicio de handleLogin:', failedAttempts);
+        
+        // Verificar si el email cambió y resetear intentos si es necesario
+        if (userEmail && userEmail !== currentEmail) {
+            console.log('📧 Email cambió de', currentEmail, 'a', userEmail, '- Reseteando intentos fallidos');
+            setCurrentEmail(userEmail);
+            setFailedAttempts(0);
+            setIsLocked(false);
+            setShowModal(false);
+            // Limpiar sessionStorage del estado anterior
+            sessionStorage.removeItem('failedAttempts');
+            sessionStorage.removeItem('isLocked');
+        }
+        
         try {
             setLoginError('');
+            
+            // Verificar si la cuenta está bloqueada
+            if (isLocked) {
+                setLoginError('🔒 Cuenta bloqueada por múltiples intentos fallidos. Contacte al administrador para desbloquearla.');
+                return;
+            }
+            
             // Validaciones mínimas
             if (!userEmail || !userPassword) {
                 setLoginError('Debes ingresar email y contraseña');
-                setFailedAttempts(prev => prev + 1);
+                // NO incrementar failedAttempts para validaciones de frontend
                 return;
             }
             let resp;
@@ -354,6 +429,16 @@ const App = () => {
             try { setInMemoryToken(access); } catch (err) { /* silent */ }
             try { await saveAccessToken(access); } catch (err) { console.warn('No se pudo guardar token:', err); }
 
+            // Resetear intentos fallidos y bloqueo al login exitoso
+            setFailedAttempts(0);
+            setIsLocked(false);
+            
+            // Limpiar estado crítico de sessionStorage al login exitoso
+            sessionStorage.removeItem('failedAttempts');
+            sessionStorage.removeItem('isLocked');
+            sessionStorage.removeItem('currentEmail');
+            setCurrentEmail('');
+            
             setIsLoggedIn(true);
             const roleFromResp = resp?.data?.user?.role || resp?.data?.role || (resp?.data?.user && resp.data.user.role) || 'Gerente';
             setUserRole(roleFromResp);
@@ -369,9 +454,50 @@ const App = () => {
             console.log('🔐 Login completo y datos iniciales cargados');
         } catch (error) {
             console.error('Error de login con backend:', error?.response?.data || error?.message || error);
-            setFailedAttempts(prev => prev + 1);
-            if (error.response && error.response.status === 401) setLoginError('Credenciales inválidas');
-            else setLoginError('Error iniciando sesión. Revisa la consola.');
+            
+            // Manejar errores específicos del backend
+            const errorData = error?.response?.data?.error;
+            if (errorData) {
+                // Actualizar intentos fallidos desde el backend
+                if (typeof errorData.failed_attempts === 'number') {
+                    console.log('🔢 Actualizando intentos fallidos desde backend:', errorData.failed_attempts);
+                    setFailedAttempts(errorData.failed_attempts);
+                } else {
+                    console.log('🔢 Incrementando intentos fallidos localmente');
+                    setFailedAttempts(prev => {
+                        const newValue = prev + 1;
+                        console.log('🔢 Nuevos intentos fallidos:', newValue);
+                        return newValue;
+                    });
+                }
+                
+                // Verificar si la cuenta está bloqueada
+                if (errorData.code === 'account_locked') {
+                    console.log('🔒 Cuenta bloqueada');
+                    setIsLocked(true);
+                    // No mostrar loginError porque ya tenemos el mensaje de bloqueo permanente
+                    setLoginError('');
+                } else if (errorData.code === 'invalid_credentials') {
+                    // Mostrar solo "Credenciales inválidas" sin mencionar intentos (ya tenemos el contador)
+                    setLoginError('❌ Credenciales inválidas');
+                } else if (errorData.code === 'inactive') {
+                    setLoginError('La cuenta está inactiva. Contacte al administrador.');
+                } else {
+                    setLoginError(errorData.message || 'Error iniciando sesión');
+                }
+            } else if (error.response && error.response.status === 401) {
+                console.log('🔢 Error 401 - Incrementando intentos');
+                setFailedAttempts(prev => prev + 1);
+                setLoginError('Credenciales inválidas');
+            } else if (error.response && error.response.status === 403) {
+                console.log('🔢 Error 403 - Incrementando intentos');
+                setFailedAttempts(prev => prev + 1);
+                setLoginError('Acceso denegado. Verifica tus credenciales.');
+            } else {
+                console.log('🔢 Error genérico - Incrementando intentos');
+                setFailedAttempts(prev => prev + 1);
+                setLoginError('Error iniciando sesión. Revisa la consola.');
+            }
         }
     };
     
@@ -458,7 +584,7 @@ const App = () => {
                     // Normalizar items y campos si es necesario
                     const backendOrders = res.data.map(o => ({
                         id: o.id,
-                        date: o.date,
+                        date: o.created_at || o.date,
                         customerName: o.customer_name || o.customerName || o.customer_name || '',
                         paymentMethod: o.payment_method || o.paymentMethod || '',
                         items: Array.isArray(o.items) ? o.items.map(it => ({
@@ -583,8 +709,8 @@ const App = () => {
         return [];
     });
 
-    // Estado para indicar cuando se están sincronizando productos
-    const [isSyncing, setIsSyncing] = useState(false);
+    // Estado para indicar cuando se están cargando productos
+    const [isLoading, setIsLoading] = useState(false);
 
     // useEffect para guardar en localStorage (inventory NO se guarda, products SÍ se guarda)
     // useEffect(() => { saveLS(LS_KEYS.inventory, inventory); }, [inventory]); // DESHABILITADO - inventario se regenera desde products
@@ -612,6 +738,7 @@ const App = () => {
     // Función para cargar usuarios desde el backend
     const loadUsersFromBackend = async () => {
         try {
+            console.log('👥 loadUsersFromBackend llamado - iniciando carga...');
             const response = await api.get('/users/');
             if (response.data) {
                 // Transformar datos del backend para compatibilidad local
@@ -621,10 +748,20 @@ const App = () => {
                     email: user.email,
                     role: user.role ? user.role.name : 'Cajero', // Extraer nombre del rol
                     is_active: user.is_active,
+                    is_locked: user.is_locked || false, // Incluir estado de bloqueo
+                    failed_login_attempts: user.failed_login_attempts || 0, // Intentos fallidos
+                    locked_at: user.locked_at || null, // Fecha de bloqueo
                     hashedPassword: 'backend-managed' // Password manejado por backend
                 }));
-                setUsers(backendUsers);
-                console.log('✅ Usuarios cargados desde backend:', backendUsers.length);
+                console.log('👥 setUsers llamado con', backendUsers.length, 'usuarios');
+                try {
+                    setUsers(backendUsers);
+                    // setUsers ejecutado exitosamente
+                } catch (error) {
+                    console.error('❌ Error en setUsers:', error);
+                    throw error; // Re-throw para que se pueda investigar
+                }
+                // Usuarios cargados desde backend
             }
         } catch (error) {
             console.error('Error cargando usuarios desde backend:', error);
@@ -645,7 +782,7 @@ const App = () => {
 
         // useEffect para sincronización productos -> inventario
         useEffect(() => {
-                console.log('🔄 SYNC: Sincronizando inventario desde products');
+                // Sincronizar inventario desde products
 
                 // Verificar que products sea un array válido antes de usar map
                 if (!Array.isArray(products)) {
@@ -662,7 +799,9 @@ const App = () => {
                     unit: product.unit,
                     type: product.category || 'Producto',
                     price: product.price,      // Ahora sí se incluye el precio
-                    estado: product.estado     // Y el estado si viene del backend
+                    estado: product.estado,    // Y el estado si viene del backend
+                    low_stock_threshold: product.lowStockThreshold, // Umbral procesado en loadProducts
+                    lowStockThreshold: product.lowStockThreshold    // Compatibilidad con ambos nombres
                 }));
 
                 console.log('🎯 Inventario sincronizado:', newInventory?.length ? `${newInventory.length} productos` : 'Array vacío');
@@ -672,6 +811,14 @@ const App = () => {
 
     // Función para cerrar la sesión.
     const handleLogout = async () => {
+        // Llamar al backend para que borre cookies / invalide refresh
+        try {
+            try { await backendLogout(); } catch (e) { /* continuar limpiando aun si falla el backend */ }
+        } catch (e) {
+            // no-op
+        }
+
+        // Limpiar estado local de la app
         setIsLoggedIn(false);
         setUserRole(null);
         setCurrentPage('login');
@@ -681,8 +828,24 @@ const App = () => {
         setFailedAttempts(0);  // Resetear intentos fallidos
         setIsLocked(false);    // Desbloquear cuenta
         setShowModal(false);   // Cerrar modal
-    try { await removeAccessToken(); } catch (e) {}
-    try { clearInMemoryToken(); } catch (e) {}
+        
+        // Limpiar estado crítico de sessionStorage al logout
+        sessionStorage.removeItem('failedAttempts');
+        sessionStorage.removeItem('isLocked');
+        sessionStorage.removeItem('currentEmail');
+        setCurrentEmail('');
+
+        // Limpiar almacenamiento local y token en memoria
+        try { await removeAccessToken(); } catch (e) {}
+        try { clearInMemoryToken(); } catch (e) {}
+        try { localStorage.removeItem('access'); localStorage.removeItem('refresh'); } catch (e) {}
+        try { sessionStorage.clear(); } catch (e) {}
+
+        // Notificar a otras pestañas que se ha cerrado la sesión
+        try {
+            // Usar un valor con timestamp para forzar el evento storage
+            localStorage.setItem('app_logout', String(Date.now()));
+        } catch (e) {}
     };
 
     // Función para manejar la navegación.
@@ -694,6 +857,24 @@ const App = () => {
     const handleModalClose = () => {
         setShowModal(false);
     };
+
+    // Escuchar eventos de storage para sincronizar logout entre pestañas
+    useEffect(() => {
+        const onStorage = (e) => {
+            if (!e) return;
+            if (e.key === 'app_logout') {
+                // Otra pestaña hizo logout: limpiar estado aquí también
+                try { clearInMemoryToken(); } catch (err) {}
+                try { localStorage.removeItem('access'); localStorage.removeItem('refresh'); } catch (err) {}
+                try { sessionStorage.clear(); } catch (err) {}
+                setIsLoggedIn(false);
+                setUserRole(null);
+                setCurrentPage('login');
+            }
+        };
+        window.addEventListener('storage', onStorage);
+        return () => window.removeEventListener('storage', onStorage);
+    }, []);
      
     const LockedAccountModal = () => (
         <div className="modal-overlay">
@@ -718,6 +899,12 @@ const App = () => {
         setIsLocked(false);
         setShowModal(false);
         setLoginError('');
+        
+        // Limpiar estado crítico de sessionStorage al reintentar
+        sessionStorage.removeItem('failedAttempts');
+        sessionStorage.removeItem('isLocked');
+        sessionStorage.removeItem('currentEmail');
+        setCurrentEmail('');
     };
 
     const loadInventory = async () => {
@@ -742,6 +929,10 @@ const App = () => {
                         name: u.username ?? u.name ?? (typeof u === 'string' ? u : ''),
                         email: u.email ?? '',
                         role: (u.role && typeof u.role === 'object') ? (u.role.name ?? String(u.role)) : (u.role ?? 'Cajero'),
+                        is_active: u.is_active ?? true,
+                        is_locked: u.is_locked ?? false,
+                        failed_login_attempts: u.failed_login_attempts ?? 0,
+                        locked_at: u.locked_at ?? null,
                         hashedPassword: 'backend-managed'
                     }));
                     setUsers(normalized);
@@ -757,7 +948,7 @@ const App = () => {
 
     const loadProducts = async () => {
       try {
-        setIsSyncing(true);
+        setIsLoading(true);
         const response = await api.get('/products/');
         const serverProducts = response.data;
         
@@ -772,14 +963,16 @@ const App = () => {
           description: product.description || '',
           status: 'Sincronizado',
           hasSales: false,
-          lowStockThreshold: product.low_stock_threshold || 10,
-          recipe_yield: product.recipe_yield || 1
+          lowStockThreshold: product.low_stock_threshold !== undefined && product.low_stock_threshold !== null ? product.low_stock_threshold : 10,
+          highStockMultiplier: product.high_stock_multiplier !== undefined && product.high_stock_multiplier !== null ? product.high_stock_multiplier : 2.0,
+          recipe_yield: product.recipe_yield || 1,
+          is_ingredient: product.is_ingredient || false
         }));
         
         // Solo actualizar si hay diferencias para evitar re-renders innecesarios
         setProducts(prevProducts => {
           if (JSON.stringify(prevProducts) !== JSON.stringify(formattedProducts)) {
-            console.log('✅ Productos actualizados:', `${formattedProducts.length} productos del servidor`);
+            // Productos actualizados exitosamente
             return formattedProducts;
           } else {
             console.log('📋 Productos sin cambios - no se actualiza el estado');
@@ -805,7 +998,7 @@ const App = () => {
         // Solo actualizar a array vacío si no había productos antes
         setProducts(prevProducts => prevProducts.length > 0 ? prevProducts : []);
       } finally {
-        setIsSyncing(false);
+        setIsLoading(false);
       }
     };
 
@@ -903,26 +1096,44 @@ const App = () => {
 
     // Componente de la interfaz de inicio de sesión.
     const Login = () => {
+      console.log('🎨 Login render - failedAttempts:', failedAttempts, 'isLocked:', isLocked);
+      
       const [emailInput, setEmailInput] = useState('');
       const [passwordInput, setPasswordInput] = useState('');
 
-      const onSubmit = (e) => {
-        e.preventDefault();
-        handleLogin(e, { email: emailInput, password: passwordInput });
+      const onSubmit = async () => {
+        console.log('🔐 Login clicked, calling handleLogin');
+        console.log('🔢 Estado actual failedAttempts:', failedAttempts);
+        await handleLogin(null, { email: emailInput, password: passwordInput });
+        console.log('🔢 Estado después de handleLogin:', failedAttempts);
+      };
+      
+      // Limpiar solo el mensaje de error cuando el usuario empieza a escribir
+      // (pero mantener el contador de intentos visible)
+      const handleEmailChange = (e) => {
+        setEmailInput(e.target.value);
+        // Solo limpiar el mensaje de error, NO los intentos fallidos
+        if (loginError && !isLocked) setLoginError('');
+      };
+      
+      const handlePasswordChange = (e) => {
+        setPasswordInput(e.target.value);
+        // Solo limpiar el mensaje de error, NO los intentos fallidos
+        if (loginError && !isLocked) setLoginError('');
       };
 
       return (
         <div className="login-container">
           <h1>Iniciar Sesión</h1>
           
-          <form onSubmit={onSubmit}>
+          <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }}>
             <div className="input-group">
               <label htmlFor="email">Correo Electrónico</label>
               <input
                 type="email"
                 id="email"
                 value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
+                onChange={handleEmailChange}
                 placeholder="ejemplo@email.com"
                 required
                 autoComplete="email"
@@ -935,7 +1146,7 @@ const App = () => {
                 type="password"
                 id="password"
                 value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
+                onChange={handlePasswordChange}
                 placeholder="••••••••"
                 required
                 autoComplete="current-password"
@@ -943,33 +1154,64 @@ const App = () => {
               />
             </div>
             
-            {/* Mostrar mensaje de error */}
-            <p className={loginError ? 'error-message' : 'error-message hidden'}>
-              {loginError}
-            </p>
-            
-            {/* Mostrar contador de intentos */}
-            {failedAttempts > 0 && !isLocked && (
-              <p className="attempts-message">
-                Intentos fallidos: {failedAttempts} de {maxAttempts}
+            {/* Mostrar contador de intentos (SIEMPRE visible, permanente) */}
+            {!isLocked && (
+              <p style={{ 
+                marginTop: '12px', 
+                marginBottom: '12px', 
+                padding: '10px', 
+                backgroundColor: failedAttempts > 0 ? '#fff3cd' : '#f8f9fa',
+                border: `1px solid ${failedAttempts > 0 ? '#ffc107' : '#dee2e6'}`,
+                borderRadius: '4px',
+                textAlign: 'center',
+                color: failedAttempts > 0 ? '#856404' : '#6c757d',
+                fontWeight: failedAttempts > 0 ? 'bold' : 'normal',
+                fontSize: '14px',
+                position: "relative",
+                left: "-2.7em",
+                right: "-10em"
+              }}>
+                {failedAttempts > 0 ? '⚠️ ' : ''}Intentos fallidos: {failedAttempts} de {maxAttempts}
               </p>
             )}
             
             {/* Mostrar mensaje de bloqueo */}
             {isLocked && (
-              <p className="lock-message">
-                Tu cuenta ha sido bloqueada. Contacta al administrador.
+              <p style={{ 
+                marginTop: '12px', 
+                marginBottom: '12px', 
+                padding: '12px', 
+                backgroundColor: '#ffebee', 
+                border: '2px solid #d32f2f',
+                borderRadius: '4px',
+                textAlign: 'center',
+                color: '#d32f2f', 
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}>
+                🔒 Cuenta bloqueada por múltiples intentos fallidos. Contacte al administrador para desbloquearla.
+              </p>
+            )}
+            
+            {/* Mostrar mensaje de error (solo si hay error y no es un mensaje de bloqueo) */}
+            {loginError && !isLocked && (
+              <p className="error-message" style={{ marginTop: '8px', marginBottom: '8px' }}>
+                {loginError}
               </p>
             )}
             
             {/* Formulario de login - sin funciones de test en producción */}
             <button 
-              type="submit" 
+              type="button"
+              onClick={onSubmit}
               className="login-button" 
               disabled={isLocked}
             >
               {isLocked ? 'Cuenta Bloqueada' : 'Iniciar Sesión'}
             </button>
+                        <div style={{ marginTop: 10 }}>
+                            <button type="button" className="link-button" onClick={() => setCurrentPage('forgot-password')}>Olvidé mi contraseña</button>
+                        </div>
           </form>
         </div>
       );
@@ -981,10 +1223,13 @@ const App = () => {
 
         return (
             <nav className="navbar">
-                <div className="user-info">
-                    <span>Rol: {userRole}</span>
-                    <button onClick={handleLogout} className="logout-button">Cerrar Sesión</button>
-                </div>
+                {/* Mostrar información de usuario solo si está autenticado y no estamos en la pantalla pública de 'forgot-password' */}
+                {(isLoggedIn && userRole && currentPage !== 'forgot-password') && (
+                  <div className="user-info">
+                      <span>Rol: {userRole}</span>
+                      <button onClick={handleLogout} className="logout-button">Cerrar Sesión</button>
+                  </div>
+                )}
                 <ul className="nav-list">
                     {itemsToShow.map(item => (
                         <li key={item}>
@@ -1010,7 +1255,7 @@ const App = () => {
                             <div className="order-header">
                                 <strong>ID: {order.id}</strong>
                                 <span>Cliente: {order.customerName}</span>
-                                <span>Fecha: {new Date(order.date).toLocaleDateString()}</span>
+                                <span>Fecha: {formatMovementDate(order.date)}</span>
                             </div>
                             <div className="order-details">
                                 <p><strong>Estado:</strong> {order.status}</p>
@@ -1037,9 +1282,13 @@ const App = () => {
     // Componente del tablero (Dashboard).
     const Dashboard = () => {
         // Obtener productos e insumos con stock bajo según su umbral personalizado
-        const lowStockItems = products.filter(product => 
-            product.stock < (product.lowStockThreshold || 10)
-        );
+        // Comparar en la misma unidad base (gramos/ml/unidades)
+        const lowStockItems = products.filter(product => {
+            const threshold = product.lowStockThreshold || 10;
+            // El stock ya está en unidad base, el threshold también debe estar en unidad base
+            // (si el backend lo guardó correctamente)
+            return product.stock < threshold;
+        });
 
         // Separar productos e insumos para mejor organización
         const lowStockProducts = lowStockItems.filter(item => item.category === 'Producto');
@@ -1091,7 +1340,7 @@ const App = () => {
                                     <ul className="alert-list">
                                         {lowStockProducts.map(item => (
                                             <li key={item.id} className="alert-item">
-                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {item.lowStockThreshold || 10})
+                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {formatStockDisplay(item.lowStockThreshold || 10, item.unit)})
                                             </li>
                                         ))}
                                     </ul>
@@ -1104,7 +1353,7 @@ const App = () => {
                                     <ul className="alert-list">
                                         {lowStockSupplies.map(item => (
                                             <li key={item.id} className="alert-item">
-                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {item.lowStockThreshold || 10})
+                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {formatStockDisplay(item.lowStockThreshold || 10, item.unit)})
                                             </li>
                                         ))}
                                     </ul>
@@ -1130,6 +1379,14 @@ const App = () => {
         const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Cajero', password: '' });
         const [message, setMessage] = useState('');
 
+        // Modales de confirmación
+        const [confirmModal, setConfirmModal] = useState({
+            isOpen: false,
+            action: null, // 'unlock', 'edit', 'delete', 'create'
+            userId: null,
+            userName: ''
+        });
+
         const handleAddUser = async (e) => {
             e.preventDefault();
             if (!newUser.name || !newUser.email || !newUser.password) {
@@ -1146,19 +1403,36 @@ const App = () => {
                 setMessage('Error: El email ya está registrado.');
                 return;
             }
+            
+            // Mostrar modal de confirmación antes de crear
+            setConfirmModal({
+                isOpen: true,
+                action: 'create',
+                userId: null,
+                userName: newUser.name
+            });
+        };
+
+        const confirmCreateUser = async () => {
             try {
-                await api.post('/users/', { 
-                    username: newUser.name,
+                const payload = { 
+                    username: newUser.name, // Username igual al nombre completo exactamente como se escribió
                     email: newUser.email,
                     password: newUser.password,
-                    role: newUser.role 
-                });
+                    role_name: newUser.role 
+                };
+                // Payload preparado para envío
+                
+                await api.post('/users/', payload);
                 await loadUsersFromBackend();
                 setNewUser({ name: '', email: '', role: 'Cajero', password: '' });
                 setShowAddUser(false);
                 setMessage('✅ Usuario creado exitosamente.');
+                setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
             } catch (error) {
-                setMessage(error.response?.data?.email?.[0] || 'Error: No se pudo crear el usuario.');
+                // Error al crear usuario
+                setMessage(error.response?.data?.email?.[0] || error.response?.data?.username?.[0] || error.response?.data?.error || 'Error: No se pudo crear el usuario.');
+                setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
             }
         };
 
@@ -1171,6 +1445,18 @@ const App = () => {
                 setMessage(`Error de contraseña: ${validatePassword(newPassword)}`);
                 return;
             }
+
+            // Mostrar modal de confirmación para editar
+            setConfirmModal({
+                isOpen: true,
+                action: 'edit',
+                userId: editingUser.id,
+                userName: editingUser.name
+            });
+        };
+
+        const performUpdateUser = async () => {
+            if (!editingUser) return;
 
             try {
                 const payload = {
@@ -1219,20 +1505,113 @@ const App = () => {
 
         const handleDeleteUser = async (userId) => {
             const userToDelete = users.find(u => u.id === userId);
-            if (!userToDelete || (userToDelete.role === 'Gerente') || !window.confirm(`¿Seguro que quieres eliminar a ${userToDelete.name}?`)) return;
-            try {
-                await api.delete(`/users/${userId}/`);
-                await loadUsersFromBackend();
-                setMessage('✅ Usuario eliminado.');
-            } catch (error) {
-                setMessage('Error eliminando usuario.');
+            if (!userToDelete) return;
+            if (userToDelete.role === 'Gerente') {
+                setMessage('No se puede eliminar a un usuario con rol Gerente.');
+                return;
             }
+            // Abrir modal de confirmación
+            setConfirmModal({
+                isOpen: true,
+                action: 'delete',
+                userId: userId,
+                userName: userToDelete.name
+            });
+        };
+
+        const handleUnlockUser = async (userId) => {
+            const userToUnlock = users.find(u => u.id === userId);
+            if (!userToUnlock) return;
+            // Abrir modal de confirmación
+            setConfirmModal({
+                isOpen: true,
+                action: 'unlock',
+                userId: userId,
+                userName: userToUnlock.name
+            });
         };
 
         const startEditing = (user) => {
             setEditingUser({ ...user });
             setNewPassword('');
             setShowAddUser(false);
+        };
+
+        const confirmAction = async () => {
+            const { action, userId } = confirmModal;
+            setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
+
+            try {
+                if (action === 'delete') {
+                    await api.delete(`/users/${userId}/`);
+                    await loadUsersFromBackend();
+                    setMessage('✅ Usuario eliminado correctamente.');
+                } else if (action === 'unlock') {
+                    console.log('🔓 Iniciando desbloqueo de usuario:', userId);
+                    await api.post(`/users/${userId}/unlock/`);
+                    console.log('🔓 Usuario desbloqueado en backend, programando recarga...');
+                    // Usar setTimeout para evitar conflictos de re-render
+                    setTimeout(async () => {
+                        console.log('🔓 Ejecutando recarga de usuarios...');
+                        await loadUsersFromBackend();
+                        console.log('🔓 Usuarios recargados después del desbloqueo');
+                    }, 100); // 100ms de delay
+                    setMessage('✅ Usuario desbloqueado exitosamente.');
+                } else if (action === 'edit') {
+                    // Ejecutar la actualización del usuario
+                    await performUpdateUser();
+                } else if (action === 'create') {
+                    // Ejecutar la creación del usuario
+                    await confirmCreateUser();
+                }
+            } catch (error) {
+                if (action === 'delete') {
+                    setMessage('Error eliminando usuario.');
+                } else if (action === 'unlock') {
+                    setMessage('Error desbloqueando usuario.');
+                } else if (action === 'edit') {
+                    setMessage('Error: No se pudo actualizar el usuario.');
+                } else if (action === 'create') {
+                    setMessage('Error: No se pudo crear el usuario.');
+                }
+                console.error('Confirm action error:', error.response?.data || error.message);
+            }
+        };
+
+        const cancelAction = () => {
+            setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
+        };
+
+        // Modal de confirmación reutilizable
+        const ConfirmationModal = () => {
+            if (!confirmModal.isOpen) return null;
+
+            const messages = {
+                unlock: `¿Estás seguro de que deseas desbloquear a ${confirmModal.userName}?`,
+                edit: `¿Estás seguro de que deseas editar las credenciales de ${confirmModal.userName}?`,
+                delete: `¿Estás seguro de que deseas eliminar a ${confirmModal.userName}?`,
+                create: `¿Estás seguro de que quieres crear este usuario "${confirmModal.userName}"?`
+            };
+
+            const buttonText = {
+                unlock: 'Desbloquear',
+                edit: 'Editar',
+                delete: 'Eliminar',
+                create: 'Crear Usuario'
+            };
+
+            return (
+                <div className="modal-overlay">
+                    <div className="modal-content">
+                        <h3>Confirmación</h3>
+                        <p>{messages[confirmModal.action]}</p>
+                        <div className="modal-buttons">
+                            <button className="modal-button cancel-button" onClick={cancelAction}>Cancelar</button>
+                            <button className="modal-button confirm-button" onClick={confirmAction}>{buttonText[confirmModal.action]}</button>
+                        </div>
+                    </div>
+                </div>
+            );
         };
 
         const editUserForm = () => (
@@ -1264,7 +1643,13 @@ const App = () => {
         const addUserForm = () => (
             <form className="form-container" onSubmit={handleAddUser}>
                 <h3>Registrar Usuario</h3>
-                <input type="text" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} placeholder="Nombre Completo" required />
+                <input 
+                    type="text" 
+                    value={newUser.name} 
+                    onChange={e => setNewUser({ ...newUser, name: e.target.value })} 
+                    placeholder="Nombre Completo (Ej: Juan Carlos Pérez)" 
+                    required 
+                />
                 <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="Email" required />
                 <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Contraseña" required />
                 <select
@@ -1289,16 +1674,31 @@ const App = () => {
             <div className="management-container">
                 <h2>Gestión de Usuarios</h2>
                 {message && <p className="message">{message}</p>}
+                <ConfirmationModal />
                 {editingUser ? editUserForm() : (showAddUser ? addUserForm() : <button className="main-button" onClick={() => setShowAddUser(true)}>Registrar Nuevo Usuario</button>)}
                 <h3>Usuarios Existentes ({users.length})</h3>
                 <ul className="list-container">
                     {users.map(user => (
                         <li key={user.id} className="list-item">
                             <div className="user-info-container">
-                                <div><strong>{user.name}</strong> ({user.role})</div>
+                                <div>
+                                    <strong>{user.name}</strong> ({user.role})
+                                    {user.is_locked && <span style={{color: 'red', marginLeft: '10px', fontWeight: 'bold'}}>🔒 BLOQUEADO</span>}
+                                </div>
                                 <div className="user-email">{user.email}</div>
+                                {user.is_locked && (
+                                    <div style={{color: 'orange', fontSize: '0.9em', marginTop: '5px'}}>
+                                        Bloqueado por {user.failed_login_attempts} intentos fallidos
+                                        {user.locked_at && ` el ${new Date(user.locked_at).toLocaleString('es-AR')}`}
+                                    </div>
+                                )}
                             </div>
                             <div className="button-group">
+                                {user.is_locked && (
+                                    <button onClick={() => handleUnlockUser(user.id)} className="action-button primary" style={{backgroundColor: '#28a745'}}>
+                                        Desbloquear
+                                    </button>
+                                )}
                                 <button onClick={() => startEditing(user)} className="edit-button">Editar</button>
                                 <button onClick={() => handleDeleteUser(user.id)} className="delete-button">Eliminar</button>
                             </div>
@@ -1439,8 +1839,9 @@ const App = () => {
                     </ul>
                 </div>
                 <hr />
-                {userRole === 'Gerente' && (
-                    <div className="inventory-change-section">
+          {/* Bloque 'Registrar Cambios en el Inventario' comentado  */}
+          {false && (
+              <div className="inventory-change-section">
                         <h3>Registrar Cambios en el Inventario</h3>
                         {!showChangeForm ? (
                             <button className="main-button" onClick={() => setShowChangeForm(true)}>Registrar Salida (Excepcional)</button>
@@ -1497,6 +1898,8 @@ const App = () => {
     };
 
     const SalesView = () => {
+    // Estado para el orden del historial de movimientos de caja SOLO para la pestaña caja
+    const [cashSortOrder, setCashSortOrder] = useState('desc');
         const [cartItems, setCartItems] = useState([]);
         const [total, setTotal] = useState(0);
         const [showMovementForm, setShowMovementForm] = useState(false);
@@ -1764,10 +2167,25 @@ const App = () => {
                         )}
                         
                         <h3>Historial de Movimientos</h3>
+                        <div style={{ marginBottom: '1em' }}>
+                            <label htmlFor="cashSortOrder">Orden:&nbsp;</label>
+                            <select
+                                id="cashSortOrder"
+                                value={cashSortOrder}
+                                onChange={e => setCashSortOrder(e.target.value)}
+                            >
+                                <option value="desc">Descendente (más nuevos primero)</option>
+                                <option value="asc">Ascendente (más viejos primero)</option>
+                            </select>
+                        </div>
                         <ul className="list-container">
-                            {cashMovements.map(movement => (
+                            {[...cashMovements].sort((a, b) => {
+                                const dateA = new Date(a.date);
+                                const dateB = new Date(b.date);
+                                return cashSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+                            }).map(movement => (
                                 <li key={movement.id} className="list-item">
-                                    <span>{movement.date} - {movement.description} {movement.payment_method && `(${movement.payment_method})`}</span>
+                                    <span>{formatMovementDate(movement.date)} - {movement.description} {movement.payment_method && `(${movement.payment_method})`}</span>
                                     <span className={movement.type === 'Entrada' ? 'positive' : 'negative'}>
                                         {movement.type === 'Entrada' ? '+' : '-'} ${movement.amount}
                                     </span>
@@ -1842,7 +2260,7 @@ const App = () => {
                 <ul className="list-container">
                     {cashMovements.map(movement => (
                         <li key={movement.id} className="list-item">
-                            <span>{movement.date} - {movement.description}</span>
+                            <span>{formatMovementDate(movement.date)} - {movement.description}</span>
                             <span className={movement.type === 'Entrada' ? 'positive' : 'negative'}>
                                 {movement.type === 'Entrada' ? '+' : '-'} ${movement.amount}
                             </span>
@@ -1856,6 +2274,27 @@ const App = () => {
     // Componente de la interfaz de creación de nuevos productos.
         // Componente de la interfaz de creación de nuevos productos.
         const ProductCreationViewComponent = () => {
+            // Función para convertir y formatear unidades (igual que en ProductionCreation)
+            const formatQuantityWithConversion = (quantity, unit) => {
+                const num = parseFloat(quantity);
+                
+                if (unit === 'g') {
+                    if (num >= 1000) {
+                        const kg = (num / 1000).toFixed(2);
+                        return `${num.toFixed(1)} g (${kg} kg)`;
+                    }
+                    return `${num.toFixed(1)} g`;
+                } else if (unit === 'ml') {
+                    if (num >= 1000) {
+                        const liters = (num / 1000).toFixed(2);
+                        return `${num.toFixed(1)} ml (${liters} L)`;
+                    }
+                    return `${num.toFixed(1)} ml`;
+                } else {
+                    return `${num.toFixed(1)} ${unit}`;
+                }
+            };
+
             const [newProduct, setNewProduct] = useState({
                 name: '', 
                 description: '', 
@@ -1864,7 +2303,9 @@ const App = () => {
                 // Rendimiento de la receta: cuántas unidades produce una receta/lote
                 recipe_yield: 1,
                 low_stock_threshold: 10,
-                category: 'Producto'
+                high_stock_multiplier: 2.0,
+                category: 'Producto',
+                unit: 'unidades'
             });
             const [recipeItems, setRecipeItems] = useState([{ ingredient: '', quantity: '', unit: '' }]);
             const [message, setMessage] = useState('');
@@ -1993,7 +2434,9 @@ const App = () => {
                             }
 
                             if (ingredientInStore.stock < requiredQuantity) {
-                                setMessage(`🚫 Error: Stock insuficiente para el insumo "${ingredientInStore.name}". Se necesitan ${requiredQuantity} ${item.unit} para crear ${newProduct.stock} unidades del producto (rendimiento por lote: ${recipeYield}), pero solo hay ${ingredientInStore.stock} ${ingredientInStore.unit || ''} disponibles.`);
+                                const requiredFormatted = formatQuantityWithConversion(requiredQuantity, item.unit);
+                                const availableFormatted = formatQuantityWithConversion(ingredientInStore.stock, ingredientInStore.unit || item.unit);
+                                setMessage(`🚫 Error: Stock insuficiente para el insumo "${ingredientInStore.name}". Se necesitan ${requiredFormatted} para crear ${newProduct.stock} unidades del producto (rendimiento por lote: ${recipeYield}), pero solo hay ${availableFormatted} disponibles.`);
                                 return;
                             }
                         }
@@ -2015,22 +2458,43 @@ const App = () => {
                         }
                     }
                     
+                    // Para productos finales, el stock inicial representa una producción inicial
+                    let finalStock = parseInt(newProduct.stock);
+
+                    // Convertir umbral de stock a unidad base antes de enviar
+                    const convertThresholdToBaseUnit = (threshold, unit) => {
+                        if (unit === 'g') return threshold * 1000; // Kg a gramos
+                        if (unit === 'ml') return threshold * 1000; // L a mililitros
+                        return threshold; // unidades sin cambio
+                    };
+
+                    // Convertir stock a unidad base antes de enviar
+                    const convertStockToBaseUnit = (stock, unit) => {
+                        if (unit === 'g') return stock * 1000; // Kg a gramos
+                        if (unit === 'ml') return stock * 1000; // L a mililitros
+                        return stock; // unidades sin cambio
+                    };
+
                     const payload = {
                         name: newProduct.name.trim(),
                         description: newProduct.description.trim(),
                         price: parseFloat(newProduct.price),
-                        stock: parseInt(newProduct.stock),
+                        stock: convertStockToBaseUnit(finalStock, newProduct.unit),
                         recipe_yield: parseInt(newProduct.recipe_yield) || 1,
-                        low_stock_threshold: parseInt(newProduct.low_stock_threshold),
+                        low_stock_threshold: convertThresholdToBaseUnit(parseInt(newProduct.low_stock_threshold), newProduct.unit),
+                        high_stock_multiplier: parseFloat(newProduct.high_stock_multiplier),
                         category: newProduct.category,
+                        unit: newProduct.unit,
                         recipe_ingredients: recipePayload
                     };
                     
-                    // Crear producto en el backend
+                    // Crear producto
                     const response = await api.post('/products/', payload);
 
                     // Recargar productos desde PostgreSQL para mantener sincronización
                     await loadProducts();
+                    setMessage('✅ Producto creado exitosamente y datos recargados desde PostgreSQL.');
+                    // Productos recargados desde PostgreSQL después de crear producto
 
                     // Limpiar formulario
                     setNewProduct({ 
@@ -2040,12 +2504,11 @@ const App = () => {
                         stock: 0, 
                         recipe_yield: 1,
                         low_stock_threshold: 10,
-                        category: 'Producto'
+                        high_stock_multiplier: 2.0,
+                        category: 'Producto',
+                        unit: 'unidades'
                     });
                     setRecipeItems([{ ingredient: '', quantity: '', unit: '' }]);
-
-                    setMessage('✅ Producto creado exitosamente y datos recargados desde PostgreSQL.');
-                    console.log('🔄 Productos recargados desde PostgreSQL después de crear producto');
                 } catch (error) {
                     console.log('❌ Error creando producto:', error);
                     
@@ -2097,6 +2560,27 @@ const App = () => {
                             rows="3"
                         />
                         
+                        <p>Categoría</p>
+                        <select 
+                            value={newProduct.category} 
+                            onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
+                            required
+                        >
+                            <option value="Producto">Producto</option>
+                            <option value="Insumo">Insumo</option>
+                        </select>
+
+                        <p>Unidad de Medida</p>
+                        <select 
+                            value={newProduct.unit} 
+                            onChange={e => setNewProduct({ ...newProduct, unit: e.target.value })}
+                            required
+                        >
+                            <option value="unidades">Unidades</option>
+                            <option value="g">Gramos (se mostrará en Kg)</option>
+                            <option value="ml">Mililitros (se mostrará en L)</option>
+                        </select>
+                        
                         <p>Precio</p>
                         <input 
                             type="number" 
@@ -2107,16 +2591,16 @@ const App = () => {
                             //step="0.01"
                             required 
                         />
-                        <p>Stock Inicial</p>
+                        <p>Stock ({newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'})</p>
                         <input 
                             type="number" 
                             value={newProduct.stock} 
                             onChange={e => setNewProduct({ ...newProduct, stock: parseInt(e.target.value) || 0 })} 
-                            placeholder="Stock Inicial *" 
+                            placeholder={`Stock en ${newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'}`} 
                             min="0"
                             required 
                         />
-
+                        
                         <p>Rendimiento de la receta (unidades por lote)</p>
                         <input
                             type="number"
@@ -2127,16 +2611,24 @@ const App = () => {
                             required
                         />
 
-                        <p>Umbral de stock</p>
+                        <p>Umbral de Stock Bajo ({newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'})</p>
                         <input 
                             type="number" 
                             value={newProduct.low_stock_threshold} 
                             onChange={e => setNewProduct({ ...newProduct, low_stock_threshold: parseInt(e.target.value) || 10 })} 
-                            placeholder="Umbral de Stock Bajo (por defecto: 10)" 
+                            placeholder={`Umbral en ${newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'} (por defecto: 10)`} 
                             min="0"
                         />
 
-
+                        <p>Multiplicador para Stock Alto</p>
+                        <input 
+                            type="number" 
+                            step="0.1"
+                            value={newProduct.high_stock_multiplier} 
+                            onChange={e => setNewProduct({ ...newProduct, high_stock_multiplier: parseFloat(e.target.value) || 2.0 })} 
+                            placeholder="Ej: 2.0 = duplicar, 3.5 = triplicar y medio (por defecto: 2.0)" 
+                            min="1.1"
+                        />
 
                         {newProduct.category === 'Producto' && (
                             <div className="recipe-builder">
@@ -2900,7 +3392,7 @@ const PurchaseRequests = () => {
                         const created = res.data;
                         const createdNormalized = {
                             id: created.id,
-                            date: created.date,
+                            date: created.created_at || created.date,
                             customerName: created.customer_name || created.customerName || '',
                             paymentMethod: created.payment_method || created.paymentMethod || '',
                             items: Array.isArray(created.items) ? created.items.map(it => ({ productName: it.product_name || it.productName || '', quantity: it.quantity, unitPrice: it.unit_price || it.unitPrice || 0, total: it.total || 0 })) : [],
@@ -2922,12 +3414,23 @@ const PurchaseRequests = () => {
                 }
             };
     
-            const handleUpdateOrderStatus = (orderId, newStatus) => {
-                setOrders(orders.map(order => 
-                    order.id === orderId 
-                        ? { ...order, status: newStatus }
-                        : order
-                ));
+            const handleUpdateOrderStatus = async (orderId, newStatus) => {
+                try {
+                    // Actualizar en el backend primero
+                    await updateOrderStatus(orderId, newStatus);
+                    
+                    // Si la llamada al backend es exitosa, actualizar el estado local
+                    setOrders(orders.map(order => 
+                        order.id === orderId 
+                            ? { ...order, status: newStatus }
+                            : order
+                    ));
+                    
+                    setMessage(`✅ Estado del pedido #${orderId} actualizado a "${newStatus}"`);
+                } catch (error) {
+                    console.error("Error actualizando estado del pedido:", error);
+                    setMessage("❌ Error al actualizar el estado del pedido. Revisa la consola.");
+                }
             };
     
             return (
@@ -3194,7 +3697,7 @@ const PurchaseRequests = () => {
                         const created = res.data;
                         const createdNormalized = {
                             id: created.id,
-                            date: created.date,
+                            date: created.created_at || created.date,
                             customerName: created.customer_name || created.customerName || '',
                             paymentMethod: created.payment_method || created.paymentMethod || '',
                             items: Array.isArray(created.items) ? created.items.map(it => ({ productName: it.product_name || it.productName || '', quantity: it.quantity, unitPrice: it.unit_price || it.unitPrice || 0, total: it.total || 0 })) : [],
@@ -3216,12 +3719,23 @@ const PurchaseRequests = () => {
                 }
             };
     
-            const handleUpdateOrderStatus = (orderId, newStatus) => {
-                setOrders(orders.map(order => 
-                    order.id === orderId 
-                        ? { ...order, status: newStatus }
-                        : order
-                ));
+            const handleUpdateOrderStatus = async (orderId, newStatus) => {
+                try {
+                    // Actualizar en el backend primero
+                    await updateOrderStatus(orderId, newStatus);
+                    
+                    // Si la llamada al backend es exitosa, actualizar el estado local
+                    setOrders(orders.map(order => 
+                        order.id === orderId 
+                            ? { ...order, status: newStatus }
+                            : order
+                    ));
+                    
+                    setMessage(`✅ Estado del pedido #${orderId} actualizado a "${newStatus}"`);
+                } catch (error) {
+                    console.error("Error actualizando estado del pedido:", error);
+                    setMessage("❌ Error al actualizar el estado del pedido. Revisa la consola.");
+                }
             };
     
             return (
@@ -3267,8 +3781,8 @@ const PurchaseRequests = () => {
                                 <div key={index} className="order-item">
                                     <div className="item-row">
                                         <Select
-                                            options={products.map(p => ({ value: p.name, label: p.name }))}
-                                            value={products.map(p => ({ value: p.name, label: p.name })).find(opt => opt.value === item.productName) || null}
+                                            options={products.filter(p => !p.is_ingredient && p.category === 'Producto').map(p => ({ value: p.name, label: p.name }))}
+                                            value={products.filter(p => !p.is_ingredient && p.category === 'Producto').map(p => ({ value: p.name, label: p.name })).find(opt => opt.value === item.productName) || null}
                                             onChange={selectedOption => updateItem(index, 'productName', selectedOption ? selectedOption.value : '')}
                                             placeholder="Buscar y seleccionar producto..."
                                             isClearable
@@ -3335,8 +3849,8 @@ const PurchaseRequests = () => {
                     <ul className="list-container">
                         {orders.map(order => (
                             <li key={order.id} className="order-list-item">
-                                <div className="order-header">
-                                    <strong>Pedido #{order.id} - {order.date}</strong>
+                                    <div className="order-header">
+                                        <strong>Pedido #{order.id} - {formatMovementDate(order.date)}</strong>
                                     <div className="order-status-controls">
                                         <span className={`order-status ${order.status.toLowerCase()}`}>
                                             {order.status}
@@ -3393,7 +3907,6 @@ const PurchaseRequests = () => {
             'cuit': 'CUIT',
             'phone': 'Teléfono',
             'address': 'Dirección',
-            'products': 'Producto',
             'items': 'Insumo/Producto',
             'id': 'ID',
             'date': 'Fecha',
@@ -3426,8 +3939,7 @@ const PurchaseRequests = () => {
             'customer_name': 'Cliente',
             'paymentMethod': 'Método de Pago',
             'payment_method': 'Método de Pago',
-            'payment_method': 'Método de Pago',
-            'products': 'Producto/Insumo',
+            'products': 'Productos',
             'units': 'Unidades',
             'totalMovements': 'Total de Movimientos',
             'totalIncome': 'Ingresos Totales',
@@ -3443,6 +3955,7 @@ const PurchaseRequests = () => {
             const [selectedProduct, setSelectedProduct] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
             const [filteredProducts, setFilteredProducts] = useState([]);
+            const [isFirstRender, setIsFirstRender] = useState(true);
             const [editingProduct, setEditingProduct] = useState({
                 name: '',
                 price: 0,
@@ -3450,6 +3963,7 @@ const PurchaseRequests = () => {
                 stock: 0,
                 description: '',
                 lowStockThreshold: 10,
+                highStockMultiplier: 2.0,
                 recipeYield: 1,
                 recipe_ingredients: []
             });
@@ -3470,6 +3984,9 @@ const PurchaseRequests = () => {
             // Cargar ingredientes disponibles al montar el componente
             useEffect(() => {
                 loadAvailableIngredients();
+                // Después del primer render, marcar como no primera vez
+                const timer = setTimeout(() => setIsFirstRender(false), 100);
+                return () => clearTimeout(timer);
             }, []);
 
             // Filtrar productos basado en el término de búsqueda
@@ -3666,13 +4183,22 @@ const PurchaseRequests = () => {
                     return;
                 }
                 setSelectedProduct(product);
+                
+                // Convertir umbral de stock de unidad base a unidad de visualización
+                const convertThresholdFromBaseUnit = (threshold, unit) => {
+                    if (unit === 'g') return threshold / 1000; // gramos a Kg
+                    if (unit === 'ml') return threshold / 1000; // mililitros a L
+                    return threshold; // unidades sin cambio
+                };
+                
                 setEditingProduct({
                     name: product.name || '',
                     price: product.price || 0,
                     category: product.category || 'Producto',
                     stock: product.stock || 0,
                     description: product.description || '',
-                    lowStockThreshold: product.lowStockThreshold ?? product.low_stock_threshold ?? 10,
+                    lowStockThreshold: convertThresholdFromBaseUnit(product.lowStockThreshold ?? product.low_stock_threshold ?? 10, product.unit),
+                    highStockMultiplier: product.highStockMultiplier ?? product.high_stock_multiplier ?? 2.0,
                     recipeYield: parseInt(product.recipe_yield) || 1,
                     recipe_ingredients: []
                 });
@@ -3699,7 +4225,7 @@ const PurchaseRequests = () => {
                 }
 
                 if (!validateStock(editingProduct.stock)) {
-                    setMessage('🚫 Error: El stock inicial debe ser un número entero positivo o cero.');
+                    setMessage('🚫 Error: El stock debe ser un número entero positivo o cero.');
                     return;
                 }
 
@@ -3730,13 +4256,21 @@ const PurchaseRequests = () => {
                         return;
                     }
 
+                    // Convertir umbral de stock a unidad base antes de enviar
+                    const convertThresholdToBaseUnit = (threshold, unit) => {
+                        if (unit === 'g') return threshold * 1000; // Kg a gramos
+                        if (unit === 'ml') return threshold * 1000; // L a mililitros
+                        return threshold; // unidades sin cambio
+                    };
+
                     const updatedProduct = {
                         name: editingProduct.name,
                         price: parseFloat(editingProduct.price),
                         category: editingProduct.category,
-                        stock: parseFloat(editingProduct.stock),
+                        // stock: parseFloat(editingProduct.stock), // Eliminado: stock es solo visual, no editable
                         description: editingProduct.description,
-                        low_stock_threshold: parseInt(editingProduct.lowStockThreshold),
+                        low_stock_threshold: convertThresholdToBaseUnit(parseFloat(editingProduct.lowStockThreshold), selectedProduct.unit),
+                        high_stock_multiplier: parseFloat(editingProduct.highStockMultiplier),
                         recipe_yield: recipeYieldValue
                     };
 
@@ -3781,6 +4315,7 @@ const PurchaseRequests = () => {
                         stock: 0,
                         description: '',
                         lowStockThreshold: 10,
+                        highStockMultiplier: 2.0,
                         recipeYield: 1,
                         recipe_ingredients: []
                     });
@@ -3983,297 +4518,353 @@ const PurchaseRequests = () => {
                             )}
                         </div>
                         
-                        {filteredProducts.filter(p => !p.hasSales).length === 0 ? (
-                            <p className="no-products">
-                                {searchTerm ? 'No se encontraron productos que coincidan con la búsqueda.' : 'No hay productos nuevos disponibles para editar.'}
-                            </p>
-                        ) : (
-                            <ul className="list-container">
-                                {filteredProducts.filter(p => !p.hasSales).map(product => (
-                                    <li key={product.id} className="product-list-item">
-                                        <div className="product-info">
-                                            <strong>{product.name}</strong>
-                                            <span className="product-price">${product.price}</span>
-                                            <span className="product-category">{product.category}</span>
-                                            <span className="product-stock">Stock: {product.stock}</span>
-                                            <span className="product-threshold">Umbral Stock Bajo: {product.lowStockThreshold || 10}</span>
-                                            {product.description && (
-                                                <span className="product-description">{product.description}</span>
-                                            )}
-                                        </div>
-                                        <button 
-                                            onClick={() => selectProductForEdit(product)}
-                                            className="edit-button"
-                                            disabled={selectedProduct?.id === product.id}
-                                        >
-                                            {selectedProduct?.id === product.id ? 'Editando...' : 'Editar'}
-                                        </button>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </div>
-    
-                    {selectedProduct && (
-                        <div className="edit-form">
-                            <h3>Editar Producto: {selectedProduct.name}</h3>
+                        {(() => {
+                            // Usar products directamente si filteredProducts está vacío (carga inicial)
+                            const productsToShow = filteredProducts.length > 0 ? filteredProducts : products;
+                            const editableProducts = productsToShow.filter(p => !p.hasSales);
                             
-                            <form onSubmit={handleSaveChanges} className="form-container">
-                                <div className="form-group">
-                                    <label>Nombre del Producto *</label>
-                                    <input 
-                                        type="text" 
-                                        value={editingProduct.name} 
-                                        onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} 
-                                        placeholder="Nombre del producto (máximo 100 caracteres)"
-                                        maxLength="100"
-                                        required 
-                                    />
-                                </div>
-                                
-                                <div className="form-group">
-                                    <label>Precio *</label>
-                                    <input 
-                                        type="number" 
-                                        value={editingProduct.price} 
-                                        onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})} 
-                                        placeholder="Precio (mayor a 0)"
-                                        min="0.01"
-                                        step="0.01"
-                                        required 
-                                    />
-                                </div>
-                                
-                                <div className="form-group">
-                                    <label>Categoría *</label>
-                                    <select 
-                                        value={editingProduct.category} 
-                                        onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
-                                        required
-                                    >
-                                        <option value="Producto">Producto</option>
-                                        <option value="Insumo">Insumo</option>
-                                    </select>
-                                </div>
-                                
-                                <div className="form-group">
-                                    <label>Stock Inicial</label>
-                                    <input 
-                                        type="number" 
-                                        value={editingProduct.stock} 
-                                        onChange={e => setEditingProduct({...editingProduct, stock: parseInt(e.target.value)})} 
-                                        placeholder="Stock inicial (0 o mayor)"
-                                        min="0"
-                                        required 
-                                    />
-                                </div>
-                                
-                                <div className="form-group">
-                                    <label>Descripción</label>
-                                    <textarea 
-                                        value={editingProduct.description} 
-                                        onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} 
-                                        placeholder="Descripción del producto (opcional)"
-                                        rows="3"
-                                    />
-                                </div>
-                                
-                                <div className="form-group">
-                                    <label>Umbral de Stock Bajo *</label>
-                                    <input 
-                                        type="number" 
-                                        value={editingProduct.lowStockThreshold} 
-                                        onChange={e => {
-                                            const value = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
-                                            setEditingProduct({...editingProduct, lowStockThreshold: value});
-                                        }} 
-                                        placeholder="Nivel de stock para mostrar alertas (0 o mayor)"
-                                        min="0"
-                                        required 
-                                    />
-                                    <small className="form-helper-text">
-                                        Cantidad mínima de stock antes de mostrar alertas en el Dashboard
-                                    </small>
-                                </div>
-
-                                {/* Campo de rendimiento solo para productos que no son insumos */}
-                                {editingProduct.category === 'Producto' && (
-                                    <div className="form-group">
-                                        <label>Rendimiento de la Receta *</label>
-                                        <input 
-                                            type="number" 
-                                            value={editingProduct.recipeYield} 
-                                            onChange={e => {
-                                                const value = e.target.value === '' ? 1 : parseInt(e.target.value) || 1;
-                                                setEditingProduct({...editingProduct, recipeYield: value});
-                                            }} 
-                                            placeholder="Unidades que produce esta receta"
-                                            min="1"
-                                            required 
-                                        />
-                                        <small className="form-helper-text">
-                                            Número de unidades que produce una ejecución completa de esta receta
-                                        </small>
-                                    </div>
-                                )}
-
-                                {/* Sección de Recetas - Solo para productos que no son insumos */}
-                                {selectedProduct && editingProduct.category === 'Producto' && (
-                                    <div className="recipe-section">
-                                        <h4>Receta del Producto</h4>
+                            // Durante el primer render, no mostrar nada para evitar parpadeo
+                            if (isFirstRender) {
+                                return null;
+                            }
+                            
+                            // Si está cargando productos, mostrar indicador de carga
+                            if (isLoading) {
+                                return <p className="no-products">Cargando productos...</p>;
+                            }
+                            
+                            // Si hay productos editables, mostrar la lista
+                            if (editableProducts.length > 0) {
+                                return (
+                            <ul className="list-container">
+                                {productsToShow.filter(p => !p.hasSales).map(product => (
+                                    <React.Fragment key={product.id}>
+                                        <li className="product-list-item">
+                                            <div className="product-info">
+                                                <strong>{product.name}</strong>
+                                                <span className="product-price">${product.price}</span>
+                                                <span className="product-category">{product.category}</span>
+                                                <span className="product-stock">Stock: {product.stock}</span>
+                                                <span className="product-threshold">Umbral Stock Bajo: {product.lowStockThreshold || 10}</span>
+                                                {product.description && (
+                                                    <span className="product-description">{product.description}</span>
+                                                )}
+                                            </div>
+                                            <button 
+                                                onClick={() => selectProductForEdit(product)}
+                                                className="edit-button"
+                                                disabled={selectedProduct?.id === product.id}
+                                            >
+                                                {selectedProduct?.id === product.id ? 'Editando...' : 'Editar'}
+                                            </button>
+                                        </li>
                                         
-                                        {/* Lista de ingredientes actuales */}
-                                        <div className="current-ingredients">
-                                            <h5>Ingredientes Actuales:</h5>
-                                            {(!editingProduct.recipe_ingredients || editingProduct.recipe_ingredients.length === 0) ? (
-                                                <p>No hay ingredientes en la receta.</p>
-                                            ) : (
-                                                <div className="ingredients-list">
-                                                    {editingProduct.recipe_ingredients.map((ingredient, index) => (
-                                                        <div key={index} className="ingredient-item">
-                                                            <div className="ingredient-display">
-                                                                <span className="ingredient-info">
-                                                                    <strong>{ingredient.ingredient_name}</strong>: {ingredient.quantity} {ingredient.unit}
-                                                                </span>
-                                                                <div className="ingredient-actions">
+                                        {/* Formulario inline que aparece debajo del producto seleccionado */}
+                                        {selectedProduct?.id === product.id && (
+                                            <li className="edit-form-inline" style={{listStyle: 'none', padding: '20px', backgroundColor: '#f9f9f9', borderRadius: '8px', marginBottom: '20px'}}>
+                                                <h3>Editar Producto: {selectedProduct.name}</h3>
+                                                
+                                                <form onSubmit={handleSaveChanges} className="form-container">
+                                                    <div className="form-group">
+                                                        <label>Nombre del Producto *</label>
+                                                        <input 
+                                                            type="text" 
+                                                            value={editingProduct.name} 
+                                                            onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} 
+                                                            placeholder="Nombre del producto (máximo 100 caracteres)"
+                                                            maxLength="100"
+                                                            required 
+                                                        />
+                                                    </div>
+                                                    
+                                                    <div className="form-group">
+                                                        <label>Precio *</label>
+                                                        <input 
+                                                            type="number" 
+                                                            value={editingProduct.price} 
+                                                            onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})} 
+                                                            placeholder="Precio (mayor a 0)"
+                                                            min="0.01"
+                                                            step="0.01"
+                                                            required 
+                                                        />
+                                                    </div>
+                                                    
+                                                    <div className="form-group">
+                                                        <label>Categoría *</label>
+                                                        <select 
+                                                            value={editingProduct.category} 
+                                                            onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
+                                                            required
+                                                        >
+                                                            <option value="Producto">Producto</option>
+                                                            <option value="Insumo">Insumo</option>
+                                                        </select>
+                                                    </div>
+                                                    
+                                                    <div className="form-group">
+                                                        <label>Stock Actual {selectedProduct?.unit && `(${selectedProduct.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'})`}</label>
+                                                        <input 
+                                                            type="number" 
+                                                            value={selectedProduct?.unit === 'g' ? (editingProduct.stock / 1000).toFixed(3) : 
+                                                                   selectedProduct?.unit === 'ml' ? (editingProduct.stock / 1000).toFixed(3) : 
+                                                                   editingProduct.stock} 
+                                                            readOnly
+                                                            disabled
+                                                            style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}
+                                                            placeholder={`Stock actual en ${selectedProduct?.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'} (solo lectura)`}
+                                                        />
+                                                        <small style={{ color: '#666', fontSize: '0.9em' }}>
+                                                            Este campo es solo informativo. El stock se actualiza automáticamente con las ventas y movimientos de inventario.
+                                                        </small>
+                                                    </div>
+                                                    
+                                                    <div className="form-group">
+                                                        <label>Descripción</label>
+                                                        <textarea 
+                                                            value={editingProduct.description} 
+                                                            onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} 
+                                                            placeholder="Descripción del producto (opcional)"
+                                                            rows="3"
+                                                        />
+                                                    </div>
+                                                    
+                                                    <div className="form-group">
+                                                        <label>Umbral de Stock Bajo * {selectedProduct?.unit && `(${selectedProduct.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'})`}</label>
+                                                        <input 
+                                                            type="number" 
+                                                            step="0.1"
+                                                            value={editingProduct.lowStockThreshold} 
+                                                            onChange={e => {
+                                                                const value = e.target.value === '' ? 0 : parseFloat(e.target.value) || 0;
+                                                                setEditingProduct({...editingProduct, lowStockThreshold: value});
+                                                            }} 
+                                                            placeholder={`Nivel de stock para alertas en ${selectedProduct?.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'} (0 o mayor)`}
+                                                            min="0"
+                                                            required 
+                                                        />
+                                                        <small className="form-helper-text">
+                                                            Cantidad mínima de stock antes de mostrar alertas en el Dashboard
+                                                        </small>
+                                                    </div>
+
+                                                    <div className="form-group">
+                                                        <label>Multiplicador para Stock Alto *</label>
+                                                        <input 
+                                                            type="number" 
+                                                            step="0.1"
+                                                            value={editingProduct.highStockMultiplier} 
+                                                            onChange={e => {
+                                                                const value = e.target.value === '' ? 2.0 : parseFloat(e.target.value) || 2.0;
+                                                                setEditingProduct({...editingProduct, highStockMultiplier: value});
+                                                            }} 
+                                                            placeholder="Ej: 2.0 = duplicar, 3.5 = triplicar y medio"
+                                                            min="1.1"
+                                                            required 
+                                                        />
+                                                        <small className="form-helper-text">
+                                                            Factor para calcular stock alto: Stock Alto = Umbral × Multiplicador. Stock Medio queda entre ambos valores.
+                                                        </small>
+                                                    </div>
+
+                                                    {/* Campo de rendimiento solo para productos que no son insumos */}
+                                                    {editingProduct.category === 'Producto' && (
+                                                        <div className="form-group">
+                                                            <label>Rendimiento de la Receta *</label>
+                                                            <input 
+                                                                type="number" 
+                                                                value={editingProduct.recipeYield} 
+                                                                onChange={e => {
+                                                                    const value = e.target.value === '' ? 1 : parseInt(e.target.value) || 1;
+                                                                    setEditingProduct({...editingProduct, recipeYield: value});
+                                                                }} 
+                                                                placeholder="Unidades que produce esta receta"
+                                                                min="1"
+                                                                required 
+                                                            />
+                                                            <small className="form-helper-text">
+                                                                Número de unidades que produce una ejecución completa de esta receta
+                                                            </small>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Sección de Recetas - Solo para productos que no son insumos */}
+                                                    {selectedProduct && editingProduct.category === 'Producto' && (
+                                                        <div className="recipe-section">
+                                                            <h4>Receta del Producto</h4>
+                                                            
+                                                            {/* Lista de ingredientes actuales */}
+                                                            <div className="current-ingredients">
+                                                                <h5>Ingredientes Actuales:</h5>
+                                                                {(!editingProduct.recipe_ingredients || editingProduct.recipe_ingredients.length === 0) ? (
+                                                                    <p>No hay ingredientes en la receta.</p>
+                                                                ) : (
+                                                                    <div className="ingredients-list">
+                                                                        {editingProduct.recipe_ingredients.map((ingredient, index) => (
+                                                                            <div key={index} className="ingredient-item">
+                                                                                <div className="ingredient-display">
+                                                                                    <span className="ingredient-info">
+                                                                                        <strong>{ingredient.ingredient_name}</strong>: {ingredient.quantity} {ingredient.unit}
+                                                                                    </span>
+                                                                                    <div className="ingredient-actions">
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => {
+                                                                                                // Si el ingrediente tiene ID, usar la API para eliminarlo
+                                                                                                if (ingredient.id) {
+                                                                                                    deleteIngredientFromRecipe(ingredient.id);
+                                                                                                } else {
+                                                                                                    // Si no tiene ID, solo quitarlo del estado local
+                                                                                                    const updatedIngredients = editingProduct.recipe_ingredients.filter((_, i) => i !== index);
+                                                                                                    setEditingProduct(prev => ({
+                                                                                                        ...prev,
+                                                                                                        recipe_ingredients: updatedIngredients
+                                                                                                    }));
+                                                                                                }
+                                                                                            }}
+                                                                                            className="action-button delete small"
+                                                                                        >
+                                                                                            Eliminar
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Formulario para agregar múltiples ingredientes */}
+                                                            <div className="add-ingredient-form">
+                                                                <h5>Agregar Ingredientes:</h5>
+                                                                {newIngredients.map((newIngredient, index) => (
+                                                                    <div key={index} className="form-row ingredient-row">
+                                                                        <div className="form-group">
+                                                                            <label>Ingrediente:</label>
+                                                                            <Select
+                                                                                value={newIngredient.ingredient}
+                                                                                onChange={(selectedOption) => handleIngredientChange(selectedOption, index)}
+                                                                                options={availableIngredients.map(ingredient => ({
+                                                                                        value: ingredient.id,
+                                                                                        label: `${ingredient.name} (Stock: ${ingredient.stock} ${ingredient.unit})`,
+                                                                                        unit: ingredient.unit,
+                                                                                        suggested_unit: ingredient.suggested_unit
+                                                                                    }))}
+                                                                                placeholder="Buscar ingrediente..."
+                                                                                isClearable
+                                                                                isSearchable
+                                                                                className="searchable-select"
+                                                                                menuPortalTarget={document.body}
+                                                                                styles={{
+                                                                                    menuPortal: (base) => ({ ...base, zIndex: 9999 })
+                                                                                }}
+                                                                            />
+                                                                        </div>
+                                                                        <div className="form-group">
+                                                                            <label>Cantidad:</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                placeholder="Cantidad"
+                                                                                value={newIngredient.quantity}
+                                                                                onChange={(e) => updateIngredientField(index, 'quantity', e.target.value)}
+                                                                            />
+                                                                        </div>
+                                                                        <div className="form-group">
+                                                                            <label>Unidad:</label>
+                                                                            <select
+                                                                                value={newIngredient.unit}
+                                                                                onChange={(e) => updateIngredientField(index, 'unit', e.target.value)}
+                                                                            >
+                                                                                <option value="g">Gramos</option>
+                                                                                <option value="ml">Mililitros</option>
+                                                                                <option value="unidades">Unidades</option>
+                                                                            </select>
+                                                                        </div>
+                                                                        <div className="form-group">
+                                                                            <label>&nbsp;</label>
+                                                                            <div className="ingredient-actions">
+                                                                                {index === newIngredients.length - 1 && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={addNewIngredientField}
+                                                                                        className="action-button secondary small"
+                                                                                        title="Agregar otro ingrediente"
+                                                                                    >
+                                                                                        +
+                                                                                    </button>
+                                                                                )}
+                                                                                {newIngredients.length > 1 && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => removeIngredientField(index)}
+                                                                                        className="action-button delete small"
+                                                                                        title="Eliminar este ingrediente"
+                                                                                    >
+                                                                                        ×
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                                <div className="form-actions">
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => {
-                                                                            // Si el ingrediente tiene ID, usar la API para eliminarlo
-                                                                            if (ingredient.id) {
-                                                                                deleteIngredientFromRecipe(ingredient.id);
-                                                                            } else {
-                                                                                // Si no tiene ID, solo quitarlo del estado local
-                                                                                const updatedIngredients = editingProduct.recipe_ingredients.filter((_, i) => i !== index);
-                                                                                setEditingProduct(prev => ({
-                                                                                    ...prev,
-                                                                                    recipe_ingredients: updatedIngredients
-                                                                                }));
-                                                                            }
-                                                                        }}
-                                                                        className="action-button delete small"
+                                                                        onClick={addIngredientsToRecipe}
+                                                                        className="action-button primary"
                                                                     >
-                                                                        Eliminar
+                                                                        Agregar Todos los Ingredientes
                                                                     </button>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Formulario para agregar múltiples ingredientes */}
-                                        <div className="add-ingredient-form">
-                                            <h5>Agregar Ingredientes:</h5>
-                                            {newIngredients.map((newIngredient, index) => (
-                                                <div key={index} className="form-row ingredient-row">
-                                                    <div className="form-group">
-                                                        <label>Ingrediente:</label>
-                                                        <Select
-                                                            value={newIngredient.ingredient}
-                                                            onChange={(selectedOption) => handleIngredientChange(selectedOption, index)}
-                                                            options={availableIngredients.map(ingredient => ({
-                                                                    value: ingredient.id,
-                                                                    label: `${ingredient.name} (Stock: ${ingredient.stock} ${ingredient.unit})`,
-                                                                    unit: ingredient.unit,
-                                                                    suggested_unit: ingredient.suggested_unit
-                                                                }))}
-                                                            placeholder="Buscar ingrediente..."
-                                                            isClearable
-                                                            isSearchable
-                                                            className="searchable-select"
-                                                            menuPortalTarget={document.body}
-                                                            styles={{
-                                                                menuPortal: (base) => ({ ...base, zIndex: 9999 })
-                                                            }}
-                                                        />
-                                                    </div>
-                                                    <div className="form-group">
-                                                        <label>Cantidad:</label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            placeholder="Cantidad"
-                                                            value={newIngredient.quantity}
-                                                            onChange={(e) => updateIngredientField(index, 'quantity', e.target.value)}
-                                                        />
-                                                    </div>
-                                                    <div className="form-group">
-                                                        <label>Unidad:</label>
-                                                        <select
-                                                            value={newIngredient.unit}
-                                                            onChange={(e) => updateIngredientField(index, 'unit', e.target.value)}
+                                                    )}
+                                                    
+                                                    <div className="button-group">
+                                                        <button type="submit" className="action-button primary">
+                                                            Guardar Cambios
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleCancelEdit}
+                                                            className="action-button secondary"
                                                         >
-                                                            <option value="g">Gramos</option>
-                                                            <option value="ml">Mililitros</option>
-                                                            <option value="unidades">Unidades</option>
-                                                        </select>
+                                                            Cancelar
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleDeleteProduct}
+                                                            className="action-button delete"
+                                                        >
+                                                            {confirmDelete ? "Confirmar Eliminación" : 
+                                                             `Eliminar ${selectedProduct?.category === 'Insumo' ? 'Insumo' : 'Producto'}`}
+                                                        </button>
                                                     </div>
-                                                    <div className="form-group">
-                                                        <label>&nbsp;</label>
-                                                        <div className="ingredient-actions">
-                                                            {index === newIngredients.length - 1 && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={addNewIngredientField}
-                                                                    className="action-button secondary small"
-                                                                    title="Agregar otro ingrediente"
-                                                                >
-                                                                    +
-                                                                </button>
-                                                            )}
-                                                            {newIngredients.length > 1 && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => removeIngredientField(index)}
-                                                                    className="action-button delete small"
-                                                                    title="Eliminar este ingrediente"
-                                                                >
-                                                                    ×
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            <div className="form-actions">
-                                                <button
-                                                    type="button"
-                                                    onClick={addIngredientsToRecipe}
-                                                    className="action-button primary"
-                                                >
-                                                    Agregar Todos los Ingredientes
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                
-                                <div className="button-group">
-                                    <button type="submit" className="action-button primary">
-                                        Guardar Cambios
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleCancelEdit}
-                                        className="action-button secondary"
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleDeleteProduct}
-                                        className="action-button delete"
-                                    >
-                                        {confirmDelete ? "Confirmar Eliminación" : 
-                                         `Eliminar ${selectedProduct?.category === 'Insumo' ? 'Insumo' : 'Producto'}`}
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    )}
-                    
+                                                </form>
+                                            </li>
+                                        )}
+                                    </React.Fragment>
+                                ))}
+                            </ul>
+                                );
+                            }
+                            
+                            // Si no hay productos editables y hay término de búsqueda
+                            if (searchTerm) {
+                                return <p className="no-products">No se encontraron productos que coincidan con la búsqueda.</p>;
+                            }
+                            
+                            // Si no hay productos en total o están cargando, no mostrar nada para evitar parpadeo
+                            if (products.length === 0) {
+                                return null;
+                            }
+                            
+                            // Si hay productos pero ninguno es editable
+                            return <p className="no-products">No hay productos nuevos disponibles para editar.</p>;
+                        })()}
+                    </div>
+    
                     <div className="manage-all-products">
                         <button 
                             onClick={handleDeleteAllProducts}
@@ -4395,13 +4986,21 @@ const PurchaseRequests = () => {
 
     // Renderiza el componente de la página actual según el estado.
     const renderPage = () => {
+        // Always allow forgot-password page even when not logged in
+        if (currentPage === 'forgot-password') {
+                // Siempre regresar a la pantalla de login al cancelar desde "Olvidé mi contraseña",
+                // sin depender del estado `isLoggedIn` que puede cambiar al restaurar sesión
+                // cuando la pestaña recibe foco.
+                return <ForgotPassword onDone={() => setCurrentPage('login')} />;
+            }
+
         if (!isLoggedIn) {
             return <Login />;
         }
 
         // Defensive: ensure currentPage is a known page when logged in to avoid falling
         // into the default case which renders the "Página no encontrada." message
-        const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'editar productos','login', 'reportar faltantes', 'ver reportes de faltantes', 'gestión de pérdidas']);
+    const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'editar productos','login', 'reportar faltantes', 'ver reportes de faltantes', 'gestión de pérdidas', 'generate-token']);
         let pageToRender = currentPage;
         if (!validPages.has(String(currentPage))) {
             console.warn('⚠️ currentPage inválido detectado, forzando a dashboard:', currentPage);
@@ -4426,6 +5025,7 @@ const PurchaseRequests = () => {
                 /> : <ProductCreationViewComponent />;
             case 'gestión de usuarios':
                 return userRole === 'Gerente' ? <UserManagement /> : <div>Acceso Denegado</div>;
+            // legacy token generation view removed
             case 'proveedores':
                 return userRole === 'Gerente' ? <SupplierManagement /> : <div>Acceso Denegado</div>;
             case 'compras':
@@ -4470,6 +5070,11 @@ const PurchaseRequests = () => {
                         userRole={userRole}
                         loadProducts={loadProducts}
                     /> : <div>Acceso Denegado</div>;
+            case 'login':
+                // Permitir renderizar la pantalla de login incluso cuando la aplicación
+                // detecta que está logueada en otra pestaña; esto evita que "Cancelar"
+                // desde 'forgot-password' lleve al default (Página no encontrada).
+                return <Login />;
             default:
                 return <div>Página no encontrada.</div>;
         }
@@ -4548,7 +5153,7 @@ const PurchaseRequests = () => {
           
           if (!isTyping && !hasOpenForms && !recentInteraction && !(isInConsultationPage && hasQueryResults)) {
             loadProducts();
-            console.log('🔄 Sincronización automática de productos');
+            // Sincronización automática de productos
           } else {
             console.log('⏸️ Sincronización pausada - usuario activo:', {
               typing: isTyping,
@@ -4703,10 +5308,17 @@ const PurchaseRequests = () => {
         <div className="app-container">
             {/* Panel de desarrollo "DEV STATUS" eliminado para UI limpia. */}
             {showModal && <LockedAccountModal />}
-            {isLoggedIn && <Navbar />}
+            {/* Mostrar la barra superior SOLO cuando el usuario esté autenticado y
+                no estemos en páginas públicas como 'forgot-password' o 'login'.
+                Evita que la barra azul aparezca en la pantalla de inicio de sesión. */}
+            {isLoggedIn && !['forgot-password', 'login'].includes(currentPage) && <Navbar />}
             {renderPage()}
         </div>
     );
+    } catch (error) {
+        console.error('❌ Error de render en App:', error);
+        throw error; // Re-throw para que ErrorBoundary lo atrape
+    }
     };
 
 export default App;

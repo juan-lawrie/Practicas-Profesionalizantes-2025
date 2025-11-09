@@ -310,10 +310,14 @@ h1 {
 }
 
 .rate-card-header {
-  padding: 20px 20px 10px 20px;
-  background: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
+
+
+
+
 
 .product-details {
   display: flex;
@@ -513,6 +517,690 @@ td.category{
   
   .loss-records-table .description {
     max-width: 150px;
+  }
+}
+
+/* Estilos para filtros de fecha granular en consultas de ventas */
+.granular-date-filters {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.granular-date-filters h5 {
+  margin: 0 0 10px 0;
+  color: #495057;
+  font-weight: 600;
+}
+
+.date-components {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.date-components label {
+  font-weight: 500;
+  color: #6c757d;
+  min-width: 40px;
+  margin: 0;
+  display: inline-block;
+  line-height: 1.5;
+}
+
+.date-components input[type="number"] {
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  width: 80px;
+  font-size: 14px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.date-components input[type="number"]:focus {
+  border-color: #80bdff;
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Estilos específicos para filtros de ventas */
+.sales-filters {
+  background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+  border: 2px solid #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 15px rgba(0, 123, 255, 0.1);
+}
+
+.sales-filters h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #333;
+  font-weight: 600;
+  font-size: 18px;
+  border-bottom: 2px solid rgb(235, 236, 239);
+  padding-bottom: 10px;
+}
+
+.sales-filters .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.sales-filters .filter-row label {
+  font-weight: 500;
+  color: #333;
+  min-width: 100px;
+  margin: 0;
+}
+
+.sales-filters .filter-row select,
+.sales-filters .filter-row input[type="text"],
+.sales-filters .filter-row input[type="number"] {
+  padding: 8px 12px;
+  border: 1px solid #bbdefb;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  background: #ffffff;
+}
+
+.sales-filters .filter-row select:focus,
+.sales-filters .filter-row input[type="text"]:focus,
+.sales-filters .filter-row input[type="number"]:focus {
+  border-color: #007bff;
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+  background: #f8f9fa;
+}
+
+.sales-filters .filter-row select:hover,
+.sales-filters .filter-row input[type="text"]:hover,
+.sales-filters .filter-row input[type="number"]:hover {
+  border-color: #007bff;
+}
+
+.sales-filters .granular-date-filters {
+  background: #ffffff;
+  padding: 15px;
+  border-radius: 8px;
+  margin-top: 10px;
+  border: 1px solid #007bff;
+}
+
+.sales-filters .granular-date-filters h5 {
+  margin: 10px 0 8px 0;
+  color: #333;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sales-filters .date-components {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.sales-filters .date-components label {
+  margin: 0;
+  min-width: 35px;
+  font-weight: 500;
+  color: #495057;
+  font-size: 13px;
+}
+
+.sales-filters .date-components input[type="number"] {
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  width: 70px;
+  font-size: 13px;
+  margin: 0;
+  text-align: center;
+}
+
+.sales-filters .date-components input[type="number"]:focus {
+  border-color: #007bff;
+  outline: 0;
+  box-shadow: 0 0 0 0.1rem rgba(0, 123, 255, 0.25);
+}
+
+/* Estilos específicos para filtros de compras */
+.purchases-filters {
+  background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+  border: 2px solid #e9ecef;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.purchases-filters h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #495057;
+  font-weight: 600;
+  font-size: 18px;
+  border-bottom: 2px solid #e9ecef;
+  padding-bottom: 10px;
+}
+
+.purchases-filters .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+
+.purchases-filters .filter-row label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 100px;
+  font-size: 14px;
+}
+
+.purchases-filters .filter-row select,
+.purchases-filters .filter-row input[type="text"] {
+  padding: 8px 12px;
+  border: 2px solid #ced4da;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: white;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  min-width: 150px;
+}
+
+.purchases-filters .filter-row select:focus,
+.purchases-filters .filter-row input[type="text"]:focus {
+  border-color: #007bff;
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.purchases-filters .type-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 8px;
+}
+
+.purchases-filters .type-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #f8f9fa;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 2px solid #e9ecef;
+  cursor: pointer;
+  transition: all 0.3s;
+  min-width: auto;
+  font-weight: 500;
+}
+
+.purchases-filters .type-checkboxes label:hover {
+  background-color: #e9ecef;
+  border-color: #007bff;
+}
+
+.purchases-filters .type-checkboxes input[type="checkbox"] {
+  transform: scale(1.2);
+  accent-color: #007bff;
+}
+
+.purchases-filters .granular-date-filters {
+  background: #ffffff;
+  padding: 15px;
+  border-radius: 8px;
+  margin-top: 10px;
+  border: 1px solid #e9ecef;
+}
+
+.purchases-filters .granular-date-filters h5 {
+  margin: 0 0 10px 0;
+  color: #495057;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.purchases-filters .date-components {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.purchases-filters .date-components label {
+  font-weight: 600;
+  color: #6c757d;
+  min-width: 50px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.purchases-filters .date-components input[type="number"] {
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  width: 70px;
+  font-size: 13px;
+  margin: 0;
+  text-align: center;
+}
+
+.purchases-filters .date-components input[type="number"]:focus {
+  border-color: #007bff;
+  outline: 0;
+  box-shadow: 0 0 0 0.1rem rgba(0, 123, 255, 0.25);
+}
+
+/* Estilos específicos para filtros de proveedores */
+.suppliers-filters {
+  background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+  border: 2px solid #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.suppliers-filters h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #000000;
+  font-weight: 600;
+  font-size: 18px;
+  border-bottom: 2px solid rgb(235, 236, 239);
+  padding-bottom: 10px;
+}
+
+.suppliers-filters .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+
+.suppliers-filters .filter-row label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 100px;
+  font-size: 14px;
+}
+
+.suppliers-filters .filter-row select,
+.suppliers-filters .filter-row input[type="text"],
+.suppliers-filters .filter-row input[type="number"] {
+  padding: 8px 12px;
+  border: 1px solid #000000;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: white;
+  min-width: 150px;
+}
+
+.suppliers-filters .filter-row select:focus,
+.suppliers-filters .filter-row input[type="text"]:focus,
+.suppliers-filters .filter-row input[type="number"]:focus {
+  border-color: #000000;
+  outline: 0;
+}
+
+.suppliers-filters .filter-row select:hover,
+.suppliers-filters .filter-row input[type="text"]:hover,
+.suppliers-filters .filter-row input[type="number"]:hover {
+  border-color: #000000;
+}
+
+/* Estilos específicos para filtros de movimientos de caja */
+.cash-filters {
+  background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+  border: 2px solid #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+
+}
+
+.cash-filters h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-weight: 600;
+  font-size: 18px;
+  border-bottom: 2px solid rgb(235, 236, 239);
+  padding-bottom: 10px;
+}
+
+.cash-filters .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+
+.cash-filters .filter-row label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 100px;
+  font-size: 14px;
+}
+
+.cash-filters .filter-row select,
+.cash-filters .filter-row input[type="text"] {
+  padding: 8px 12px;
+  border: 1px solid #000000;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: white;
+  min-width: 150px;
+}
+
+.cash-filters .filter-row select:focus,
+.cash-filters .filter-row input[type="text"]:focus {
+  border-color: #000000;
+  outline: 0;
+}
+
+.cash-filters .payment-method-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 8px;
+}
+
+.cash-filters .payment-method-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #000000;
+  cursor: pointer;
+  transition: all 0.3s;
+  min-width: auto;
+  font-weight: 500;
+}
+
+.cash-filters .payment-method-checkboxes label:hover {
+  background-color: #ffffff;
+  border-color: #000000;
+}
+
+/*.cash-filters .payment-method-checkboxes input[type="checkbox"] {
+  transform: scale(1.2);
+  accent-color: #dc3545;
+}*/
+
+.cash-filters .granular-date-filters {
+  background: #ffffff;
+  padding: 15px;
+  border-radius: 8px;
+  margin-top: 10px;
+  border: 1px solid #000000;
+}
+
+/* Estilos específicos para filtros de pedidos */
+.orders-filters {
+  background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+  border: 2px solid #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  
+}
+
+.orders-filters h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  
+  font-weight: 600;
+  font-size: 18px;
+  border-bottom: 2px solid rgb(231, 234, 236);
+  padding-bottom: 10px;
+}
+
+.orders-filters .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+
+.orders-filters .filter-row label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 100px;
+  font-size: 14px;
+}
+
+.orders-filters .filter-row select,
+.orders-filters .filter-row input[type="text"] {
+  padding: 8px 12px;
+  border: 1px solid #000000;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: white;
+  
+  min-width: 150px;
+}
+
+.orders-filters .filter-row select:focus,
+.orders-filters .filter-row input[type="text"]:focus {
+  border-color: #000000;
+  outline: 0;
+
+}
+
+.orders-filters .payment-method-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 8px;
+}
+
+.orders-filters .payment-method-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #000000;
+  cursor: pointer;
+  transition: all 0.3s;
+  min-width: auto;
+  font-weight: 500;
+}
+
+.orders-filters .payment-method-checkboxes label:hover {
+  background-color: #ffffff;
+  border-color: #000000;
+}
+
+/*.orders-filters .payment-method-checkboxes input[type="checkbox"] {
+  transform: scale(1.2);
+  accent-color: #007bff;
+}*/
+
+.orders-filters .status-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 8px;
+}
+
+.orders-filters .status-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #000000;
+  cursor: pointer;
+  transition: all 0.3s;
+  min-width: auto;
+  font-weight: 500;
+}
+
+.orders-filters .status-checkboxes label:hover {
+  background-color: #ffffff;
+  border-color: #000000;
+}
+
+/*.orders-filters .status-checkboxes input[type="checkbox"] {
+  transform: scale(1.2);
+  accent-color: #007bff;
+}*/
+
+.orders-filters .granular-date-filters {
+  background: #ffffff;
+  padding: 15px;
+  border-radius: 8px;
+  margin-top: 10px;
+  border: 1px solid #b3d9ff;
+}
+
+/* Estilos específicos para filtros de estado de stock */
+.stock-filters {
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  border: 2px solid #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.08);
+}
+
+.stock-filters h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #000000;
+  font-weight: 600;
+  font-size: 18px;
+  border-bottom: 2px solid rgb(234, 236, 239);
+  padding-bottom: 10px;
+}
+
+.stock-filters .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+
+.stock-filters .filter-row label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 100px;
+  font-size: 14px;
+}
+
+.stock-filters .filter-row select,
+.stock-filters .filter-row input[type="text"] {
+  padding: 8px 12px;
+  border: 2px solid #ced4da;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: white;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  min-width: 150px;
+}
+
+/*.stock-filters .filter-row select:focus,
+.stock-filters .filter-row input[type="text"]:focus {
+  
+  outline: 0;
+ 
+}*/
+
+.stock-filters .status-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-top: 8px;
+}
+
+.stock-filters .status-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #000000;
+  cursor: pointer;
+  transition: all 0.3s;
+  min-width: auto;
+  font-weight: 500;
+}
+
+.stock-filters .status-checkboxes label:hover {
+  background-color: #c3e6cb;
+  border-color: #28a745;
+}
+
+.stock-filters .status-checkboxes input[type="checkbox"] {
+  transform: scale(1.2);
+  accent-color: #28a745;
+}
+
+/* Responsive design para filtros de fecha */
+@media (max-width: 768px) {
+  .date-components {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .date-components input[type="number"] {
+    width: 100px;
+  }
+  
+  .sales-filters .filter-row,
+  .purchases-filters .filter-row,
+  .cash-filters .filter-row,
+  .orders-filters .filter-row,
+  .stock-filters .filter-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .sales-filters .filter-row label,
+  .purchases-filters .filter-row label,
+  .cash-filters .filter-row label,
+  .orders-filters .filter-row label,
+  .stock-filters .filter-row label {
+    min-width: auto;
+  }
+  
+  .purchases-filters .type-checkboxes,
+  .cash-filters .payment-method-checkboxes,
+  .orders-filters .payment-method-checkboxes,
+  .orders-filters .status-checkboxes,
+  .stock-filters .status-checkboxes {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

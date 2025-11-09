@@ -1,6 +1,7 @@
 # backend/api/models.py
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+import uuid
 
 # Modelo para almacenamiento tipo localStorage por usuario
 class UserStorage(models.Model):
@@ -31,6 +32,8 @@ class Supplier(models.Model):
     address = models.CharField(max_length=255, blank=True, null=True)
     phone = models.CharField(max_length=30, blank=True, null=True)
     products = models.CharField(max_length=255, blank=True, null=True)
+    is_active = models.BooleanField(default=True)  # Para eliminación lógica
+    deleted_at = models.DateTimeField(null=True, blank=True)  # Fecha de eliminación
 
     def __str__(self):
         return self.name
@@ -48,6 +51,20 @@ class User(AbstractUser):
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True)
     # Añadimos la columna `is_active` por defecto
     is_active = models.BooleanField(default=True)
+    # Campos para tracking de intentos de login
+    failed_login_attempts = models.IntegerField(default=0)
+    is_locked = models.BooleanField(default=False)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    
+    # Permitir espacios en el username sobrescribiendo el campo
+    username = models.CharField(
+        max_length=150,
+        unique=True,
+        help_text='Requerido. 150 caracteres o menos. Permite espacios y caracteres especiales.',
+        error_messages={
+            'unique': "Ya existe un usuario con ese nombre de usuario.",
+        },
+    )
     
     def __str__(self):
         return f"{self.username} - {self.role}"
@@ -59,6 +76,7 @@ class Product(models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2)
     stock = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     low_stock_threshold = models.IntegerField(default=10) # Umbral para la alerta de stock
+    high_stock_multiplier = models.DecimalField(max_digits=5, decimal_places=2, default=2.0) # Multiplicador para stock alto (ej: 2.0 = duplicar, 3.5 = triplicar y medio)
     category = models.CharField(max_length=50, default='Producto') # Categoría del producto
     is_ingredient = models.BooleanField(default=False)
     UNIT_CHOICES = (
@@ -71,6 +89,8 @@ class Product(models.Model):
     recipe_yield = models.IntegerField(default=1)
     # Tasa de pérdida esperada para este producto/insumo (porcentaje como decimal: 0.02 = 2%)
     loss_rate = models.DecimalField(max_digits=5, decimal_places=4, default=0.02)
+    is_active = models.BooleanField(default=True)  # Para eliminación lógica
+    deleted_at = models.DateTimeField(null=True, blank=True)  # Fecha de eliminación
 
     def __str__(self):
         return self.name
@@ -162,6 +182,8 @@ class Purchase(models.Model):
     user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='purchases')
     approved_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_purchases')
     approved_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)  # Para eliminación lógica
+    deleted_at = models.DateTimeField(null=True, blank=True)  # Fecha de eliminación
 
     class Meta:
         ordering = ['-created_at']
@@ -273,3 +295,25 @@ class RecipeIngredient(models.Model):
 
     def __str__(self):
         return f"{self.quantity} {self.unit} of {self.ingredient.name} for {self.product.name}"
+
+
+# Modelo para tokens de recuperación / reseteo de contraseña generados por Gerentes
+class ResetToken(models.Model):
+    """
+    Token de un solo uso para permitir que un usuario restablezca su contraseña.
+    El token en claro nunca se almacena; solo se guarda su hash.
+    """
+    id = models.UUIDField(primary_key=True, editable=False, unique=True, default=uuid.uuid4)
+    token_hash = models.CharField(max_length=128)
+    target_user = models.ForeignKey('User', on_delete=models.CASCADE, null=True, blank=True, related_name='reset_tokens')
+    generated_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='generated_reset_tokens')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+    note = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"ResetToken for {self.target_user.email} (used={self.used})"

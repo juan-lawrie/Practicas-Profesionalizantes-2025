@@ -10,4 +10,7 @@ const API_CONFIG = {
   timeout: 10000
 };
 
+// HCAPTCHA site key para el frontend. Reemplazar por la clave real en producción.
+API_CONFIG.hcaptchaSiteKey = '10000000-ffff-ffff-ffff-000000000001';
+
 export default API_CONFIG;

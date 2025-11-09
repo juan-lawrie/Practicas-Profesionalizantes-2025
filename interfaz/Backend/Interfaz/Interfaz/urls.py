@@ -27,12 +27,9 @@ from api.views import (
     UserQueryViewSet, SupplierViewSet, UserStorageViewSet, CurrentUserView,
     LowStockReportCreateView, LowStockReportListView, LowStockReportUpdateView,
     RecipeIngredientViewSet, ProductProductionView, LossRecordViewSet,
-    get_ingredients_with_suggested_unit
+    get_ingredients_with_suggested_unit, refresh_from_cookie, logout_view,
+    RoleViewSet, PurchaseViewSet, OrderViewSet
 )
-from api.views import RoleViewSet
-from api.views import PurchaseViewSet, OrderViewSet, refresh_from_cookie, logout_view
-from api.views import PurchaseViewSet
-from api.views import OrderViewSet
 from django.shortcuts import redirect
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
@@ -72,6 +69,7 @@ urlpatterns = [
     path('api/sales/create/', SaleCreate.as_view(), name='sale-create'),
     # Legacy login endpoint used by the app (email/password) - keeps custom behavior
     path('api/auth/login/', login_view, name='login'),
+    path('api/auth/reset-with-token/', __import__('api.views', fromlist=['reset_with_token']).reset_with_token, name='reset-with-token'),
     # Standard JWT token endpoints expected by the frontend
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

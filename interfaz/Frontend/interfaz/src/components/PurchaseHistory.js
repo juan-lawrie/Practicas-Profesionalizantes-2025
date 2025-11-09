@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { formatMovementDate } from '../utils/date';
 
 const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelDelete, userRole }) => {
     // Ordenar las compras por fecha, de la más reciente a la más antigua
@@ -29,7 +30,7 @@ const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelD
                         <div key={purchase.id} className="history-item">
                             <div className="history-field id-col">#{purchase.id}</div>
                             <div className="history-field">{purchase.supplier_name || 'N/A'}</div>
-                            <div className="history-field">{new Date(purchase.created_at).toLocaleDateString()}</div>
+                            <div className="history-field">{formatMovementDate(purchase.created_at)}</div>
                             <div className="history-field items-col">
                                 <ul className="inner-items-list">
                                     {purchase.items && purchase.items.map((item, index) => (

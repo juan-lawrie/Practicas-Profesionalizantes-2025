@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport, RecipeIngredient, LossRecord
+from .models import ResetToken
 from django.conf import settings
 from django.utils import timezone
 from .serializers import (
@@ -20,6 +21,83 @@ from .models import UserStorage
 from django.db import transaction
 from decimal import Decimal
 from rest_framework.exceptions import ValidationError
+import traceback
+import secrets
+import hashlib
+import urllib.request
+import urllib.parse
+import json
+from datetime import timedelta
+
+# Función de formateo de fecha para replicar el formato del frontend
+def format_date_for_pdf(date_input):
+    """
+    Formatea una fecha para que coincida con el formato del frontend: YYYY/MM/DD HH:mm
+    """
+    if not date_input:
+        return ''
+    
+    try:
+        # Debug: imprimir el valor de entrada para depurar
+        print(f"DEBUG - Formatting date: {date_input} (type: {type(date_input)})")
+        
+        # Si ya es un objeto datetime, lo usamos directamente
+        if hasattr(date_input, 'strftime'):
+            result = date_input.strftime('%Y/%m/%d %H:%M')
+            print(f"DEBUG - Datetime object formatted to: {result}")
+            return result
+        
+        # Si es una cadena, intentamos parsearla
+        if isinstance(date_input, str):
+            # Limpiar la cadena de entrada
+            date_str = date_input.strip()
+            
+            # Intentamos varios formatos comunes incluyendo ISO 8601
+            from datetime import datetime
+            formats = [
+                '%Y-%m-%dT%H:%M:%S.%fZ',   # ISO 8601 con microsegundos y Z
+                '%Y-%m-%dT%H:%M:%S.%f',    # ISO 8601 con microsegundos
+                '%Y-%m-%dT%H:%M:%SZ',      # ISO 8601 con Z
+                '%Y-%m-%dT%H:%M:%S',       # ISO 8601 básico
+                '%Y-%m-%d %H:%M:%S.%f',    # Con microsegundos
+                '%Y-%m-%d %H:%M:%S',       # Sin microsegundos
+                '%Y-%m-%d',                # Solo fecha
+                '%d/%m/%Y %H:%M',          # DD/MM/YYYY HH:MM
+                '%d/%m/%Y',                # DD/MM/YYYY
+            ]
+            
+            for fmt in formats:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    result = dt.strftime('%Y/%m/%d %H:%M')
+                    print(f"DEBUG - String '{date_str}' parsed with format '{fmt}' and formatted to: {result}")
+                    return result
+                except ValueError:
+                    continue
+            
+            # Si no se pudo parsear, pero contiene 'T', intentar eliminarla manualmente
+            if 'T' in date_str:
+                # Reemplazar T por espacio y eliminar Z al final si existe
+                cleaned = date_str.replace('T', ' ').rstrip('Z')
+                # Eliminar microsegundos si existen
+                if '.' in cleaned:
+                    cleaned = cleaned.split('.')[0]
+                
+                try:
+                    dt = datetime.strptime(cleaned, '%Y-%m-%d %H:%M:%S')
+                    result = dt.strftime('%Y/%m/%d %H:%M')
+                    print(f"DEBUG - Manual T replacement: '{cleaned}' formatted to: {result}")
+                    return result
+                except ValueError:
+                    pass
+        
+        # Si nada funciona, retornamos la entrada como string
+        print(f"DEBUG - Could not parse date, returning as string: {date_input}")
+        return str(date_input)
+        
+    except Exception as e:
+        print(f"DEBUG - Exception formatting date {date_input}: {e}")
+        return str(date_input)
 
 # Permiso personalizado para rol de Gerente
 class IsGerente(BasePermission):
@@ -118,7 +196,7 @@ class UserStorageViewSet(viewsets.ModelViewSet):
 
 # ViewSet para la gestión de proveedores (CRUD)
 class SupplierViewSet(viewsets.ModelViewSet):
-    queryset = Supplier.objects.all()
+    queryset = Supplier.objects.filter(is_active=True)  # Solo proveedores activos
     serializer_class = SupplierSerializer
     
     def get_permissions(self):
@@ -131,6 +209,15 @@ class SupplierViewSet(viewsets.ModelViewSet):
         else:
             self.permission_classes = [IsAuthenticated]
         return super().get_permissions()
+    
+    def destroy(self, request, *args, **kwargs):
+        """Eliminación lógica en lugar de física"""
+        from django.utils import timezone
+        supplier = self.get_object()
+        supplier.is_active = False
+        supplier.deleted_at = timezone.now()
+        supplier.save()
+        return Response({'message': 'Proveedor eliminado correctamente'}, status=status.HTTP_200_OK)
 
 from .models import Purchase
 from .serializers import PurchaseSerializer
@@ -177,7 +264,19 @@ def login_view(request):
     email_normalizado = email.strip().lower()
 
     try:
+        # DEBUG: mostrar información no sensible para rastrear errores 500
+        try:
+            print(f"[login_view][DEBUG] request.data keys={list(request.data.keys())}")
+        except Exception:
+            print("[login_view][DEBUG] request.data could not be listed")
         user = User.objects.filter(email__iexact=email_normalizado).first()
+        print(f"[login_view][DEBUG] email_normalizado={email_normalizado} user_found={bool(user)}")
+        if user:
+            try:
+                print(f"[login_view][DEBUG] user.id={user.id} is_active={getattr(user, 'is_active', None)} role={getattr(user, 'role', None)}")
+                print(f"[login_view][DEBUG] has_failed_login_attempts={hasattr(user, 'failed_login_attempts')} has_is_locked={hasattr(user, 'is_locked')} has_locked_at={hasattr(user, 'locked_at')}")
+            except Exception:
+                print("[login_view][DEBUG] could not inspect user attributes")
         if not user:
             return Response({
                 'success': False,
@@ -196,16 +295,87 @@ def login_view(request):
                 }
             }, status=status.HTTP_403_FORBIDDEN)
 
+        # Verificar si la cuenta está bloqueada (con manejo de campos que pueden no existir)
+        try:
+            if hasattr(user, 'is_locked') and user.is_locked:
+                failed_attempts = getattr(user, 'failed_login_attempts', 5)
+                return Response({
+                    'success': False,
+                    'error': {
+                        'code': 'account_locked',
+                        'message': 'La cuenta está bloqueada por múltiples intentos fallidos. Contacte al administrador.',
+                        'failed_attempts': failed_attempts,
+                        'max_attempts': 5
+                    }
+                }, status=status.HTTP_403_FORBIDDEN)
+        except AttributeError:
+            pass  # Los campos de bloqueo no existen todavía
+
         if not user.check_password(password):
+            # Incrementar intentos fallidos (con manejo de campos que pueden no existir)
+            message = 'Credenciales inválidas.'
+            failed_attempts = 0
+            max_attempts = 5
+            
+            try:
+                if hasattr(user, 'failed_login_attempts'):
+                    user.failed_login_attempts = getattr(user, 'failed_login_attempts', 0) + 1
+                    failed_attempts = user.failed_login_attempts
+                    
+                    if user.failed_login_attempts >= max_attempts:
+                        if hasattr(user, 'is_locked'):
+                            user.is_locked = True
+                        if hasattr(user, 'locked_at'):
+                            user.locked_at = timezone.now()
+                    
+                    # Construir lista de campos que realmente existen
+                    fields_to_update = []
+                    if hasattr(user, 'failed_login_attempts'):
+                        fields_to_update.append('failed_login_attempts')
+                    if hasattr(user, 'is_locked'):
+                        fields_to_update.append('is_locked')
+                    if hasattr(user, 'locked_at'):
+                        fields_to_update.append('locked_at')
+                    
+                    if fields_to_update:
+                        user.save(update_fields=fields_to_update)
+                    
+                    remaining_attempts = max_attempts - user.failed_login_attempts
+                    if remaining_attempts > 0:
+                        message = f'Credenciales inválidas. Te quedan {remaining_attempts} intentos.'
+                    else:
+                        message = 'Cuenta bloqueada por múltiples intentos fallidos. Contacte al administrador.'
+            except Exception as e:
+                # Si falla, simplemente continuar sin tracking de intentos
+                print(f"[login_view] No se pudo actualizar intentos fallidos: {e}")
+                message = 'Credenciales inválidas.'
+            
             return Response({
                 'success': False,
                 'error': {
                     'code': 'invalid_credentials',
-                    'message': 'Credenciales inválidas.'
+                    'message': message,
+                    'failed_attempts': failed_attempts,
+                    'max_attempts': max_attempts
                 }
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Credenciales correctas -> generar tokens
+        # Credenciales correctas -> resetear intentos fallidos y generar tokens
+        try:
+            fields_to_update = []
+            if hasattr(user, 'failed_login_attempts') and getattr(user, 'failed_login_attempts', 0) != 0:
+                user.failed_login_attempts = 0
+                fields_to_update.append('failed_login_attempts')
+            if hasattr(user, 'is_locked') and getattr(user, 'is_locked', False):
+                user.is_locked = False
+                fields_to_update.append('is_locked')
+            if hasattr(user, 'locked_at') and getattr(user, 'locked_at', None) is not None:
+                user.locked_at = None
+                fields_to_update.append('locked_at')
+            if fields_to_update:
+                user.save(update_fields=fields_to_update)
+        except (AttributeError, Exception):
+            pass  # Los campos de bloqueo no existen todavía
         refresh = RefreshToken.for_user(user)
         role_name = user.role.name if getattr(user, 'role', None) else None
 
@@ -248,8 +418,9 @@ def login_view(request):
         return response
 
     except Exception as e:
-        # Log simple para depuración (evitar exponer detalles sensibles)
-        print(f"[login_view] Error inesperado: {e}")
+        # Log completo para depuración (no retornar stacktrace al cliente)
+        print("[login_view] Error inesperado:")
+        traceback.print_exc()
         return Response({
             'success': False,
             'error': {
@@ -315,12 +486,222 @@ def refresh_from_cookie(request):
         return response
 
 
+def verify_captcha(token, remote_ip=None):
+    """
+    Verifica un captcha utilizando reCAPTCHA si está configurado en settings.
+    Si no existe la configuración y estamos en DEBUG, permite un token especial 'bypass' para pruebas.
+    """
+    from django.conf import settings
+    if not token:
+        return False
+
+    # Prefer hCaptcha if configurado, si no probar reCAPTCHA
+    hcaptcha_secret = getattr(settings, 'HCAPTCHA_SECRET_KEY', None)
+    if hcaptcha_secret:
+        try:
+            url = 'https://hcaptcha.com/siteverify'
+            post_data = urllib.parse.urlencode({
+                'secret': hcaptcha_secret,
+                'response': token,
+                'remoteip': remote_ip
+            }).encode('utf-8')
+            req = urllib.request.Request(url, data=post_data, method='POST')
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = resp.read().decode('utf-8')
+                data = json.loads(body)
+                return data.get('success', False)
+        except Exception as e:
+            print(f"[verify_captcha] Error verifying hCaptcha: {e}")
+            return False
+
+    # Si no existe hcaptcha, intentar reCAPTCHA (compatibilidad)
+    recaptcha_secret = getattr(settings, 'RECAPTCHA_SECRET_KEY', None)
+    if recaptcha_secret:
+        try:
+            url = 'https://www.google.com/recaptcha/api/siteverify'
+            post_data = urllib.parse.urlencode({
+                'secret': recaptcha_secret,
+                'response': token,
+                'remoteip': remote_ip
+            }).encode('utf-8')
+            req = urllib.request.Request(url, data=post_data, method='POST')
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = resp.read().decode('utf-8')
+                data = json.loads(body)
+                return data.get('success', False)
+        except Exception as e:
+            print(f"[verify_captcha] Error verifying recaptcha: {e}")
+            return False
+
+    # Si no hay recaptcha configurado, permitir bypass en DEBUG para desarrollo
+    if getattr(__import__('django.conf').conf.settings, 'DEBUG', False):
+        return token == 'bypass'
+
+    # Por defecto rechazar
+    return False
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsGerente])
+def generate_reset_token(request):
+    """
+    Genera un token de un solo uso para que un Gerente permita a un usuario resetear su contraseña.
+    Request: { "target_email": "user@example.com" }
+    Response: { "token": "PLAIN_TOKEN" } (se muestra SOLO una vez)
+    """
+    target_email = request.data.get('target_email')
+    if not target_email:
+        return Response({'success': False, 'error': {'code': 'missing_target', 'message': 'Se requiere target_email'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.filter(email__iexact=target_email.strip().lower()).first()
+    if not user:
+        return Response({'success': False, 'error': {'code': 'user_not_found', 'message': 'Usuario no encontrado'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Generar token seguro
+    token_plain = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token_plain.encode('utf-8')).hexdigest()
+
+    # Crear ResetToken con expiración en 6 minutos
+    expires = timezone.now() + timedelta(minutes=6)
+    rt = ResetToken.objects.create(
+        token_hash=token_hash,
+        target_user=user,
+        generated_by=request.user,
+        expires_at=expires
+    )
+
+    # Responder con token en claro SOLO una vez
+    return Response({'success': True, 'token': token_plain, 'expires_at': expires.isoformat()}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def generate_reset_token_unauth(request):
+    """
+    Genera un token de reseteo permitiendo que un Gerente lo cree proporcionando
+    sus credenciales en la misma petición. Diseñado para casos donde el Gerente
+    no puede iniciar sesión por UI (p.ej. cuenta bloqueada).
+
+    Request: { "gerente_email": "...", "gerente_password": "...", "target_email": "..." }
+    Response: { success: True, token: "...", expires_at: "..." }
+    """
+    gerente_email = request.data.get('gerente_email')
+    gerente_password = request.data.get('gerente_password')
+    target_email = request.data.get('target_email') or gerente_email
+
+    if not gerente_email or not gerente_password:
+        return Response({'success': False, 'error': {'code': 'missing_fields', 'message': 'gerente_email y gerente_password son requeridos.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    gerente = User.objects.filter(email__iexact=gerente_email.strip().lower()).first()
+    if not gerente:
+        return Response({'success': False, 'error': {'code': 'gerente_not_found', 'message': 'Gerente no encontrado.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verificar que es Gerente y contraseña válida
+    try:
+        role_name = gerente.role.name if getattr(gerente, 'role', None) else None
+    except Exception:
+        role_name = None
+
+    if role_name != 'Gerente' or not gerente.check_password(gerente_password):
+        return Response({'success': False, 'error': {'code': 'invalid_credentials', 'message': 'Credenciales de Gerente inválidas.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Encontrar el usuario objetivo
+    user = User.objects.filter(email__iexact=target_email.strip().lower()).first()
+    if not user:
+        return Response({'success': False, 'error': {'code': 'user_not_found', 'message': 'Usuario objetivo no encontrado.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Generar token (igual que en generate_reset_token)
+    token_plain = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token_plain.encode('utf-8')).hexdigest()
+    expires = timezone.now() + timedelta(minutes=6)
+
+    ResetToken.objects.create(
+        token_hash=token_hash,
+        target_user=user,
+        generated_by=gerente,
+        expires_at=expires
+    )
+
+    return Response({'success': True, 'token': token_plain, 'expires_at': expires.isoformat()}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_with_token(request):
+    """
+    Restablece la contraseña sin requerir captcha ni token de Gerente.
+    Request: { email, new_password }
+    """
+    # Flujo simplificado: solo email y new_password
+    email = request.data.get('email')
+    new_password = request.data.get('new_password')
+
+    if not email or not new_password:
+        return Response({'success': False, 'error': {'code': 'missing_fields', 'message': 'Faltan campos obligatorios: email, new_password.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Buscar usuario por email
+    user = User.objects.filter(email__iexact=email.strip().lower()).first()
+    if not user:
+        # No revelamos si no existe
+        return Response({'success': False, 'error': {'code': 'invalid_request', 'message': 'Solicitud inválida.'}}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Verificar que el usuario sea Gerente
+    role_name = user.role.name if getattr(user, 'role', None) else None
+    if role_name != 'Gerente':
+        return Response({'success': False, 'error': {'code': 'not_gerente', 'message': 'Solo los usuarios Gerente pueden cambiar la contraseña.'}}, status=status.HTTP_403_FORBIDDEN)
+
+    # Aplicar nuevo password
+    try:
+        user.set_password(new_password)
+        # Resetear bloqueo
+        if hasattr(user, 'failed_login_attempts'):
+            user.failed_login_attempts = 0
+        if hasattr(user, 'is_locked'):
+            user.is_locked = False
+        if hasattr(user, 'locked_at'):
+            user.locked_at = None
+        user.save()
+        return Response({'success': True, 'message': 'Contraseña restablecida correctamente.'})
+    except Exception as e:
+        print(f"[reset_with_token] Error: {e}")
+        traceback.print_exc()
+        return Response({'success': False, 'error': {'code': 'internal_error', 'message': 'Error interno.'}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def logout_view(request):
-    """Eliminar cookie de refresh en el cliente."""
+    """Eliminar cookie de refresh en el cliente y, si es posible, invalidar (blacklist) el refresh token.
+
+    Comportamiento:
+    - Busca el refresh token en cookies (`refresh`, `refresh_token`) o en el body (`refresh`/`refresh_token`).
+    - Si existe, intenta crear un `RefreshToken(token)` y llamar a `blacklist()` (funciona si `rest_framework_simplejwt.token_blacklist` está instalado).
+    - Elimina las cookies que pueda y responde con éxito.
+    """
+    # Intentar obtener el refresh token desde cookies o body
+    token = None
+    token = request.COOKIES.get('refresh') or request.COOKIES.get('refresh_token') or request.data.get('refresh') or request.data.get('refresh_token')
+
+    if token:
+        try:
+            rt = RefreshToken(token)
+            # Si el método blacklist existe (token_blacklist instalado), invocarlo
+            if hasattr(rt, 'blacklist'):
+                rt.blacklist()
+        except Exception:
+            # No hay blacklisting disponible o token inválido: ignorar y continuar con borrado de cookies
+            pass
+
     response = Response({'detail': 'Logged out'}, status=status.HTTP_200_OK)
-    response.delete_cookie('refresh_token', path='/')
+    # Eliminar cookies de sesión/refresh/access para evitar que otras pestañas vuelvan a autenticar
+    cookies_to_delete = ['refresh', 'refresh_token', 'jwt', 'access', 'access_token']
+    for c in cookies_to_delete:
+        try:
+            response.delete_cookie(c, path='/')
+        except Exception:
+            # ignore failures deleting non-existent cookies
+            pass
+
     return response
 
 # ViewSet para la gestión de usuarios
@@ -351,17 +732,17 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        - Gerentes ven a todos los usuarios.
-        - Otros usuarios autenticados solo se ven a sí mismos.
+        - Gerentes ven a todos los usuarios activos.
+        - Otros usuarios autenticados solo se ven a sí mismos si están activos.
         """
         user = self.request.user
         if user.is_authenticated:
             try:
                 if user.role and user.role.name == 'Gerente':
-                    return User.objects.all()
+                    return User.objects.filter(is_active=True)  # Solo usuarios activos
             except (AttributeError, Role.DoesNotExist):
-                return User.objects.filter(pk=user.pk)
-            return User.objects.filter(pk=user.pk)
+                return User.objects.filter(pk=user.pk, is_active=True)
+            return User.objects.filter(pk=user.pk, is_active=True)
         return User.objects.none()
 
     def get_permissions(self):
@@ -390,30 +771,86 @@ class UserViewSet(viewsets.ModelViewSet):
                 {"detail": "No puedes eliminar tu propia cuenta."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        return super().destroy(request, *args, **kwargs)
+        
+        # Eliminación lógica en lugar de física
+        instance.is_active = False
+        instance.save()
+        return Response({'message': 'Usuario desactivado correctamente'}, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['post'], permission_classes=[IsGerente])
+    def unlock(self, request, pk=None):
+        """
+        Desbloquea un usuario que ha sido bloqueado por intentos fallidos de login.
+        Solo accesible por Gerentes.
+        """
+        user = self.get_object()
+        user.is_locked = False
+        user.failed_login_attempts = 0
+        user.locked_at = None
+        user.save()
+        return Response({
+            'message': f'Usuario {user.username} desbloqueado correctamente.',
+            'user': UserSerializer(user).data
+        }, status=status.HTTP_200_OK)
 
 # ViewSet para la gestión de productos (CRUD)
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.all()
+    queryset = Product.objects.filter(is_active=True)  # Solo productos activos
     serializer_class = ProductSerializer
     permission_classes = [IsAuthenticated]
     
+    def destroy(self, request, *args, **kwargs):
+        """Eliminación lógica en lugar de física"""
+        from django.utils import timezone
+        product = self.get_object()
+        product.is_active = False
+        product.deleted_at = timezone.now()
+        product.save()
+        return Response({'message': 'Producto eliminado correctamente'}, status=status.HTTP_200_OK)
+    
     def update(self, request, *args, **kwargs):
-        # Forzar update completo en lugar de partial_update
-        kwargs['partial'] = False
+        # Permitir tanto PUT (completo) como PATCH (parcial)
         return super().update(request, *args, **kwargs)
     
     def partial_update(self, request, *args, **kwargs):
-        # También manejar partial_update explícitamente
+        # Manejar partial_update (PATCH) correctamente
         return super().partial_update(request, *args, **kwargs)
     
+    @action(detail=True, methods=['patch', 'put'])
+    def update_loss_rate(self, request, pk=None):
+        """Endpoint específico para actualizar solo loss_rate"""
+        product = self.get_object()
+        loss_rate = request.data.get('loss_rate')
+        
+        if loss_rate is not None:
+            try:
+                loss_rate = float(loss_rate)
+                if loss_rate < 0 or loss_rate > 1:
+                    return Response({'error': 'La tasa de pérdida debe estar entre 0.0 y 1.0'}, status=400)
+                
+                # Forzar actualización usando update() para asegurar persistencia
+                Product.objects.filter(id=product.id).update(loss_rate=loss_rate)
+                
+                # Recargar el objeto para verificar que se guardó
+                product.refresh_from_db()
+                
+                # Verificar que el valor se guardó correctamente
+                if abs(product.loss_rate - loss_rate) > 0.0001:
+                    return Response({'error': 'Error al guardar la tasa de pérdida'}, status=500)
+                
+                serializer = self.get_serializer(product)
+                return Response(serializer.data, status=200)
+                
+            except (ValueError, TypeError):
+                return Response({'error': 'Valor de tasa de pérdida inválido'}, status=400)
+        
+        return Response({'error': 'Se requiere el campo loss_rate'}, status=400)
+
     @action(detail=True, methods=['patch', 'put'])
     def update_recipe_yield(self, request, pk=None):
         """Endpoint específico para actualizar solo recipe_yield"""
         product = self.get_object()
         recipe_yield = request.data.get('recipe_yield')
-        
-        print(f"ENDPOINT update_recipe_yield - Recibido: {recipe_yield} (tipo: {type(recipe_yield)})")
         
         if recipe_yield is not None:
             try:
@@ -421,10 +858,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 if recipe_yield < 1:
                     return Response({'error': 'El rendimiento debe ser al menos 1'}, status=400)
                 
-                print(f"ENDPOINT update_recipe_yield - Antes: {product.recipe_yield}")
                 product.recipe_yield = recipe_yield
                 product.save()
-                print(f"ENDPOINT update_recipe_yield - Después: {product.recipe_yield}")
                 
                 # Recargar desde la BD para asegurar que se guardó
                 product.refresh_from_db()
@@ -580,20 +1015,23 @@ class IsGerenteOrEncargado(BasePermission):
 
 # ViewSet para compras
 class PurchaseViewSet(viewsets.ModelViewSet):
-    queryset = Purchase.objects.all().order_by('-created_at')
+    queryset = Purchase.objects.filter(is_active=True).order_by('-created_at')
     serializer_class = PurchaseSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
         if user.is_authenticated:
-            # Gerente sees all purchases
+            # Gerente sees all active purchases
             if hasattr(user, 'role') and user.role and user.role.name == 'Gerente':
-                return Purchase.objects.all()
+                return Purchase.objects.filter(is_active=True)
             # Encargado sees all approved purchases (history) and their own pending ones
             if hasattr(user, 'role') and user.role and user.role.name == 'Encargado':
                 from django.db.models import Q
-                return Purchase.objects.filter(Q(status='Aprobada') | Q(user=user, status='Pendiente'))
+                return Purchase.objects.filter(
+                    Q(status='Aprobada', is_active=True) | 
+                    Q(user=user, status='Pendiente', is_active=True)
+                )
         return Purchase.objects.none()
 
     def get_permissions(self):
@@ -722,7 +1160,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         """
         Endpoint para que los Gerentes vean todas las solicitudes de compra pendientes.
         """
-        pending_purchases = Purchase.objects.filter(status='Pendiente').order_by('-created_at')
+        pending_purchases = Purchase.objects.filter(status='Pendiente', is_active=True).order_by('-created_at')
         
         page = self.paginate_queryset(pending_purchases)
         if page is not None:
@@ -740,7 +1178,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         # Gerentes y Encargados pueden ver todas las compras aprobadas y completadas
         from django.db.models import Q
         completed_purchases = Purchase.objects.filter(
-            Q(status='Aprobada') | Q(status='Completada')
+            Q(status='Aprobada', is_active=True) | Q(status='Completada', is_active=True)
         ).order_by('-created_at')
         
         page = self.paginate_queryset(completed_purchases)
@@ -856,16 +1294,29 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         
         return Response(self.get_serializer(purchase).data)
 
+    def destroy(self, request, *args, **kwargs):
+        """
+        Implementa eliminación lógica para compras
+        """
+        instance = self.get_object()
+        instance.is_active = False
+        instance.deleted_at = timezone.now()
+        instance.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         """
-        Reject and delete a purchase request. Only for 'Gerente'.
+        Reject a purchase request using logical deletion. Only for 'Gerente'.
         """
         purchase = self.get_object()
         if purchase.status != 'Pendiente':
             return Response({'error': 'This purchase is not pending approval.'}, status=status.HTTP_400_BAD_REQUEST)
         
-        purchase.delete()
+        # Usar eliminación lógica en lugar de eliminar físicamente
+        purchase.is_active = False
+        purchase.deleted_at = timezone.now()
+        purchase.save()
         
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -1104,6 +1555,8 @@ class UserQueryViewSet(viewsets.ModelViewSet):
 
 # Asegúrate de que ExportDataView esté definida solo aquí y no duplicada en urls.py
 class ExportDataView(APIView):
+
+    
     def post(self, request):
         try:
             data = request.data
@@ -1427,9 +1880,17 @@ class ExportDataView(APIView):
                 except Exception:
                     total_num = 0.0
 
+            # Procesar fecha de la misma manera que en movimientos de caja
+            date_str = item.get('date', '')
+            if date_str and '.' in date_str:
+                date_str = date_str.split('.')[0]
+            
+            # Formatear fecha para que coincida con la interfaz gráfica
+            formatted_date = format_date_for_pdf(date_str)
+
             table_data.append([
                 str(item.get('id', '')),
-                item.get('date', ''),
+                formatted_date,
                 item.get('product', ''),
                 str(item.get('quantity', 0)),
                 f"${total_num:.2f}",
@@ -1494,10 +1955,13 @@ class ExportDataView(APIView):
             except (ValueError, TypeError):
                 amount_str = str(item.get('amount', ''))
 
+            # Formatear fecha para que coincida con la interfaz gráfica
+            formatted_date = format_date_for_pdf(date_str)
+
             # Crear Paragraphs para permitir el ajuste de línea
             row = [
                 Paragraph(str(item.get('id', '')), normal_style),
-                Paragraph(date_str, normal_style),
+                Paragraph(formatted_date, normal_style),
                 Paragraph(item.get('type', ''), normal_style),
                 Paragraph(amount_str, normal_style),
                 Paragraph(payment_method_text, normal_style),
@@ -1526,8 +1990,8 @@ class ExportDataView(APIView):
     def _generate_purchases_table(self, data):
         from .models import Product
         
-        # Columns: ID, Fecha, Proveedor, Items (nombres), Total, Tipo, Estado
-        table_data = [['ID', 'Fecha', 'Proveedor', 'Insumo/Producto', 'Total', 'Tipo', 'Estado']]
+        # Columns: ID, Fecha, Proveedor, Items (nombres), Total, Tipo (sin columna Estado)
+        table_data = [['ID', 'Fecha', 'Proveedor', 'Insumo/Producto', 'Total', 'Tipo']]
         for item in data:
             # items can be a comma-separated string or list
             items_field = item.get('items')
@@ -1589,14 +2053,22 @@ class ExportDataView(APIView):
                 items_str = str(items_field or '')
 
             total_val = item.get('total') if item.get('total', None) is not None else (item.get('totalAmount') if item.get('totalAmount', None) is not None else item.get('total_amount', 0))
+            
+            # Procesar fecha de la misma manera que en movimientos de caja
+            date_str = item.get('date', '')
+            if date_str and '.' in date_str:
+                date_str = date_str.split('.')[0]
+            
+            # Formatear fecha para que coincida con la interfaz gráfica
+            formatted_date = format_date_for_pdf(date_str)
+            
             table_data.append([
                 item.get('id', ''),
-                item.get('date', ''),
+                formatted_date,
                 item.get('supplier', ''),
                 items_str,
                 f"${total_val}",
-                item.get('type', ''),
-                item.get('status', '')
+                item.get('type', '')
             ])
         table = Table(table_data)
         table.setStyle(TableStyle([
@@ -1648,9 +2120,17 @@ class ExportDataView(APIView):
                     products_str = str(items_field or '')
                     units_str = ''
 
+            # Procesar fecha de la misma manera que en movimientos de caja
+            date_str = item.get('date', '')
+            if date_str and '.' in date_str:
+                date_str = date_str.split('.')[0]
+            
+            # Formatear fecha para que coincida con la interfaz gráfica
+            formatted_date = format_date_for_pdf(date_str)
+
             table_data.append([
                 item.get('id', ''),
-                item.get('date', ''),
+                formatted_date,
                 cliente,
                 metodo,
                 item.get('status', ''),
@@ -1687,9 +2167,10 @@ class ExportDataView(APIView):
             spaceAfter=2
         )
         
-        table_data = [['Nombre', 'CUIT', 'Teléfono', 'Dirección', 'Productos']]
+        table_data = [['ID', 'Nombre', 'CUIT', 'Teléfono', 'Dirección', 'Producto/Insumo']]
         for item in data:
             # No truncar el texto, dejarlo completo para que se ajuste automáticamente
+            id_val = str(item.get('id', ''))
             name = str(item.get('name', ''))
             cuit = str(item.get('cuit', ''))
             phone = str(item.get('phone', ''))
@@ -1697,6 +2178,7 @@ class ExportDataView(APIView):
             products = str(item.get('products', ''))
             
             table_data.append([
+                Paragraph(id_val, cell_style),
                 Paragraph(name, cell_style),
                 Paragraph(cuit, cell_style),
                 Paragraph(phone, cell_style),
@@ -1704,8 +2186,8 @@ class ExportDataView(APIView):
                 Paragraph(products, cell_style)
             ])
         
-        # Ajustar anchos para dar más espacio a productos y dirección
-        col_widths = [80, 70, 60, 100, 200]  # Total: 510 puntos (más espacio para productos)
+        # Ajustar anchos para incluir columna ID
+        col_widths = [30, 70, 70, 60, 90, 190]  # Total: 510 puntos
         
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
@@ -1757,14 +2239,14 @@ class ProductProductionView(APIView):
 
     def post(self, request, *args, **kwargs):
         product_id = request.data.get('product_id')
-        quantity = request.data.get('quantity')
+        quantity_produced = request.data.get('quantity_produced')
 
-        if not product_id or not quantity:
+        if not product_id or not quantity_produced:
             return Response({'error': 'El ID del producto y la cantidad son requeridos.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            quantity = int(quantity)
-            if quantity <= 0:
+            quantity_produced = int(quantity_produced)
+            if quantity_produced <= 0:
                 raise ValueError()
         except (ValueError, TypeError):
             return Response({'error': 'La cantidad debe ser un número entero positivo.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1785,29 +2267,30 @@ class ProductProductionView(APIView):
                 # 3. Verificar stock de ingredientes
                 for recipe_item in recipe:
                     ingredient = recipe_item.ingredient
-                    required_quantity = recipe_item.quantity * quantity
+                    required_quantity = recipe_item.quantity * quantity_produced
                     
                     # Bloquear el ingrediente para la actualización
                     ingredient_to_update = Product.objects.select_for_update().get(pk=ingredient.pk)
 
                     if ingredient_to_update.stock < required_quantity:
-                        raise ValidationError(f'Stock insuficiente para el insumo "{ingredient.name}". Necesario: {required_quantity}, Disponible: {ingredient_to_update.stock}')
+                        raise ValidationError(f'Stock insuficiente para el insumo "{ingredient.name}". Necesario: {required_quantity:.2f} {recipe_item.unit}, Disponible: {ingredient_to_update.stock:.2f} {recipe_item.unit}')
 
                 # 4. Descontar stock de ingredientes y aumentar stock del producto final
                 for recipe_item in recipe:
                     ingredient = recipe_item.ingredient
-                    required_quantity = recipe_item.quantity * quantity
+                    required_quantity = recipe_item.quantity * quantity_produced
                     
-                    # El re-fetch no es necesario gracias a select_for_update, pero es una buena práctica
                     ingredient_to_update = Product.objects.get(pk=ingredient.pk)
                     ingredient_to_update.stock -= required_quantity
                     ingredient_to_update.save()
 
                 # 5. Aumentar el stock del producto producido
-                product_to_produce.stock += quantity
+                product_to_produce.stock += quantity_produced
                 product_to_produce.save()
 
-            return Response({'success': f'Se han producido {quantity} unidades de {product_to_produce.name}.'}, status=status.HTTP_200_OK)
+            return Response({
+                'success': f'Producción completada: {quantity_produced} unidades de {product_to_produce.name}.'
+            }, status=status.HTTP_200_OK)
 
         except ValidationError as e:
             return Response({'error': e.detail[0]}, status=status.HTTP_400_BAD_REQUEST)
@@ -1815,3 +2298,6 @@ class ProductProductionView(APIView):
             return Response({'error': 'El producto a producir no existe.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': f'Ocurrió un error inesperado: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+

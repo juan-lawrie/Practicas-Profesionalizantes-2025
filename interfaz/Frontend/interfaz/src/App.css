@@ -65,6 +65,7 @@ body {
   flex-direction: column;
   padding: 20px;
   box-sizing: border-box;
+  
 }
 
 .login-container {
@@ -73,6 +74,8 @@ body {
   width: 100%;
   max-width: 450px;
   margin: 0 auto;
+  position: relative;
+  left: -0.5em
 }
 
 h1 {
@@ -83,7 +86,7 @@ h1 {
   position: relative;
   text-align: center;
   justify-content: center;
-  left: -0.8em;
+  left: -1.4em;
 }
 
 h2 {
@@ -153,10 +156,53 @@ h2 {
 }
 
 .login-button:hover {
-  background-color: #3182ce;
+    background-color: #007fff;
 }
 
-.login-button:disabled {
+/* Estilos para botones de confirmación */
+.confirmation-buttons {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    margin-top: 15px;
+}
+
+.submit-button.confirm {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.submit-button.confirm:hover {
+    background-color: #218838;
+}
+
+.cancel-button {
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.cancel-button:hover {
+    background-color: #c82333;
+}
+
+.action-button.primary.confirm {
+    background-color: #28a745;
+}
+
+.action-button.primary.confirm:hover {
+    background-color: #218838;
+}.login-button:disabled {
   background-color: #a0aec0;
   cursor: not-allowed;
 }
@@ -293,6 +339,100 @@ h2 {
   border: 1px solid #e2e8f0;
 }
 
+/* Estilos agradables para formularios públicos como login y recuperar contraseña */
+.panel {
+  max-width: 520px;
+  margin: 24px auto;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border-radius: 12px;
+  padding: 28px 28px;
+  box-shadow: 0 10px 30px rgba(2,6,23,0.06), inset 0 1px 0 rgba(255,255,255,0.6);
+  border: 1px solid rgba(15,23,42,0.04);
+}
+
+.panel h2 {
+  margin: 0 0 18px 0;
+  font-size: 1.6rem;
+  color: #1f2937;
+  letter-spacing: -0.5px;
+}
+
+.form-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-vertical label {
+  font-size: 0.9rem;
+  color: #475569;
+  font-weight: 600;
+}
+
+.form-vertical input[type="email"],
+.form-vertical input[type="password"],
+.form-vertical input[type="text"] {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #e6eef8;
+  background: #fcfeff;
+  box-shadow: 0 2px 6px rgba(16, 24, 40, 0.04);
+  font-size: 1rem;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.form-vertical input:focus {
+  outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 6px 18px rgba(96,165,250,0.12);
+}
+
+.action-button.primary {
+  background: linear-gradient(180deg,#2b8de6,#1673c8);
+  box-shadow: 0 8px 18px rgba(37,99,235,0.18);
+  color: white;
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.action-button {
+  min-width: 140px;
+}
+
+.action-button + .action-button {
+  margin-left: 8px;
+}
+
+.success-message {
+  color: #065f46;
+  background: #f0fdf4;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.error-message {
+  background: transparent;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: #2b6cb0;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+/* Ajustes responsivos */
+@media (max-width: 600px) {
+  .panel { padding: 18px; margin: 12px; }
+  .login-container { padding: 28px 12px; }
+  .input-group { left: 0; }
+  .login-button { left: 0; }
+}
+
 .form-container input,
 .form-container select,
 .form-container textarea {
@@ -321,21 +461,22 @@ h2 {
 }
 
 .action-button.primary {
-  background-color: #4299e1;
+  background-color: #0087f6;
   color: white;
 }
 
-.action-button.primary:hover {
-  background-color: #3182ce;
+/* Make hover more specific and override any background shorthand; ignore disabled buttons */
+.action-button.primary:hover:not(:disabled) {
+  background: #0f84f2;
 }
 
 .action-button.secondary {
-  background-color: #e2e8f0;
-  color: #2d3748;
+  background-color: #f90d05;
+  color: #ffffff;
 }
 
 .action-button.secondary:hover {
-  background-color: #cbd5e0;
+  background-color: #e3110d;
 }
 
 .list-container {
@@ -484,6 +625,29 @@ h2 {
   cursor: pointer;
   font-size: 1rem;
   font-weight: 600;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem; /* Espacio entre los botones */
+  margin-top: 1.5rem;
+}
+
+.cancel-button {
+  background-color: #fb3301;
+}
+
+.cancel-button:hover {
+  background-color: #e8370b;
+}
+
+.confirm-button {
+  background-color: #4299e1;
+}
+
+.confirm-button:hover {
+  background-color: #3182ce;
 }
 
 /* Estilos específicos para proveedores */
@@ -1459,4 +1623,215 @@ h2 {
 
 .action-button.delete.small {
     background-color: #BF3737;
+}
+
+/* Estilos para el componente SearchableProductInput mejorado */
+.searchable-product-input-container {
+  position: relative;
+  width: 100%;
+}
+
+.searchable-product-input {
+  width: 100% !important;
+  padding: 0.75rem 1rem;
+  border: 2px solid #ced4da;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  background-color: white;
+  box-sizing: border-box;
+}
+
+.searchable-product-input:focus {
+  outline: none;
+  border-color: #3182ce;
+  box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+}
+
+.searchable-product-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 2px solid #e2e8f0;
+  border-top: none;
+  border-radius: 0 0 0.5rem 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  /* Prevenir desbordamiento en Chrome/Brave */
+  contain: layout style;
+}
+
+.searchable-product-option {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f7fafc;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background-color 0.2s;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+.searchable-product-option:hover {
+  background-color: #f7fafc;
+}
+
+.searchable-product-option:last-child {
+  border-bottom: none;
+}
+
+.searchable-product-option .product-name {
+  font-weight: 600;
+  color: #2d3748;
+  flex: 1;
+  text-align: left;
+  margin-right: 0.5rem;
+}
+
+.searchable-product-option .product-unit {
+  background: #e2e8f0;
+  color: #4a5568;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-right: 0.5rem;
+  white-space: nowrap;
+}
+
+.searchable-product-option .product-stock {
+  color: #718096;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* Evitar que el dropdown se expanda más allá del contenedor padre */
+.purchase-form .form-group {
+  position: relative;
+  overflow: visible;
+  max-width: 100%;
+}
+
+.item-row {
+  position: relative;
+  overflow: visible;
+  max-width: 100%;
+}
+
+.item-row .form-group {
+  max-width: 100%;
+}
+
+/* Estilos base para todos los navegadores */
+.searchable-product-dropdown {
+  max-width: 100%;
+  width: 100%;
+  left: 0;
+  right: 0;
+  transform: none;
+}
+
+/* Estilos específicos para navegadores Chromium (Chrome, Brave, Edge) */
+@supports (-webkit-appearance: none) {
+  .searchable-product-dropdown {
+    max-width: calc(100% - 4px);
+    width: calc(100% - 4px);
+    left: 2px;
+    right: 2px;
+    contain: layout style size;
+    overflow: hidden;
+  }
+  
+  .searchable-product-option {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    max-width: 100%;
+  }
+  
+  .searchable-product-option .product-name {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Clase específica para navegadores Chromium cuando se detecta por JavaScript */
+.searchable-product-dropdown.chromium-browser {
+  max-width: 100% !important;
+  width: 100% !important;
+  left: 0 !important;
+  right: 0 !important;
+  box-sizing: border-box !important;
+  contain: layout !important;
+}
+
+.searchable-product-dropdown.chromium-browser .searchable-product-option {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+}
+
+.searchable-product-dropdown.chromium-browser .searchable-product-option .product-name {
+  max-width: 60% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Asegurar que el contenedor no se desborde */
+.items-section {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.purchase-form {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Mejorar la responsividad en pantallas pequeñas */
+@media (max-width: 768px) {
+  .searchable-product-dropdown {
+    max-height: 150px;
+  }
+  
+  .searchable-product-option {
+    padding: 0.5rem;
+    flex-direction: column;
+    align-items: flex-start;
+    min-height: auto;
+  }
+  
+  .searchable-product-option .product-name {
+    margin-bottom: 0.25rem;
+    margin-right: 0;
+  }
+  
+  .searchable-product-option .product-unit,
+  .searchable-product-option .product-stock {
+    margin-right: 0;
+  }
+}
+
+#Exportar-datos{
+  background-color: #48bb78;
+  color: #ffffff;  
+}
+
+#Exportar-datos:hover{
+  background-color: #2f855a;
+  color: #ffffff;  
 }

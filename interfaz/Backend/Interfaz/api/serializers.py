@@ -6,6 +6,7 @@ from .models import (
     Product, CashMovement, InventoryChange, Sale, SaleItem, Role, 
     UserQuery, Supplier, UserStorage, LowStockReport, RecipeIngredient, LossRecord
 )
+from .models import ResetToken
 from .models import Purchase
 from .models import Order, OrderItem
 
@@ -37,8 +38,18 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'role', 'role_id', 'is_active')
-        read_only_fields = ('is_active',)
+        fields = ('id', 'username', 'email', 'role', 'role_id', 'is_active', 'is_locked', 'failed_login_attempts', 'locked_at')
+        read_only_fields = ('is_active', 'is_locked', 'failed_login_attempts', 'locked_at')
+
+
+class ResetTokenSerializer(serializers.ModelSerializer):
+    target_email = serializers.ReadOnlyField(source='target_user.email')
+    generated_by_username = serializers.ReadOnlyField(source='generated_by.username')
+
+    class Meta:
+        model = ResetToken
+        fields = ('id', 'target_user', 'target_email', 'generated_by', 'generated_by_username', 'created_at', 'expires_at', 'used')
+        read_only_fields = ('id', 'target_user', 'target_email', 'generated_by', 'generated_by_username', 'created_at', 'expires_at', 'used')
 
 # Serializer para que el Gerente actualice usuarios (SIN CONTRASEÑA)
 class UserUpdateSerializer(serializers.ModelSerializer):
@@ -107,7 +118,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = ['id', 'name', 'description', 'price', 'stock', 'recipe_yield', 'loss_rate', 'low_stock_threshold', 'category', 'is_ingredient', 'unit', 'recipe', 'recipe_ingredients', 'estado']
+        fields = ['id', 'name', 'description', 'price', 'stock', 'recipe_yield', 'loss_rate', 'low_stock_threshold', 'high_stock_multiplier', 'category', 'is_ingredient', 'unit', 'recipe', 'recipe_ingredients', 'estado']
 
     def validate_recipe_yield(self, value):
         try:
@@ -135,12 +146,12 @@ class ProductSerializer(serializers.ModelSerializer):
         return 'Inactivo'
     
     def validate_name(self, value):
-        if not value or not value.strip():
+        if value is not None and (not value or not value.strip()):
             raise serializers.ValidationError("El nombre del producto es obligatorio.")
-        return value.strip()
+        return value.strip() if value else value
     
     def validate_price(self, value):
-        if value <= 0:
+        if value is not None and value <= 0:
             raise serializers.ValidationError("El precio debe ser mayor a 0.")
         return value
     
@@ -151,7 +162,12 @@ class ProductSerializer(serializers.ModelSerializer):
     
     def validate_low_stock_threshold(self, value):
         if value < 0:
-            raise serializers.ValidationError("El umbral de stock bajo no puede ser negativo.")
+            raise serializers.ValidationError('El umbral de stock bajo no puede ser negativo.')
+        return value
+    
+    def validate_high_stock_multiplier(self, value):
+        if value <= 1:
+            raise serializers.ValidationError('El multiplicador de stock alto debe ser mayor a 1.')
         return value
 
     def create(self, validated_data):
@@ -194,14 +210,12 @@ class ProductSerializer(serializers.ModelSerializer):
                     if not ingredient or not quantity_per_lot or quantity_per_lot <= 0:
                         continue
 
-                    # Cantidad proporcional requerida
-                    total_needed = float(quantity_per_lot) * float(multiplier)
+                    # Cantidad exacta requerida (SIN pérdidas automáticas)
+                    required_to_deduct = float(quantity_per_lot) * float(multiplier)
 
                     # Para unidades indivisibles, redondear hacia arriba
                     if str(unit).lower() in ['unidades', 'unidad', 'u', 'uds']:
-                        required_to_deduct = float(math.ceil(total_needed))
-                    else:
-                        required_to_deduct = float(total_needed)
+                        required_to_deduct = float(math.ceil(required_to_deduct))
 
                     # Lock ingredient for update and deduct stock
                     ingredient_to_update = Product.objects.select_for_update().get(pk=ingredient.pk)
@@ -209,7 +223,8 @@ class ProductSerializer(serializers.ModelSerializer):
                     if float(ingredient_to_update.stock) < required_to_deduct:
                         raise serializers.ValidationError(
                             f"No hay suficiente stock para el insumo '{ingredient.name}'. "
-                            f"Necesario: {required_to_deduct}, Disponible: {ingredient_to_update.stock}"
+                            f"Necesario: {required_to_deduct:.2f}, "
+                            f"Disponible: {ingredient_to_update.stock}"
                         )
 
                     ingredient_to_update.stock = float(ingredient_to_update.stock) - required_to_deduct
@@ -227,6 +242,7 @@ class ProductSerializer(serializers.ModelSerializer):
         instance.stock = validated_data.get('stock', instance.stock)
         instance.description = validated_data.get('description', instance.description)
         instance.low_stock_threshold = validated_data.get('low_stock_threshold', instance.low_stock_threshold)
+        instance.high_stock_multiplier = validated_data.get('high_stock_multiplier', instance.high_stock_multiplier)
         instance.recipe_yield = validated_data.get('recipe_yield', instance.recipe_yield)
         instance.loss_rate = validated_data.get('loss_rate', instance.loss_rate)
         instance.is_ingredient = validated_data.get('is_ingredient', instance.is_ingredient)
@@ -454,28 +470,42 @@ class LossRecordSerializer(serializers.ModelSerializer):
         
         # Calcular costo estimado automáticamente
         product = validated_data['product']
-        quantity = validated_data['quantity']
-        validated_data['cost_estimate'] = float(product.price) * float(quantity)
+        quantity_input = float(validated_data['quantity'])  # Cantidad ingresada por el usuario
+        
+        # Convertir la cantidad según la unidad del producto
+        if product.unit == 'g':  # Si el producto está en gramos
+            # El usuario ingresó en kilos, convertir a gramos para descontar del stock
+            quantity_to_subtract = quantity_input * 1000  # 1 kg = 1000 g
+            unit_display = f"{quantity_input} kg"
+        elif product.unit == 'ml':  # Si el producto está en mililitros
+            # El usuario ingresó en litros, convertir a mililitros para descontar del stock
+            quantity_to_subtract = quantity_input * 1000  # 1 l = 1000 ml
+            unit_display = f"{quantity_input} l"
+        else:  # Para unidades
+            quantity_to_subtract = quantity_input
+            unit_display = f"{quantity_input} unidades"
+        
+        # El costo se calcula basado en la cantidad ingresada por el usuario (no la convertida)
+        # porque el precio está en las unidades que ve el usuario (kg/litros/unidades)
+        validated_data['cost_estimate'] = float(product.price) * quantity_input
         
         with transaction.atomic():
             # Crear registro de pérdida
             loss_record = super().create(validated_data)
             
-            # Actualizar stock del producto (restar la cantidad perdida)
-            product.stock = float(product.stock) - float(quantity)
+            # Actualizar stock del producto (restar la cantidad convertida)
+            product.stock = float(product.stock) - quantity_to_subtract
             if product.stock < 0:
                 product.stock = 0
             product.save()
-            
-            return loss_record
             
             # Crear registro en InventoryChange para auditoría
             from .models import InventoryChange
             InventoryChange.objects.create(
                 product=product,
                 type='Salida',
-                quantity=quantity,
-                reason=f'Pérdida: {loss_record.get_category_display()} - {loss_record.description or "Sin descripción"}',
+                quantity=quantity_to_subtract,  # Registrar la cantidad real descontada
+                reason=f'Pérdida: {loss_record.get_category_display()} ({unit_display}) - {loss_record.description or "Sin descripción"}',
                 user=validated_data.get('user')
             )
             
