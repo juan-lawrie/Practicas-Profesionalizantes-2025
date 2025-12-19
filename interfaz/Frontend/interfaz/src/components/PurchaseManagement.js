@@ -636,6 +636,7 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                     confirmDelete={confirmDelete}
                     onCancelDelete={handleCancelDeleteModal}
                     userRole={userRole}
+                    inventory={inventory}
                 />
             )}
         </div>

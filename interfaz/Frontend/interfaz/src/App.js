@@ -12,6 +12,11 @@ import PurchaseRequests from './components/PurchaseRequests';
 import PurchaseHistory from './components/PurchaseHistory';
 import ProductManagement from './components/ProductManagement';
 import LossManagement from './components/LossManagement';
+import UserManagement from './components/UserManagement';
+import Registrar_Venta from './components/Registrar_Venta';
+import Movimientos_De_Caja from './components/Movimientos_De_Caja';
+import Pedidos from './components/Pedidos';
+import PedDialogo from './components/PedDialogo';
 
 
 
@@ -202,6 +207,8 @@ const App = () => {
     useEffect(() => {
         // Monitor de cambios en sessionChecked
     }, [sessionChecked]);
+
+
     
     // Intentar restaurar el token en memoria al montar la app y cada vez que la pestaña
     // reciba foco. Esto reduce la ventana donde una nueva pestaña tiene la cookie HttpOnly
@@ -255,6 +262,9 @@ const App = () => {
         const saved = sessionStorage.getItem('isLocked');
         return saved === 'true';
     });
+    const [lockType, setLockType] = useState(() => {
+        return sessionStorage.getItem('lockType') || '';
+    });
     const [showModal, setShowModal] = useState(false);
     const [currentEmail, setCurrentEmail] = useState(() => {
         return sessionStorage.getItem('currentEmail') || '';
@@ -271,6 +281,11 @@ const App = () => {
         sessionStorage.setItem('isLocked', isLocked.toString());
         console.log('🔒 isLocked cambió a:', isLocked, '- Guardado en sessionStorage');
     }, [isLocked]);
+    
+    useEffect(() => {
+        sessionStorage.setItem('lockType', lockType);
+        console.log('🔐 lockType cambió a:', lockType, '- Guardado en sessionStorage');
+    }, [lockType]);
     
     useEffect(() => {
         sessionStorage.setItem('currentEmail', currentEmail);
@@ -293,6 +308,8 @@ const App = () => {
      
     // Estado para el rol del usuario actualmente autenticado.
     const [userRole, setUserRole] = useState(null);
+    // Estado para el ID del usuario actual
+    const [currentUserId, setCurrentUserId] = useState(null);
     // Estado para la página current a mostrar.
     const [currentPage, setCurrentPage] = useState('login');
     // Estado para la lista de roles
@@ -347,6 +364,34 @@ const App = () => {
     const handleCancelDeletePurchase = () => {
         setConfirmDeletePurchaseId(null);
     };
+    
+    // Funciones para manejar el diálogo de pedidos
+    const handleOpenPedDialogo = () => {
+        setIsPedDialogoOpen(true);
+        setIsPedDialogoMinimized(false);
+    };
+    
+    const handleClosePedDialogo = () => {
+        setIsPedDialogoOpen(false);
+        setIsPedDialogoMinimized(false);
+    };
+    
+    const handleMinimizePedDialogo = () => {
+        setIsPedDialogoMinimized(!isPedDialogoMinimized);
+    };
+    
+    const handleOpenPedDialogoNewTab = () => {
+        const url = `${window.location.origin}${window.location.pathname}?pedidos-fullscreen=true`;
+        window.open(url, '_blank');
+    };
+
+    // Permitir abrir el diálogo desde cualquier componente usando un evento global
+    React.useEffect(() => {
+        const openDialog = () => handleOpenPedDialogo();
+        window.addEventListener('openPedDialogo', openDialog);
+        return () => window.removeEventListener('openPedDialogo', openDialog);
+    }, []);
+    // ...existing code...
 
         // Validación de contraseña mínima (se usa en creación de usuarios)
         const validatePassword = (pwd) => {
@@ -370,20 +415,23 @@ const App = () => {
             setCurrentEmail(userEmail);
             setFailedAttempts(0);
             setIsLocked(false);
+            setLockType('');
             setShowModal(false);
             // Limpiar sessionStorage del estado anterior
             sessionStorage.removeItem('failedAttempts');
             sessionStorage.removeItem('isLocked');
+            sessionStorage.removeItem('lockType');
         }
         
         try {
             setLoginError('');
             
-            // Verificar si la cuenta está bloqueada
-            if (isLocked) {
-                setLoginError('🔒 Cuenta bloqueada por múltiples intentos fallidos. Contacte al administrador para desbloquearla.');
-                return;
-            }
+            // Limpiar estado de bloqueo del sessionStorage ANTES de cada intento
+            // El servidor es la única fuente de verdad - si está bloqueado, el servidor responderá con error
+            sessionStorage.removeItem('isLocked');
+            sessionStorage.removeItem('lockType');
+            setIsLocked(false);
+            setLockType('');
             
             // Validaciones mínimas
             if (!userEmail || !userPassword) {
@@ -432,16 +480,37 @@ const App = () => {
             // Resetear intentos fallidos y bloqueo al login exitoso
             setFailedAttempts(0);
             setIsLocked(false);
+            setLockType('');
             
             // Limpiar estado crítico de sessionStorage al login exitoso
             sessionStorage.removeItem('failedAttempts');
             sessionStorage.removeItem('isLocked');
+            sessionStorage.removeItem('lockType');
             sessionStorage.removeItem('currentEmail');
             setCurrentEmail('');
             
+            // Limpiar TODO localStorage de lockTypes al login exitoso
+            try {
+                const keys = Object.keys(localStorage);
+                keys.forEach(key => {
+                    if (key.startsWith('lockType_')) {
+                        localStorage.removeItem(key);
+                    }
+                });
+            } catch (e) {
+                console.error('Error limpiando localStorage en login exitoso:', e);
+            }
+            
+            // Limpiar lockType de localStorage para este usuario
+            try {
+                localStorage.removeItem('lockType_' + userEmail);
+            } catch (e) {}
+            
             setIsLoggedIn(true);
             const roleFromResp = resp?.data?.user?.role || resp?.data?.role || (resp?.data?.user && resp.data.user.role) || 'Gerente';
+            const userIdFromResp = resp?.data?.user?.id || resp?.data?.id || null;
             setUserRole(roleFromResp);
+            setCurrentUserId(userIdFromResp);
             setCurrentPage('dashboard');
 
             // Cargar datos iniciales
@@ -457,6 +526,8 @@ const App = () => {
             
             // Manejar errores específicos del backend
             const errorData = error?.response?.data?.error;
+            console.log('🔍 DEBUG - errorData completo:', JSON.stringify(errorData, null, 2));
+            console.log('🔍 DEBUG - error.response.data:', JSON.stringify(error?.response?.data, null, 2));
             if (errorData) {
                 // Actualizar intentos fallidos desde el backend
                 if (typeof errorData.failed_attempts === 'number') {
@@ -473,10 +544,37 @@ const App = () => {
                 
                 // Verificar si la cuenta está bloqueada
                 if (errorData.code === 'account_locked') {
-                    console.log('🔒 Cuenta bloqueada');
+                    console.log('🔒 Cuenta bloqueada detectada');
+                    console.log('🔍 DEBUG - error.response.data COMPLETO:', JSON.stringify(error?.response?.data, null, 2));
+                    console.log('🔍 DEBUG - errorData.lock_type RAW:', errorData.lock_type);
+                    console.log('🔍 DEBUG - tipo:', typeof errorData.lock_type);
+                    console.log('🔍 DEBUG - errorData.lock_type === null?:', errorData.lock_type === null);
+                    console.log('🔍 DEBUG - errorData.lock_type === undefined?:', errorData.lock_type === undefined);
                     setIsLocked(true);
-                    // No mostrar loginError porque ya tenemos el mensaje de bloqueo permanente
-                    setLoginError('');
+                    
+                    // Si lock_type es null, undefined o vacío, usar 'automatic'
+                    let lockTypeFromServer = errorData.lock_type;
+                    if (!lockTypeFromServer || lockTypeFromServer === null || lockTypeFromServer === undefined || lockTypeFromServer === '') {
+                        console.warn('⚠️ lock_type es null/undefined/vacío, usando automatic');
+                        lockTypeFromServer = 'automatic';
+                    }
+                    
+                    console.log('🔍 DEBUG - lockTypeFromServer FINAL:', lockTypeFromServer);
+                    console.log('🔍 DEBUG - lockTypeFromServer === "manual"?:', lockTypeFromServer === 'manual');
+                    console.log('🔍 DEBUG - String(lockTypeFromServer):', String(lockTypeFromServer));
+                    
+                    // Normalizar el lockType antes de guardarlo
+                    const lockTypeStr = String(lockTypeFromServer).toLowerCase().trim();
+                    console.log('🔍 DEBUG - lockTypeStr normalizado:', lockTypeStr);
+                    setLockType(lockTypeStr);
+                    
+                    if (lockTypeStr === 'manual') {
+                        console.log('✅ Mostrando mensaje MANUAL');
+                        setLoginError('🔒 Tu cuenta ha sido bloqueada por el administrador.');
+                    } else {
+                        console.log('⚠️ Mostrando mensaje AUTOMÁTICO (lockType=' + lockTypeStr + ')');
+                        setLoginError('🔒 Cuenta bloqueada por múltiples intentos fallidos. Contacte al administrador para desbloquearla.');
+                    }
                 } else if (errorData.code === 'invalid_credentials') {
                     // Mostrar solo "Credenciales inválidas" sin mencionar intentos (ya tenemos el contador)
                     setLoginError('❌ Credenciales inválidas');
@@ -525,6 +623,24 @@ const App = () => {
 
     // Ventas (traídas desde backend)
     const [sales, setSales] = useState([]);
+    
+    // Estados para el diálogo de pedidos
+    const [isPedDialogoOpen, setIsPedDialogoOpen] = useState(false);
+    const [isPedDialogoMinimized, setIsPedDialogoMinimized] = useState(false);
+    const [isPedDialogoFullscreen, setIsPedDialogoFullscreen] = useState(false);
+    
+    // Detectar parámetro URL para modo fullscreen
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('pedidos-fullscreen') === 'true') {
+            setIsPedDialogoFullscreen(true);
+            setIsPedDialogoOpen(true);
+            // Si el usuario ya tiene sesión activa, evitar mostrar login
+            if (isLoggedIn) {
+                setCurrentPage('pedidos');
+            }
+        }
+    }, [isLoggedIn]);
 
         // Normalize purchase object returned by server to frontend-friendly shape
         const normalizePurchaseFromServer = (p) => {
@@ -566,13 +682,19 @@ const App = () => {
         }
     };
 
-    // Cargar historial de compras desde el backend al iniciar sesión
+    // Cargar compras desde el backend al iniciar sesión
     useEffect(() => {
         if (isLoggedIn) {
-            fetchPurchases();
-            fetchPurchaseHistory();
+            // Solo Gerente puede ver compras pendientes de aprobación
+            if (userRole === 'Gerente') {
+                fetchPurchases();
+            }
+            // Gerente y Encargado pueden ver el historial de compras
+            if (userRole === 'Gerente' || userRole === 'Encargado') {
+                fetchPurchaseHistory();
+            }
         }
-    }, [isLoggedIn]);
+    }, [isLoggedIn, userRole]);
     // Cargar pedidos desde backend al iniciar sesión (persistencia cross-browser)
     useEffect(() => {
         const fetchOrders = async () => {
@@ -584,8 +706,9 @@ const App = () => {
                     // Normalizar items y campos si es necesario
                     const backendOrders = res.data.map(o => ({
                         id: o.id,
-                        date: o.created_at || o.date,
-                        customerName: o.customer_name || o.customerName || o.customer_name || '',
+                        fecha_para_la_que_se_quiere_el_pedido: o.fecha_para_la_que_se_quiere_el_pedido,
+                        fecha_de_orden_del_pedido: o.fecha_de_orden_del_pedido,
+                        customerName: o.customer_name || o.customerName || '',
                         paymentMethod: o.payment_method || o.paymentMethod || '',
                         items: Array.isArray(o.items) ? o.items.map(it => ({
                             productName: it.product_name || it.productName || '',
@@ -741,12 +864,18 @@ const App = () => {
             console.log('👥 loadUsersFromBackend llamado - iniciando carga...');
             const response = await api.get('/users/');
             if (response.data) {
-                // Transformar datos del backend para compatibilidad local
+                // Transformar datos del backend para compatibilidad con componentes nuevos y antiguos
                 const backendUsers = response.data.map(user => ({
                     id: user.id,
+                    // Para compatibilidad con componentes antiguos
                     name: user.username,
+                    // Para componentes nuevos con Tailwind
+                    username: user.username,
+                    first_name: user.first_name || '',
+                    last_name: user.last_name || '',
                     email: user.email,
-                    role: user.role ? user.role.name : 'Cajero', // Extraer nombre del rol
+                    // Mantener objeto role completo para componente nuevo
+                    role: user.role || { name: 'Cajero' },
                     is_active: user.is_active,
                     is_locked: user.is_locked || false, // Incluir estado de bloqueo
                     failed_login_attempts: user.failed_login_attempts || 0, // Intentos fallidos
@@ -810,7 +939,7 @@ const App = () => {
         }, [products]);
 
     // Función para cerrar la sesión.
-    const handleLogout = async () => {
+    const handleLogout = async (preserveErrorMessage = false) => {
         // Llamar al backend para que borre cookies / invalide refresh
         try {
             try { await backendLogout(); } catch (e) { /* continuar limpiando aun si falla el backend */ }
@@ -821,17 +950,23 @@ const App = () => {
         // Limpiar estado local de la app
         setIsLoggedIn(false);
         setUserRole(null);
+        setCurrentUserId(null);
         setCurrentPage('login');
         setEmail('');
         setPassword('');
-        setLoginError('');
+        // Solo limpiar el error si no se solicita preservar
+        if (!preserveErrorMessage) {
+            setLoginError('');
+        }
         setFailedAttempts(0);  // Resetear intentos fallidos
         setIsLocked(false);    // Desbloquear cuenta
+        setLockType('');       // Limpiar tipo de bloqueo
         setShowModal(false);   // Cerrar modal
         
         // Limpiar estado crítico de sessionStorage al logout
         sessionStorage.removeItem('failedAttempts');
         sessionStorage.removeItem('isLocked');
+        sessionStorage.removeItem('lockType');
         sessionStorage.removeItem('currentEmail');
         setCurrentEmail('');
 
@@ -871,10 +1006,117 @@ const App = () => {
                 setUserRole(null);
                 setCurrentPage('login');
             }
+            // Escuchar evento de bloqueo de cuenta (para otras pestañas)
+            if (e.key === 'account_locked' && e.newValue) {
+                const lockData = JSON.parse(e.newValue);
+                // Si el usuario bloqueado coincide con el actual, cerrar sesión
+                if (lockData.userId && lockData.userId === currentUserId && lockData.lockType === 'manual') {
+                    setLoginError('🔒 Tu cuenta ha sido bloqueada por el administrador.');
+                    handleLogout(true);
+                }
+            }
+            // Escuchar evento de desbloqueo de cuenta (para otras pestañas)
+            if (e.key === 'account_unlocked' && e.newValue) {
+                console.log('🔓 Evento de desbloqueo detectado en storage');
+                const unlockData = JSON.parse(e.newValue);
+                
+                // Solo recargar si el usuario desbloqueado es el usuario ACTUAL
+                if (unlockData.userId && unlockData.userId === currentUserId) {
+                    console.log('✅ El usuario desbloqueado soy YO (storage), recargando...');
+                    // Limpiar TODO PRIMERO
+                    try {
+                        const keys = Object.keys(localStorage);
+                        keys.forEach(key => {
+                            if (key.startsWith('lockType_')) {
+                                localStorage.removeItem(key);
+                            }
+                        });
+                    } catch (err) {}
+                    sessionStorage.clear();
+                    
+                    // Forzar recarga COMPLETA sin cache
+                    window.location.href = window.location.origin + window.location.pathname + '?_t=' + Date.now();
+                } else {
+                    console.log('ℹ️ El usuario desbloqueado NO soy yo (storage), ignorando evento');
+                }
+            }
         };
+        
+        // Escuchar CustomEvent para bloqueo en la misma pestaña (inmediato)
+        const onUserLocked = (e) => {
+            const lockData = e.detail;
+            if (lockData.userId && lockData.userId === currentUserId && lockData.lockType === 'manual') {
+                setLoginError('🔒 Tu cuenta ha sido bloqueada por el administrador.');
+                handleLogout(true);
+            }
+        };
+        
+        // Escuchar CustomEvent para desbloqueo
+        const onUserUnlocked = (e) => {
+            const unlockData = e.detail;
+            console.log('🔓 CustomEvent de desbloqueo recibido:', unlockData);
+            
+            // Solo recargar si el usuario desbloqueado es el usuario ACTUAL (no el gerente)
+            if (unlockData.userId && unlockData.userId === currentUserId) {
+                console.log('✅ El usuario desbloqueado soy YO, recargando...');
+                // Limpiar TODO localStorage y sessionStorage PRIMERO
+                try {
+                    const keys = Object.keys(localStorage);
+                    keys.forEach(key => {
+                        if (key.startsWith('lockType_')) {
+                            localStorage.removeItem(key);
+                        }
+                    });
+                } catch (e) {}
+                sessionStorage.clear();
+                
+                // Forzar recarga COMPLETA sin cache
+                window.location.href = window.location.origin + window.location.pathname + '?_t=' + Date.now();
+            } else {
+                console.log('ℹ️ El usuario desbloqueado NO soy yo, ignorando evento');
+            }
+        };
+        
         window.addEventListener('storage', onStorage);
-        return () => window.removeEventListener('storage', onStorage);
-    }, []);
+        window.addEventListener('userAccountLocked', onUserLocked);
+        window.addEventListener('userAccountUnlocked', onUserUnlocked);
+        return () => {
+            window.removeEventListener('storage', onStorage);
+            window.removeEventListener('userAccountLocked', onUserLocked);
+            window.removeEventListener('userAccountUnlocked', onUserUnlocked);
+        };
+    }, [currentUserId]);
+    
+    // Verificar periódicamente si el usuario fue bloqueado (cada 60 segundos como respaldo)
+    useEffect(() => {
+        if (!isLoggedIn) return;
+        
+        const checkUserStatus = async () => {
+            try {
+                const response = await api.get('/users/me/');
+                if (response.data.is_locked) {
+                    // Usuario fue bloqueado, cerrar sesión
+                    const lockTypeFromServer = response.data.lock_type || 'automatic';
+                    if (lockTypeFromServer === 'manual') {
+                        setLoginError('🔒 Tu cuenta ha sido bloqueada por el administrador.');
+                    } else {
+                        setLoginError('🔒 Cuenta bloqueada por múltiples intentos fallidos. Contacte al administrador para desbloquearla.');
+                    }
+                    await handleLogout(true);
+                }
+            } catch (error) {
+                // Si hay error 401 o 403, la sesión ya no es válida
+                if (error?.response?.status === 401 || error?.response?.status === 403) {
+                    await handleLogout();
+                }
+            }
+        };
+        
+        // Verificar cada 3 segundos para detección rápida de bloqueos
+        const interval = setInterval(checkUserStatus, 3000);
+        
+        return () => clearInterval(interval);
+    }, [isLoggedIn]);
      
     const LockedAccountModal = () => (
         <div className="modal-overlay">
@@ -897,12 +1139,14 @@ const App = () => {
     const handleRetryLogin = () => {
         setFailedAttempts(0);
         setIsLocked(false);
+        setLockType('');
         setShowModal(false);
         setLoginError('');
         
         // Limpiar estado crítico de sessionStorage al reintentar
         sessionStorage.removeItem('failedAttempts');
         sessionStorage.removeItem('isLocked');
+        sessionStorage.removeItem('lockType');
         sessionStorage.removeItem('currentEmail');
         setCurrentEmail('');
     };
@@ -926,9 +1170,15 @@ const App = () => {
                 if (response.data && Array.isArray(response.data)) {
                     const normalized = response.data.map(u => ({
                         id: u.id,
+                        // Para compatibilidad con componentes antiguos
                         name: u.username ?? u.name ?? (typeof u === 'string' ? u : ''),
+                        // Para componentes nuevos con Tailwind
+                        username: u.username,
+                        first_name: u.first_name || '',
+                        last_name: u.last_name || '',
                         email: u.email ?? '',
-                        role: (u.role && typeof u.role === 'object') ? (u.role.name ?? String(u.role)) : (u.role ?? 'Cajero'),
+                        // Mantener objeto role completo para componente nuevo
+                        role: u.role || { name: 'Cajero' },
                         is_active: u.is_active ?? true,
                         is_locked: u.is_locked ?? false,
                         failed_login_attempts: u.failed_login_attempts ?? 0,
@@ -946,9 +1196,11 @@ const App = () => {
             }
         };
 
-    const loadProducts = async () => {
+    const loadProducts = async (showLoading = true) => {
       try {
-        setIsLoading(true);
+        if (showLoading) {
+          setIsLoading(true);
+        }
         const response = await api.get('/products/');
         const serverProducts = response.data;
         
@@ -998,7 +1250,9 @@ const App = () => {
         // Solo actualizar a array vacío si no había productos antes
         setProducts(prevProducts => prevProducts.length > 0 ? prevProducts : []);
       } finally {
-        setIsLoading(false);
+        if (showLoading) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -1096,8 +1350,6 @@ const App = () => {
 
     // Componente de la interfaz de inicio de sesión.
     const Login = () => {
-      console.log('🎨 Login render - failedAttempts:', failedAttempts, 'isLocked:', isLocked);
-      
       const [emailInput, setEmailInput] = useState('');
       const [passwordInput, setPasswordInput] = useState('');
 
@@ -1123,96 +1375,109 @@ const App = () => {
       };
 
       return (
-        <div className="login-container">
-          <h1>Iniciar Sesión</h1>
-          
-          <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }}>
-            <div className="input-group">
-              <label htmlFor="email">Correo Electrónico</label>
-              <input
-                type="email"
-                id="email"
-                value={emailInput}
-                onChange={handleEmailChange}
-                placeholder="ejemplo@email.com"
-                required
-                autoComplete="email"
-                disabled={isLocked}
-              />
-            </div>
-            <div className="input-group">
-              <label htmlFor="password">Contraseña</label>
-              <input
-                type="password"
-                id="password"
-                value={passwordInput}
-                onChange={handlePasswordChange}
-                placeholder="••••••••"
-                required
-                autoComplete="current-password"
-                disabled={isLocked}
-              />
-            </div>
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-blue-100 p-3 sm:p-6 md:p-8">
+          <div className="w-full max-w-[95%] sm:max-w-md md:max-w-lg lg:max-w-xl bg-white rounded-xl sm:rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 lg:p-10 border border-gray-100 overflow-hidden">
+            <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-center text-gray-800 mb-4 sm:mb-6 md:mb-8 break-words">
+              🔐 Iniciar Sesión
+            </h1>
             
-            {/* Mostrar contador de intentos (SIEMPRE visible, permanente) */}
-            {!isLocked && (
-              <p style={{ 
-                marginTop: '12px', 
-                marginBottom: '12px', 
-                padding: '10px', 
-                backgroundColor: failedAttempts > 0 ? '#fff3cd' : '#f8f9fa',
-                border: `1px solid ${failedAttempts > 0 ? '#ffc107' : '#dee2e6'}`,
-                borderRadius: '4px',
-                textAlign: 'center',
-                color: failedAttempts > 0 ? '#856404' : '#6c757d',
-                fontWeight: failedAttempts > 0 ? 'bold' : 'normal',
-                fontSize: '14px',
-                position: "relative",
-                left: "-2.7em",
-                right: "-10em"
-              }}>
-                {failedAttempts > 0 ? '⚠️ ' : ''}Intentos fallidos: {failedAttempts} de {maxAttempts}
-              </p>
-            )}
-            
-            {/* Mostrar mensaje de bloqueo */}
-            {isLocked && (
-              <p style={{ 
-                marginTop: '12px', 
-                marginBottom: '12px', 
-                padding: '12px', 
-                backgroundColor: '#ffebee', 
-                border: '2px solid #d32f2f',
-                borderRadius: '4px',
-                textAlign: 'center',
-                color: '#d32f2f', 
-                fontWeight: 'bold',
-                fontSize: '14px'
-              }}>
-                🔒 Cuenta bloqueada por múltiples intentos fallidos. Contacte al administrador para desbloquearla.
-              </p>
-            )}
-            
-            {/* Mostrar mensaje de error (solo si hay error y no es un mensaje de bloqueo) */}
-            {loginError && !isLocked && (
-              <p className="error-message" style={{ marginTop: '8px', marginBottom: '8px' }}>
-                {loginError}
-              </p>
-            )}
-            
-            {/* Formulario de login - sin funciones de test en producción */}
-            <button 
-              type="button"
-              onClick={onSubmit}
-              className="login-button" 
-              disabled={isLocked}
-            >
-              {isLocked ? 'Cuenta Bloqueada' : 'Iniciar Sesión'}
-            </button>
-                        <div style={{ marginTop: 10 }}>
-                            <button type="button" className="link-button" onClick={() => setCurrentPage('forgot-password')}>Olvidé mi contraseña</button>
-                        </div>
-          </form>
+            <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-4 sm:space-y-5 md:space-y-6">
+              <div className="space-y-1.5 sm:space-y-2 min-w-0">
+                <label 
+                  htmlFor="email" 
+                  className="block text-xs sm:text-sm md:text-base font-semibold text-gray-700 truncate"
+                >
+                  Correo Electrónico
+                </label>
+                <input
+                  type="email"
+                  id="email"
+                  value={emailInput}
+                  onChange={handleEmailChange}
+                  onFocus={() => {
+                    // NO limpiar el mensaje si es bloqueo manual
+                    if (!(isLocked && lockType === 'manual')) {
+                      setLoginError('');
+                    }
+                  }}
+                  placeholder="ejemplo@email.com"
+                  required
+                  autoComplete="email"
+                  className="w-full min-w-0 px-3 py-2.5 sm:px-4 sm:py-3 md:py-3.5 lg:py-4 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-400 overflow-hidden text-ellipsis"
+                />
+              </div>
+              
+              <div className="space-y-1.5 sm:space-y-2 min-w-0">
+                <label 
+                  htmlFor="password" 
+                  className="block text-xs sm:text-sm md:text-base font-semibold text-gray-700 truncate"
+                >
+                  Contraseña
+                </label>
+                <input
+                  type="password"
+                  id="password"
+                  value={passwordInput}
+                  onChange={handlePasswordChange}
+                  onFocus={() => {
+                    // NO limpiar el mensaje si es bloqueo manual
+                    if (!(isLocked && lockType === 'manual')) {
+                      setLoginError('');
+                    }
+                  }}
+                  placeholder="••••••••"
+                  required
+                  autoComplete="current-password"
+                  className="w-full min-w-0 px-3 py-2.5 sm:px-4 sm:py-3 md:py-3.5 lg:py-4 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-gray-900 placeholder-gray-400 overflow-hidden text-ellipsis"
+                />
+              </div>
+              
+              {/* Mostrar contador de intentos (SIEMPRE visible, permanente) */}
+              {!isLocked && (
+                <div className={`my-2 sm:my-3 p-2.5 sm:p-3 md:p-4 rounded-lg text-center text-xs sm:text-sm md:text-base transition-all duration-200 overflow-hidden ${
+                  failedAttempts > 0 
+                    ? 'bg-yellow-50 border-2 border-yellow-400 text-yellow-800 font-bold' 
+                    : 'bg-gray-50 border border-gray-300 text-gray-600'
+                }`}>
+                  <span className="whitespace-nowrap overflow-hidden text-ellipsis block">
+                    {failedAttempts > 0 ? '⚠️ ' : ''}Intentos fallidos: {failedAttempts} de {maxAttempts}
+                  </span>
+                </div>
+              )}
+              
+              {/* Mostrar mensaje de error o bloqueo dinámicamente según el tipo */}
+              {loginError && (
+                <div className={`my-2 sm:my-3 p-3 sm:p-4 md:p-5 rounded-lg text-center text-xs sm:text-sm md:text-base overflow-hidden ${
+                  isLocked 
+                    ? 'bg-red-50 border-2 border-red-500 text-red-600 font-bold' 
+                    : 'bg-red-50 border border-red-300 text-red-600'
+                }`}>
+                  <span className="block break-words">
+                    {loginError}
+                  </span>
+                </div>
+              )}
+              
+              {/* Formulario de login - sin funciones de test en producción */}
+              <button 
+                type="button"
+                onClick={onSubmit}
+                className="w-full py-2.5 sm:py-3 md:py-3.5 lg:py-4 px-4 sm:px-6 text-sm sm:text-base md:text-lg bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-lg shadow-md hover:from-blue-700 hover:to-blue-800 hover:shadow-lg transform hover:scale-[1.02] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 overflow-hidden whitespace-nowrap text-ellipsis"
+              >
+                ✓ Iniciar Sesión
+              </button>
+              
+              <div className="mt-3 sm:mt-4 md:mt-5 text-center overflow-hidden">
+                <button 
+                  type="button" 
+                  onClick={() => setCurrentPage('forgot-password')}
+                  className="text-blue-600 hover:text-blue-800 text-xs sm:text-sm md:text-base font-medium underline hover:no-underline transition-all duration-200 truncate inline-block max-w-full"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       );
     };
@@ -1223,13 +1488,6 @@ const App = () => {
 
         return (
             <nav className="navbar">
-                {/* Mostrar información de usuario solo si está autenticado y no estamos en la pantalla pública de 'forgot-password' */}
-                {(isLoggedIn && userRole && currentPage !== 'forgot-password') && (
-                  <div className="user-info">
-                      <span>Rol: {userRole}</span>
-                      <button onClick={handleLogout} className="logout-button">Cerrar Sesión</button>
-                  </div>
-                )}
                 <ul className="nav-list">
                     {itemsToShow.map(item => (
                         <li key={item}>
@@ -1239,48 +1497,22 @@ const App = () => {
                         </li>
                     ))}
                 </ul>
+                {/* Mostrar botón de cerrar sesión solo si está autenticado y no estamos en la pantalla pública de 'forgot-password' */}
+                {(isLoggedIn && userRole && currentPage !== 'forgot-password') && (
+                    <button onClick={handleLogout} className="logout-button">Cerrar Sesión</button>
+                )}
             </nav>
         );
     };
 
-    const ClientOrders = () => (
-        <div className="management-container">
-            <h2>Pedidos de Clientes</h2>
-            {orders.length === 0 ? (
-                <p>No hay pedidos para mostrar.</p>
-            ) : (
-                <ul className="list-container">
-                    {orders.map(order => (
-                        <li key={order.id} className="list-item">
-                            <div className="order-header">
-                                <strong>ID: {order.id}</strong>
-                                <span>Cliente: {order.customerName}</span>
-                                <span>Fecha: {formatMovementDate(order.date)}</span>
-                            </div>
-                            <div className="order-details">
-                                <p><strong>Estado:</strong> {order.status}</p>
-                                <p><strong>Total:</strong> ${safeToFixed(order.totalAmount)}</p>
-                            </div>
-                            <div className="order-items">
-                                <strong>Items:</strong>
-                                <ul>
-                                    {order.items.map((item, index) => (
-                                        <li key={index}>
-                                            {item.productName} (x{item.quantity}) - ${safeToFixed(item.total)}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                            {order.notes && <div className="order-notes"><strong>Notas:</strong> {order.notes}</div>}
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </div>
-    );
+
 
     // Componente del tablero (Dashboard).
     const Dashboard = () => {
+        // Estados para manejar el colapso de las secciones
+        const [showSuppliesAlerts, setShowSuppliesAlerts] = useState(true);
+        const [showProductsAlerts, setShowProductsAlerts] = useState(true);
+
         // Obtener productos e insumos con stock bajo según su umbral personalizado
         // Comparar en la misma unidad base (gramos/ml/unidades)
         const lowStockItems = products.filter(product => {
@@ -1294,10 +1526,13 @@ const App = () => {
         const lowStockProducts = lowStockItems.filter(item => item.category === 'Producto');
         const lowStockSupplies = lowStockItems.filter(item => item.category === 'Insumo');
 
+        // Calcular total de alertas
+        const totalAlerts = lowStockProducts.length + lowStockSupplies.length;
+
         const formatStockDisplay = (stock, unit) => {
             const stockNum = parseFloat(stock);
             if (isNaN(stockNum)) {
-                return `0 unidades`;
+                return `0 unid`;
             }
 
             let displayValue;
@@ -1317,7 +1552,7 @@ const App = () => {
                 displayUnit = 'litros';
             } else {
                 displayValue = stockNum;
-                displayUnit = 'unidades';
+                displayUnit = 'unid';
             }
 
             // Format number to remove trailing zeros from decimals, up to 3 decimal places
@@ -1326,385 +1561,119 @@ const App = () => {
             return `${formattedValue} ${displayUnit}`;
         };
 
+        const formatThresholdDisplay = (threshold, unit) => {
+            const thresholdNum = parseFloat(threshold) || 10;
+            if (isNaN(thresholdNum)) {
+                return `10`;
+            }
+
+            let displayValue;
+
+            if (unit === 'g') {
+                displayValue = thresholdNum / 1000;
+            } else if (unit === 'ml') {
+                displayValue = thresholdNum / 1000;
+            } else {
+                displayValue = thresholdNum;
+            }
+
+            return Number(displayValue.toFixed(3));
+        };
+
         return (
             <div className="dashboard-container">
-                <h2>Dashboard de {userRole}</h2>
+                <div className="dashboard-header">
+                    <h2>Dashboard de {userRole}</h2>   
+                       {/* 
+                //totalAlerts > 0 && (
+                //  <div className="total-alerts-badge">
+                //    <span className="alert-icon">⚠️</span>
+                //    <span className="alert-text">TOTAL ALERTAS</span>
+                //    <span className="alert-count">{totalAlerts}</span>
+                //  </div>
+                //)
+                */}
+            </div>
+    
+
                 {['Gerente', 'Encargado', 'Panadero', 'Cajero'].includes(userRole) && (
-                    lowStockItems.length > 0 && (
-                        <div className="dashboard-alerts">
-                            <h3>⚠️ Alerta de Stock Bajo</h3>
-                            
-                            {lowStockProducts.length > 0 && (
-                                <div className="alert-section">
-                                    <h4>📦 Productos con Stock Bajo:</h4>
-                                    <ul className="alert-list">
-                                        {lowStockProducts.map(item => (
-                                            <li key={item.id} className="alert-item">
-                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {formatStockDisplay(item.lowStockThreshold || 10, item.unit)})
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                            
-                            {lowStockSupplies.length > 0 && (
-                                <div className="alert-section">
-                                    <h4>🧾 Insumos con Stock Bajo:</h4>
-                                    <ul className="alert-list">
+                    <div className="alerts-wrapper">
+                        {/* Sección de Insumos Faltantes */}
+                        {lowStockSupplies.length > 0 && (
+                            <div className="alert-category">
+                                <button 
+                                    className="alert-category-header"
+                                    onClick={() => setShowSuppliesAlerts(!showSuppliesAlerts)}
+                                >
+                                    <div className="header-left">
+                                        
+                                        <span className="category-title">Insumos Faltantes o con bajo Stock</span>
+                                        <span className="category-count">{lowStockSupplies.length}</span>
+                                    </div>
+                                    <span className={`collapse-icon ${showSuppliesAlerts ? 'open' : ''}`}>▼</span>
+                                </button>
+                                
+                                {showSuppliesAlerts && (
+                                    <div className="alert-grid">
                                         {lowStockSupplies.map(item => (
-                                            <li key={item.id} className="alert-item">
-                                                <strong>{item.name}</strong>: ¡Solo quedan {formatStockDisplay(item.stock, item.unit)}! (Umbral: {formatStockDisplay(item.lowStockThreshold || 10, item.unit)})
-                                            </li>
+                                            <div key={item.id} className="alert-card alert-card-red">
+                                                <div className="alert-card-icon">⚠️</div>
+                                                <div className="alert-card-content">
+                                                    <h4 className="alert-card-title">{item.name}</h4>
+                                                    <div className="alert-card-stock">
+                                                        <span className="stock-value">{formatStockDisplay(item.stock, item.unit)}</span>
+                                                        <span className="stock-separator">·</span>
+                                                        <span className="stock-min">Mín: {formatThresholdDisplay(item.lowStockThreshold, item.unit)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         ))}
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
-                    )
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Sección de Productos Bajo Mínimo */}
+                        {lowStockProducts.length > 0 && (
+                            <div className="alert-category">
+                                <button 
+                                    className="alert-category-header"
+                                    onClick={() => setShowProductsAlerts(!showProductsAlerts)}
+                                >
+                                    <div className="header-left">
+                                        
+                                        <span className="category-title">Productos Faltantes o con bajo Stock</span>
+                                        <span className="category-count">{lowStockProducts.length}</span>
+                                    </div>
+                                    <span className={`collapse-icon ${showProductsAlerts ? 'open' : ''}`}>▼</span>
+                                </button>
+                                
+                                {showProductsAlerts && (
+                                    <div className="alert-grid">
+                                        {lowStockProducts.map(item => (
+                                            <div key={item.id} className="alert-card alert-card-red">
+                                                <div className="alert-card-icon">⚠️</div>
+                                                <div className="alert-card-content">
+                                                    <h4 className="alert-card-title">{item.name}</h4>
+                                                    <div className="alert-card-stock">
+                                                        <span className="stock-value">{formatStockDisplay(item.stock, item.unit)}</span>
+                                                        <span className="stock-separator">·</span>
+                                                        <span className="stock-min">Mín: {formatThresholdDisplay(item.lowStockThreshold, item.unit)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 )}
                 
                 <div className="info-section">
                     <h3>Información General</h3>
-                    <p>Bienvenido al sistema de gestión de churrería. Utiliza el menú superior para navegar por las diferentes funcionalidades.</p>
+                    <p className='textoBienvenida'>Bienvenido al sistema de gestión de churrería. Utiliza el menú superior para navegar por las diferentes funcionalidades.</p>
                 </div>
-            </div>
-        );
-    };
-
-    // Componente de la interfaz de gestión de usuarios (solo para Gerente).
-    const UserManagement = () => {
-        const [showAddUser, setShowAddUser] = useState(false);
-        const [editingUser, setEditingUser] = useState(null); // Usuario en edición
-        const [newPassword, setNewPassword] = useState(''); // Nuevo estado para la contraseña
-        const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Cajero', password: '' });
-        const [message, setMessage] = useState('');
-
-        // Modales de confirmación
-        const [confirmModal, setConfirmModal] = useState({
-            isOpen: false,
-            action: null, // 'unlock', 'edit', 'delete', 'create'
-            userId: null,
-            userName: ''
-        });
-
-        const handleAddUser = async (e) => {
-            e.preventDefault();
-            if (!newUser.name || !newUser.email || !newUser.password) {
-                setMessage('Error: Todos los campos son obligatorios.');
-                return;
-            }
-            const passwordError = validatePassword(newUser.password);
-            if (passwordError) {
-                setMessage(`Error de contraseña: ${passwordError}`);
-                return;
-            }
-            const userExists = users.some(u => u.email === newUser.email);
-            if (userExists) {
-                setMessage('Error: El email ya está registrado.');
-                return;
-            }
-            
-            // Mostrar modal de confirmación antes de crear
-            setConfirmModal({
-                isOpen: true,
-                action: 'create',
-                userId: null,
-                userName: newUser.name
-            });
-        };
-
-        const confirmCreateUser = async () => {
-            try {
-                const payload = { 
-                    username: newUser.name, // Username igual al nombre completo exactamente como se escribió
-                    email: newUser.email,
-                    password: newUser.password,
-                    role_name: newUser.role 
-                };
-                // Payload preparado para envío
-                
-                await api.post('/users/', payload);
-                await loadUsersFromBackend();
-                setNewUser({ name: '', email: '', role: 'Cajero', password: '' });
-                setShowAddUser(false);
-                setMessage('✅ Usuario creado exitosamente.');
-                setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
-            } catch (error) {
-                // Error al crear usuario
-                setMessage(error.response?.data?.email?.[0] || error.response?.data?.username?.[0] || error.response?.data?.error || 'Error: No se pudo crear el usuario.');
-                setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
-            }
-        };
-
-        const handleUpdateUser = async (e) => {
-            e.preventDefault();
-            if (!editingUser) return;
-
-            // Validar contraseña si se ha ingresado una nueva
-            if (newPassword && validatePassword(newPassword)) {
-                setMessage(`Error de contraseña: ${validatePassword(newPassword)}`);
-                return;
-            }
-
-            // Mostrar modal de confirmación para editar
-            setConfirmModal({
-                isOpen: true,
-                action: 'edit',
-                userId: editingUser.id,
-                userName: editingUser.name
-            });
-        };
-
-        const performUpdateUser = async () => {
-            if (!editingUser) return;
-
-            try {
-                const payload = {
-                    username: editingUser.name,
-                    email: editingUser.email,
-                    // Enviar role_id si es posible (el serializer espera role_id para update)
-                    // Buscamos el id del rol seleccionado en `roles` (roles puede ser array de objetos o strings)
-                    // Si no encontramos id, como fallback enviamos el nombre en `role_name` para compatibilidad.
-                };
-
-                // Añadir contraseña al payload solo si se ha ingresado una nueva
-                if (newPassword) {
-                    payload.password = newPassword;
-                }
-
-                // Resolver role -> role_id
-                try {
-                    const roleObj = (roles || []).find(r => (typeof r === 'string' ? r === editingUser.role : (r.name === editingUser.role)));
-                    if (roleObj) {
-                        // Si roleObj es string no tiene id; si es objeto, usar id
-                        if (typeof roleObj === 'object' && roleObj.id) {
-                            payload.role_id = roleObj.id;
-                        } else if (typeof roleObj === 'string') {
-                            // fallback: enviar role_name para que el backend lo maneje si lo soporta
-                            payload.role_name = roleObj;
-                        }
-                    } else if (editingUser.role) {
-                        // No encontramos el rol en la lista; enviar role_name como fallback
-                        payload.role_name = editingUser.role;
-                    }
-
-                    await api.patch(`/users/${editingUser.id}/`, payload);
-                } catch (err) {
-                    console.error('Error resolviendo role_id antes de actualizar usuario:', err);
-                    await api.patch(`/users/${editingUser.id}/`, payload);
-                }
-                await loadUsersFromBackend();
-                setEditingUser(null);
-                setNewPassword(''); // Limpiar el campo de contraseña
-                setMessage('✅ Datos del usuario actualizados.');
-            } catch (error) {
-                setMessage('Error: No se pudo actualizar el usuario.');
-                console.error("Update user error:", error.response?.data || error.message);
-            }
-        };
-
-        const handleDeleteUser = async (userId) => {
-            const userToDelete = users.find(u => u.id === userId);
-            if (!userToDelete) return;
-            if (userToDelete.role === 'Gerente') {
-                setMessage('No se puede eliminar a un usuario con rol Gerente.');
-                return;
-            }
-            // Abrir modal de confirmación
-            setConfirmModal({
-                isOpen: true,
-                action: 'delete',
-                userId: userId,
-                userName: userToDelete.name
-            });
-        };
-
-        const handleUnlockUser = async (userId) => {
-            const userToUnlock = users.find(u => u.id === userId);
-            if (!userToUnlock) return;
-            // Abrir modal de confirmación
-            setConfirmModal({
-                isOpen: true,
-                action: 'unlock',
-                userId: userId,
-                userName: userToUnlock.name
-            });
-        };
-
-        const startEditing = (user) => {
-            setEditingUser({ ...user });
-            setNewPassword('');
-            setShowAddUser(false);
-        };
-
-        const confirmAction = async () => {
-            const { action, userId } = confirmModal;
-            setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
-
-            try {
-                if (action === 'delete') {
-                    await api.delete(`/users/${userId}/`);
-                    await loadUsersFromBackend();
-                    setMessage('✅ Usuario eliminado correctamente.');
-                } else if (action === 'unlock') {
-                    console.log('🔓 Iniciando desbloqueo de usuario:', userId);
-                    await api.post(`/users/${userId}/unlock/`);
-                    console.log('🔓 Usuario desbloqueado en backend, programando recarga...');
-                    // Usar setTimeout para evitar conflictos de re-render
-                    setTimeout(async () => {
-                        console.log('🔓 Ejecutando recarga de usuarios...');
-                        await loadUsersFromBackend();
-                        console.log('🔓 Usuarios recargados después del desbloqueo');
-                    }, 100); // 100ms de delay
-                    setMessage('✅ Usuario desbloqueado exitosamente.');
-                } else if (action === 'edit') {
-                    // Ejecutar la actualización del usuario
-                    await performUpdateUser();
-                } else if (action === 'create') {
-                    // Ejecutar la creación del usuario
-                    await confirmCreateUser();
-                }
-            } catch (error) {
-                if (action === 'delete') {
-                    setMessage('Error eliminando usuario.');
-                } else if (action === 'unlock') {
-                    setMessage('Error desbloqueando usuario.');
-                } else if (action === 'edit') {
-                    setMessage('Error: No se pudo actualizar el usuario.');
-                } else if (action === 'create') {
-                    setMessage('Error: No se pudo crear el usuario.');
-                }
-                console.error('Confirm action error:', error.response?.data || error.message);
-            }
-        };
-
-        const cancelAction = () => {
-            setConfirmModal({ isOpen: false, action: null, userId: null, userName: '' });
-        };
-
-        // Modal de confirmación reutilizable
-        const ConfirmationModal = () => {
-            if (!confirmModal.isOpen) return null;
-
-            const messages = {
-                unlock: `¿Estás seguro de que deseas desbloquear a ${confirmModal.userName}?`,
-                edit: `¿Estás seguro de que deseas editar las credenciales de ${confirmModal.userName}?`,
-                delete: `¿Estás seguro de que deseas eliminar a ${confirmModal.userName}?`,
-                create: `¿Estás seguro de que quieres crear este usuario "${confirmModal.userName}"?`
-            };
-
-            const buttonText = {
-                unlock: 'Desbloquear',
-                edit: 'Editar',
-                delete: 'Eliminar',
-                create: 'Crear Usuario'
-            };
-
-            return (
-                <div className="modal-overlay">
-                    <div className="modal-content">
-                        <h3>Confirmación</h3>
-                        <p>{messages[confirmModal.action]}</p>
-                        <div className="modal-buttons">
-                            <button className="modal-button cancel-button" onClick={cancelAction}>Cancelar</button>
-                            <button className="modal-button confirm-button" onClick={confirmAction}>{buttonText[confirmModal.action]}</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const editUserForm = () => (
-            <form className="form-container" onSubmit={handleUpdateUser}>
-                <h3>Editando a {editingUser.name}</h3>
-                <input type="text" value={editingUser.name} onChange={e => setEditingUser({ ...editingUser, name: e.target.value })} placeholder="Nombre Completo" required />
-                <input type="email" value={editingUser.email} onChange={e => setEditingUser({ ...editingUser, email: e.target.value })} placeholder="Email" required />
-                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Nueva Contraseña (dejar en blanco para no cambiar)" />
-                <select
-                    value={editingUser.role || ''}
-                    onChange={e => setEditingUser({ ...editingUser, role: e.target.value })}
-                >
-                    <option value="" disabled>Seleccionar rol...</option>
-                    {(() => {
-                        const parsed = (roles || []).map(r => (typeof r === 'string' ? r : (r.name || r)));
-                        if (editingUser && editingUser.role && !parsed.includes(editingUser.role)) {
-                            parsed.unshift(editingUser.role);
-                        }
-                        return parsed.map(name => <option key={name} value={name}>{name}</option>);
-                    })()}
-                </select>
-                <div className="button-group">
-                    <button type="submit" className="action-button primary">Actualizar Datos</button>
-                    <button type="button" className="action-button secondary" onClick={() => { setEditingUser(null); setNewPassword(''); }}>Cancelar</button>
-                </div>
-            </form>
-        );
-
-        const addUserForm = () => (
-            <form className="form-container" onSubmit={handleAddUser}>
-                <h3>Registrar Usuario</h3>
-                <input 
-                    type="text" 
-                    value={newUser.name} 
-                    onChange={e => setNewUser({ ...newUser, name: e.target.value })} 
-                    placeholder="Nombre Completo (Ej: Juan Carlos Pérez)" 
-                    required 
-                />
-                <input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="Email" required />
-                <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Contraseña" required />
-                <select
-                    value={newUser.role}
-                    onChange={e => setNewUser({ ...newUser, role: e.target.value })}
-                >
-                    {(() => {
-                        const parsed = (roles || []).map(r => (typeof r === 'string' ? r : (r.name || r)));
-                        return parsed.filter(n => n !== 'Gerente').map(name => (
-                            <option key={name} value={name}>{name}</option>
-                        ));
-                    })()}
-                </select>
-                <div className="button-group">
-                    <button type="submit" className="action-button primary">Crear Usuario</button>
-                    <button type="button" className="action-button secondary" onClick={() => setShowAddUser(false)}>Cancelar</button>
-                </div>
-            </form>
-        );
-
-        return (
-            <div className="management-container">
-                <h2>Gestión de Usuarios</h2>
-                {message && <p className="message">{message}</p>}
-                <ConfirmationModal />
-                {editingUser ? editUserForm() : (showAddUser ? addUserForm() : <button className="main-button" onClick={() => setShowAddUser(true)}>Registrar Nuevo Usuario</button>)}
-                <h3>Usuarios Existentes ({users.length})</h3>
-                <ul className="list-container">
-                    {users.map(user => (
-                        <li key={user.id} className="list-item">
-                            <div className="user-info-container">
-                                <div>
-                                    <strong>{user.name}</strong> ({user.role})
-                                    {user.is_locked && <span style={{color: 'red', marginLeft: '10px', fontWeight: 'bold'}}>🔒 BLOQUEADO</span>}
-                                </div>
-                                <div className="user-email">{user.email}</div>
-                                {user.is_locked && (
-                                    <div style={{color: 'orange', fontSize: '0.9em', marginTop: '5px'}}>
-                                        Bloqueado por {user.failed_login_attempts} intentos fallidos
-                                        {user.locked_at && ` el ${new Date(user.locked_at).toLocaleString('es-AR')}`}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="button-group">
-                                {user.is_locked && (
-                                    <button onClick={() => handleUnlockUser(user.id)} className="action-button primary" style={{backgroundColor: '#28a745'}}>
-                                        Desbloquear
-                                    </button>
-                                )}
-                                <button onClick={() => startEditing(user)} className="edit-button">Editar</button>
-                                <button onClick={() => handleDeleteUser(user.id)} className="delete-button">Eliminar</button>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
             </div>
         );
     };
@@ -1716,6 +1685,18 @@ const App = () => {
         // productId en vez de nombre, quantity como string hasta validar, reason texto
         const [change, setChange] = useState({ productId: '', quantity: '', reason: '' });
         const [confirmOpen, setConfirmOpen] = useState(false);
+        const [activeTab, setActiveTab] = useState('productos'); // 'productos' o 'insumos'
+        
+        // Estados para filtros de productos
+        const [productNameFilter, setProductNameFilter] = useState('');
+        const [productStockFilter, setProductStockFilter] = useState('');
+        const [productStockOp, setProductStockOp] = useState('equals');
+        
+        // Estados para filtros de insumos
+        const [insumoNameFilter, setInsumoNameFilter] = useState('');
+        const [insumoStockFilter, setInsumoStockFilter] = useState('');
+        const [insumoStockOp, setInsumoStockOp] = useState('equals');
+        const [insumoStockUnit, setInsumoStockUnit] = useState('unidades');
 
         const handleRegisterChange = (e) => {
             if (e && typeof e.preventDefault === 'function') e.preventDefault();
@@ -1788,56 +1769,288 @@ const App = () => {
 
         return (
             <div className="inventory-container">
-                <h2>Inventario</h2>
-                <h3>Consultar Inventario</h3>
-                
-                <div className="inventory-categories">
-                    <h4>Productos</h4>
-                    <ul className="list-container">
-                        {inventory
-                            .filter(item => item.type === 'Producto')
-                            .map(item => {
-                                let stockDisplay;
-                                const stockNum = parseFloat(item.stock);
-                                if (item.unit === 'g') {
-                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} kilos`;
-                                } else if (item.unit === 'ml') {
-                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} litros`;
-                                } else {
-                                    stockDisplay = `${stockNum} unidades`;
-                                }
-                                return (
-                                    <li key={item.id} className="list-item">
-                                        <span className="inventory-name">{item.name}</span>
-                                        <span className="inventory-stock">{stockDisplay}</span>
-                                    </li>
-                                );
-                            })}
-                    </ul>
-                    
-                    <h4>Insumos</h4>
-                    <ul className="list-container">
-                        {inventory
-                            .filter(item => item.type === 'Insumo')
-                            .map(item => {
-                                let stockDisplay;
-                                const stockNum = parseFloat(item.stock);
-                                if (item.unit === 'g') {
-                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} kilos`;
-                                } else if (item.unit === 'ml') {
-                                    stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} litros`;
-                                } else {
-                                    stockDisplay = `${stockNum} unidades`;
-                                }
-                                return (
-                                    <li key={item.id} className="list-item">
-                                        <span className="inventory-name">{item.name}</span>
-                                        <span className="inventory-stock">{stockDisplay}</span>
-                                    </li>
-                                );
-                            })}
-                    </ul>
+                <div className="inventory-header">
+                    <h2>Control de Inventario</h2>
+                    <div className="inventory-tabs">
+                        <div className='inventory-tab-producto'>
+
+                            <button 
+                                className={`inventory-tab-button ${activeTab === 'productos' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('productos')}
+                            >
+                                Productos
+                            </button>
+                        </div>
+
+                        <div className='inventory-tab-insumo'>
+                            <button 
+                                className={`inventory-tab-button ${activeTab === 'insumos' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('insumos')}
+                            >
+                                Insumos
+                           </button>
+                        </div> 
+                    </div>
                 </div>
+                
+                {activeTab === 'productos' && (
+                    <div className="tab-content">
+                        {/* Filtros para productos */}
+                        <div className="inventory-filters">
+                            <h4>FILTROS DE BÚSQUEDA</h4>
+                            
+                            <div className="inventory-filters-row">
+                                <div className="filter-row">
+                                    <label>Nombre del Producto</label>
+                                    <input
+                                        type="text"
+                                        value={productNameFilter}
+                                        onChange={e => setProductNameFilter(e.target.value)}
+                                        placeholder="Buscar por nombre..."
+                                    />
+                                </div>
+                                
+                                <div className="filter-row">
+                                    <label>Cantidad en Stock</label>
+                                    <select value={productStockOp} onChange={e => setProductStockOp(e.target.value)}>
+                                        <option value="equals">Es igual</option>
+                                        <option value="gt">Mayor que</option>
+                                        <option value="gte">Mayor o igual</option>
+                                        <option value="lt">Menor que</option>
+                                        <option value="lte">Menor o igual</option>
+                                    </select>
+                                    <input
+                                        type="number"
+                                        step="0.001"
+                                        value={productStockFilter}
+                                        onChange={e => setProductStockFilter(e.target.value)}
+                                        placeholder="Cant..."
+                                    />
+                                    <span className="unit-label">unidades</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="inventory-results">
+                            <p className="results-count">
+                                Mostrando {inventory.filter(item => {
+                                    if (item.type !== 'Producto') return false;
+                                    if (productNameFilter && !item.name.toLowerCase().includes(productNameFilter.toLowerCase())) return false;
+                                    if (productStockFilter) {
+                                        const filterValue = parseFloat(productStockFilter);
+                                        const itemStock = parseFloat(item.stock);
+                                        if (productStockOp === 'equals' && itemStock !== filterValue) return false;
+                                        if (productStockOp === 'gt' && itemStock <= filterValue) return false;
+                                        if (productStockOp === 'gte' && itemStock < filterValue) return false;
+                                        if (productStockOp === 'lt' && itemStock >= filterValue) return false;
+                                        if (productStockOp === 'lte' && itemStock > filterValue) return false;
+                                    }
+                                    return true;
+                                }).length} resultados
+                            </p>
+                        </div>
+                        
+                        <div className="inventory-grid">
+                            {inventory
+                                .filter(item => {
+                                    // Filtro por tipo
+                                    if (item.type !== 'Producto') return false;
+                                    
+                                    // Filtro por nombre
+                                    if (productNameFilter && !item.name.toLowerCase().includes(productNameFilter.toLowerCase())) {
+                                        return false;
+                                    }
+                                    
+                                    // Filtro por stock
+                                    if (productStockFilter) {
+                                        const filterValue = parseFloat(productStockFilter);
+                                        const itemStock = parseFloat(item.stock);
+                                        
+                                        if (productStockOp === 'equals' && itemStock !== filterValue) return false;
+                                        if (productStockOp === 'gt' && itemStock <= filterValue) return false;
+                                        if (productStockOp === 'gte' && itemStock < filterValue) return false;
+                                        if (productStockOp === 'lt' && itemStock >= filterValue) return false;
+                                        if (productStockOp === 'lte' && itemStock > filterValue) return false;
+                                    }
+                                    
+                                    return true;
+                                })
+                                .map(item => {
+                                    let stockDisplay;
+                                    const stockNum = parseFloat(item.stock);
+                                    if (item.unit === 'g') {
+                                        stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} kilos`;
+                                    } else if (item.unit === 'ml') {
+                                        stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} litros`;
+                                    } else {
+                                        stockDisplay = `${stockNum} unidades`;
+                                    }
+                                    
+                                    const isLowStock = item.stock < (item.lowStockThreshold || item.low_stock_threshold || 0);
+                                    
+                                    return (
+                                        <div key={item.id} className={`inventory-card ${isLowStock ? 'low-stock' : ''}`}>
+                                            <div className="inventory-card-content">
+                                                <h4 className="inventory-card-title">{item.name}</h4>
+                                                <div className="inventory-card-stock">
+                                                    <span className="stock-label">Stock:</span>
+                                                    <span className={`stock-value ${isLowStock ? 'low' : ''}`}>{stockDisplay}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                        </div>
+                    </div>
+                )}
+                
+                {activeTab === 'insumos' && (
+                    <div className="tab-content">
+                        {/* Filtros para insumos */}
+                        <div className="inventory-filters">
+                            <h4>FILTROS DE BÚSQUEDA</h4>
+                            
+                            <div className="inventory-filters-row">
+                                <div className="filter-row">
+                                    <label>Nombre del Insumo</label>
+                                    <input
+                                        type="text"
+                                        value={insumoNameFilter}
+                                        onChange={e => setInsumoNameFilter(e.target.value)}
+                                        placeholder="Buscar por nombre..."
+                                    />
+                                </div>
+                                
+                                <div className="filter-row">
+                                    <label>Cantidad en Stock</label>
+                                    <select value={insumoStockOp} onChange={e => setInsumoStockOp(e.target.value)}>
+                                        <option value="equals">Es igual</option>
+                                        <option value="gt">Mayor que</option>
+                                        <option value="gte">Mayor o igual</option>
+                                        <option value="lt">Menor que</option>
+                                        <option value="lte">Menor o igual</option>
+                                    </select>
+                                    <input
+                                        type="number"
+                                        step="0.001"
+                                        value={insumoStockFilter}
+                                        onChange={e => setInsumoStockFilter(e.target.value)}
+                                        placeholder="Cant..."
+                                    />
+                                    <select 
+                                        value={insumoStockUnit} 
+                                        onChange={e => setInsumoStockUnit(e.target.value)}
+                                        className="unit-selector"
+                                    >
+                                        <option value="unidades">unidades</option>
+                                        <option value="Kg">Kg</option>
+                                        <option value="L">L</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="inventory-results">
+                            <p className="results-count">
+                                Mostrando {inventory.filter(item => {
+                                    if (item.type !== 'Insumo') return false;
+                                    if (insumoNameFilter && !item.name.toLowerCase().includes(insumoNameFilter.toLowerCase())) return false;
+                                    if (insumoStockFilter) {
+                                        const filterValue = parseFloat(insumoStockFilter);
+                                        let itemStock = parseFloat(item.stock);
+                                        if (insumoStockUnit === 'Kg' && item.unit === 'g') {
+                                            itemStock = itemStock / 1000;
+                                        } else if (insumoStockUnit === 'L' && item.unit === 'ml') {
+                                            itemStock = itemStock / 1000;
+                                        } else if (insumoStockUnit === 'Kg' && item.unit !== 'g') {
+                                            return false;
+                                        } else if (insumoStockUnit === 'L' && item.unit !== 'ml') {
+                                            return false;
+                                        } else if (insumoStockUnit === 'unidades' && (item.unit === 'g' || item.unit === 'ml')) {
+                                            return false;
+                                        }
+                                        if (insumoStockOp === 'equals' && Math.abs(itemStock - filterValue) > 0.001) return false;
+                                        if (insumoStockOp === 'gt' && itemStock <= filterValue) return false;
+                                        if (insumoStockOp === 'gte' && itemStock < filterValue) return false;
+                                        if (insumoStockOp === 'lt' && itemStock >= filterValue) return false;
+                                        if (insumoStockOp === 'lte' && itemStock > filterValue) return false;
+                                    }
+                                    return true;
+                                }).length} resultados
+                            </p>
+                        </div>
+                        
+                        <div className="inventory-grid">
+                            {inventory
+                                .filter(item => {
+                                    // Filtro por tipo
+                                    if (item.type !== 'Insumo') return false;
+                                    
+                                    // Filtro por nombre
+                                    if (insumoNameFilter && !item.name.toLowerCase().includes(insumoNameFilter.toLowerCase())) {
+                                        return false;
+                                    }
+                                    
+                                    // Filtro por stock
+                                    if (insumoStockFilter) {
+                                        const filterValue = parseFloat(insumoStockFilter);
+                                        let itemStock = parseFloat(item.stock);
+                                        
+                                        // Convertir el stock del item según la unidad seleccionada
+                                        if (insumoStockUnit === 'Kg' && item.unit === 'g') {
+                                            // Convertir de gramos a kilos
+                                            itemStock = itemStock / 1000;
+                                        } else if (insumoStockUnit === 'L' && item.unit === 'ml') {
+                                            // Convertir de mililitros a litros
+                                            itemStock = itemStock / 1000;
+                                        } else if (insumoStockUnit === 'Kg' && item.unit !== 'g') {
+                                            // Si buscamos en Kg pero el item no está en gramos, no coincide
+                                            return false;
+                                        } else if (insumoStockUnit === 'L' && item.unit !== 'ml') {
+                                            // Si buscamos en L pero el item no está en ml, no coincide
+                                            return false;
+                                        } else if (insumoStockUnit === 'unidades' && (item.unit === 'g' || item.unit === 'ml')) {
+                                            // Si buscamos en unidades pero el item está en g o ml, no coincide
+                                            return false;
+                                        }
+                                        
+                                        if (insumoStockOp === 'equals' && Math.abs(itemStock - filterValue) > 0.001) return false;
+                                        if (insumoStockOp === 'gt' && itemStock <= filterValue) return false;
+                                        if (insumoStockOp === 'gte' && itemStock < filterValue) return false;
+                                        if (insumoStockOp === 'lt' && itemStock >= filterValue) return false;
+                                        if (insumoStockOp === 'lte' && itemStock > filterValue) return false;
+                                    }
+                                    
+                                    return true;
+                                })
+                                .map(item => {
+                                    let stockDisplay;
+                                    const stockNum = parseFloat(item.stock);
+                                    if (item.unit === 'g') {
+                                        stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} kilos`;
+                                    } else if (item.unit === 'ml') {
+                                        stockDisplay = `${parseFloat((stockNum / 1000).toFixed(3))} litros`;
+                                    } else {
+                                        stockDisplay = `${stockNum} unidades`;
+                                    }
+                                    
+                                    const isLowStock = item.stock < (item.lowStockThreshold || item.low_stock_threshold || 0);
+                                    
+                                    return (
+                                        <div key={item.id} className={`inventory-card ${isLowStock ? 'low-stock' : ''}`}>
+                                            <div className="inventory-card-content">
+                                                <h4 className="inventory-card-title">{item.name}</h4>
+                                                <div className="inventory-card-stock">
+                                                    <span className="stock-label">Stock:</span>
+                                                    <span className={`stock-value ${isLowStock ? 'low' : ''}`}>{stockDisplay}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                        </div>
+                    </div>
+                )}
                 <hr />
           {/* Bloque 'Registrar Cambios en el Inventario' comentado  */}
           {false && (
@@ -1898,302 +2111,56 @@ const App = () => {
     };
 
     const SalesView = () => {
-    // Estado para el orden del historial de movimientos de caja SOLO para la pestaña caja
-    const [cashSortOrder, setCashSortOrder] = useState('desc');
-        const [cartItems, setCartItems] = useState([]);
-        const [total, setTotal] = useState(0);
-        const [showMovementForm, setShowMovementForm] = useState(false);
-        const [newMovement, setNewMovement] = useState({ type: 'Entrada', amount: '', description: '' });
-        const [message, setMessage] = useState('');
         const [activeTab, setActiveTab] = useState('ventas'); // 'ventas' o 'caja'
-        const [selectedProduct, setSelectedProduct] = useState(null);
-        const [quantity, setQuantity] = useState(1);
-        const [paymentMethod, setPaymentMethod] = useState('');
-
-        const availableProducts = products.filter(product => 
-            product.category === 'Producto' && product.stock > 0
-        );
-
-        const productOptions = availableProducts.map(p => ({ value: p.id, label: `${p.name} (${p.price}) - Stock: ${p.stock}` }));
-
-        const addToCart = () => {
-            if (!selectedProduct) {
-                setMessage('Por favor, selecciona un producto.');
-                return;
-            }
-
-            const productToAdd = products.find(p => p.id === selectedProduct.value);
-            if (!productToAdd) {
-                setMessage('Producto no encontrado.');
-                return;
-            }
-
-            if (quantity > productToAdd.stock) {
-                setMessage('No hay suficiente stock para la cantidad solicitada.');
-                return;
-            }
-
-            setCartItems(prevItems => {
-                const existingItem = prevItems.find(item => item.product.id === productToAdd.id);
-                if (existingItem) {
-                    const newQuantity = existingItem.quantity + quantity;
-                    if (newQuantity > productToAdd.stock) {
-                        setMessage('La cantidad total en el carrito supera el stock disponible.');
-                        return prevItems;
-                    }
-                    return prevItems.map(item =>
-                        item.product.id === productToAdd.id
-                            ? { ...item, quantity: newQuantity }
-                            : item
-                    );
-                } else {
-                    return [...prevItems, { product: productToAdd, quantity: quantity }];
-                }
-            });
-            setSelectedProduct(null);
-            setQuantity(1);
-        };
-
-        const updateQuantity = (productId, newQuantity) => {
-            const product = products.find(p => p.id === productId);
-            if (newQuantity > product.stock) {
-                setMessage(`No puedes vender más de ${product.stock} unidades de ${product.name}.`);
-                return;
-            }
-
-            setCartItems(prevItems =>
-                prevItems.map(item =>
-                    item.product.id === productId
-                        ? { ...item, quantity: newQuantity }
-                        : item
-                )
-            );
-        };
-
-        const removeFromCart = (productId) => {
-            setCartItems(prevItems => prevItems.filter(item => item.product.id !== productId));
-        };
-
-        useEffect(() => {
-            const newTotal = cartItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-            setTotal(newTotal);
-        }, [cartItems]);
-
-        const handleRegisterSale = async () => {
-            if (cartItems.length === 0) {
-                setMessage('El carrito está vacío.');
-                return;
-            }
-
-            if (!paymentMethod) {
-                setMessage('Por favor, selecciona un método de pago.');
-                return;
-            }
-
-            const description = `Venta: ${cartItems.map(item => `${item.product.name} x${item.quantity}`).join(', ')}`;
-
-            const saleItems = cartItems.map(item => ({
-                product_id: item.product.id,
-                product_name: item.product.name,
-                quantity: item.quantity,
-                price: item.product.price
-            }));
-
-            try {
-                await api.post('/sales/', {
-                    total_amount: total,
-                    payment_method: paymentMethod,
-                    items: saleItems
-                });
-                await api.post('/cash-movements/', {
-                    type: 'Entrada',
-                    amount: total,
-                    description,
-                    payment_method: paymentMethod
-                });
-                
-                await loadProducts();
-                await loadCashMovements();
-                
-                setCartItems([]);
-                setMessage('✅ Venta registrada con éxito, stock actualizado y entrada de caja registrada.');
-            } catch (err) {
-                console.error('Error registrando venta:', err);
-                setMessage('❌ No se pudo registrar la venta en el servidor.');
-            }
-        };
-
-        const handleRegisterMovement = async (e) => {
-            e.preventDefault();
-            const amount = parseFloat(newMovement.amount);
-            const currentBalance = cashMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : -m.amount), 0);
-
-            if (newMovement.type === 'Salida' && amount > currentBalance) {
-                setMessage(' Saldo insuficiente para registrar esta salida.');
-                return;
-            }
-
-            const payload = {
-                type: newMovement.type,
-                amount,
-                description: newMovement.description,
-            };
-
-            try {
-                await api.post('/cash-movements/', payload);
-                
-                await loadCashMovements();
-                
-                setNewMovement({ type: 'Entrada', amount: '', description: '' });
-                setShowMovementForm(false);
-                setMessage('✅ Movimiento registrado exitosamente.');
-            } catch (err) {
-                console.error('Error registrando movimiento de caja:', err);
-                setMessage('❌ No se pudo registrar el movimiento de caja.');
-            }
-        };
-        
-        const currentBalance = cashMovements.reduce((sum, m) => sum + (m.type === 'Entrada' ? m.amount : -m.amount), 0);
 
         return (
-            <div className="sales-container">
-                <h2>Registrar Venta</h2>
-                
-                <div className="tab-navigation">
-                    <button 
-                        className={`tab-button ${activeTab === 'ventas' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('ventas')}
-                    >
-                        Registrar Venta
-                    </button>
-                    <button 
-                        className={`tab-button ${activeTab === 'caja' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('caja')}
-                    >
-                        Movimientos de Caja
-                    </button>
+            <div className="min-h-screen bg-gray-50">
+                {/* Navigation Tabs */}
+                <div className="bg-white shadow-sm border-b border-gray-200">
+                    <div className="max-w-full mx-auto px-2 sm:px-4">
+                        <div className="flex space-x-4">
+                            <button
+                                onClick={() => setActiveTab('ventas')}
+                                className={`py-4 px-6 font-medium text-lg transition-all rounded-t-lg ${
+                                    activeTab === 'ventas'
+                                        ? 'text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                                style={activeTab === 'ventas' ? { backgroundColor: 'rgb(82, 150, 214)' } : {}}
+                            >
+                                Registrar Venta
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('caja')}
+                                className={`py-4 px-6 font-medium text-lg transition-all rounded-t-lg ${
+                                    activeTab === 'caja'
+                                        ? 'text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                                style={activeTab === 'caja' ? { backgroundColor: 'rgb(82, 150, 214)' } : {}}
+                            >
+                                Movimientos de Caja
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
-                {message && <p className="message">{message}</p>}
-
-                {activeTab === 'ventas' && (
-                    <div className="tab-content">
-                        <div className="product-selection">
-                            <h3>Selecciona Productos</h3>
-                            <Select
-                                options={productOptions}
-                                value={selectedProduct}
-                                onChange={setSelectedProduct}
-                                placeholder="Buscar producto..."
-                                isClearable
-                                className="searchable-select"
-                            />
-                            <input
-                                type="number"
-                                value={quantity}
-                                onChange={(e) => setQuantity(parseInt(e.target.value, 10))}
-                                min="1"
-                            />
-                            <button onClick={addToCart} className="action-button primary">Agregar al Carrito</button>
-                        </div>
-                        <div className="cart-summary">
-                            <h3>Resumen de Venta</h3>
-                            <ul className="list-container">
-                                {cartItems.map(item => (
-                                    <li key={item.product.id} className="list-item">
-                                        <span>{item.product.name}</span>
-                                        <input
-                                            type="number"
-                                            value={item.quantity}
-                                            onChange={(e) => updateQuantity(item.product.id, parseInt(e.target.value, 10))}
-                                            min="1"
-                                        />
-                                        <span>${(item.product.price * item.quantity).toFixed(2)}</span>
-                                        <button onClick={() => removeFromCart(item.product.id)} className="delete-button">Quitar</button>
-                                    </li>
-                                ))}
-                            </ul>
-                            <div className="form-group">
-                                <label>Método de Pago:</label>
-                                <select 
-                                    value={paymentMethod} 
-                                    onChange={e => setPaymentMethod(e.target.value)} 
-                                    required
-                                >
-                                    <option value="">Seleccionar método de pago</option>
-                                    <option value="efectivo">Efectivo</option>
-                                    <option value="debito">Débito</option>
-                                    <option value="credito">Crédito</option>
-                                    <option value="transferencia">Transferencia</option>
-                                </select>
-                            </div>
-                            <div className="total-display">
-                                <strong>Total: ${total.toFixed(2)}</strong>
-                            </div>
-                            <button className="checkout-button" onClick={handleRegisterSale} disabled={cartItems.length === 0}>
-                                Confirmar Venta
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === 'caja' && (
-                    <div className="tab-content">
-                        <div className="balance-display">
-                            <h3>Saldo Actual de Caja</h3>
-                            <div className={`balance-amount ${currentBalance >= 0 ? 'positive' : 'negative'}`}>
-                                ${safeToFixed(currentBalance)}
-                            </div>
-                        </div>
-                        
-                        {!showMovementForm ? (
-                            <button className="main-button" onClick={() => setShowMovementForm(true)}>
-                                Registrar Nuevo Movimiento
-                            </button>
-                        ) : (
-                            <form className="form-container" onSubmit={handleRegisterMovement}>
-                                <h3>Nuevo Movimiento</h3>
-                                <select value={newMovement.type} onChange={e => setNewMovement({ ...newMovement, type: e.target.value })} required>
-                                    <option value="Entrada">Entrada</option>
-                                    <option value="Salida">Salida</option>
-                                </select>
-                                <input type="number" value={newMovement.amount} onChange={e => setNewMovement({ ...newMovement, amount: e.target.value })} placeholder="Monto" required />
-                                <textarea value={newMovement.description} onChange={e => setNewMovement({ ...newMovement, description: e.target.value })} placeholder="Descripción (ej: Gasto de limpieza)" required />
-                                <div className="button-group">
-                                    <button type="submit" className="action-button primary">Registrar</button>
-                                    <button type="button" className="action-button secondary" onClick={() => setShowMovementForm(false)}>Cancelar</button>
-                                </div>
-                            </form>
-                        )}
-                        
-                        <h3>Historial de Movimientos</h3>
-                        <div style={{ marginBottom: '1em' }}>
-                            <label htmlFor="cashSortOrder">Orden:&nbsp;</label>
-                            <select
-                                id="cashSortOrder"
-                                value={cashSortOrder}
-                                onChange={e => setCashSortOrder(e.target.value)}
-                            >
-                                <option value="desc">Descendente (más nuevos primero)</option>
-                                <option value="asc">Ascendente (más viejos primero)</option>
-                            </select>
-                        </div>
-                        <ul className="list-container">
-                            {[...cashMovements].sort((a, b) => {
-                                const dateA = new Date(a.date);
-                                const dateB = new Date(b.date);
-                                return cashSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
-                            }).map(movement => (
-                                <li key={movement.id} className="list-item">
-                                    <span>{formatMovementDate(movement.date)} - {movement.description} {movement.payment_method && `(${movement.payment_method})`}</span>
-                                    <span className={movement.type === 'Entrada' ? 'positive' : 'negative'}>
-                                        {movement.type === 'Entrada' ? '+' : '-'} ${movement.amount}
-                                    </span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
+                {/* Content Area */}
+                <div className="max-w-full mx-auto px-2 sm:px-4 py-4">
+                    {activeTab === 'ventas' && (
+                        <Registrar_Venta 
+                            products={products}
+                            loadProducts={loadProducts}
+                            loadCashMovements={loadCashMovements}
+                        />
+                    )}
+                    
+                    {activeTab === 'caja' && (
+                        <Movimientos_De_Caja 
+                            cashMovements={cashMovements}
+                        />
+                    )}
+                </div>
             </div>
         );
     };
@@ -2542,33 +2509,34 @@ const App = () => {
                         <h2>Crear Productos Nuevos</h2>
                     </div>
                     {message && <p className="message">{message}</p>}
-                    <p>Crea nuevos productos e insumos. Los productos creados aparecerán automáticamente en la sección "Inventario" y "Editar Productos".</p>
+                    <p className='Parrafo'>Crea nuevos productos e insumos. Los productos creados aparecerán automáticamente en la sección "Inventario" y "Editar Productos".</p>
                     
                     <h3>Agregar nuevo producto</h3>
                     <form className="form-container" onSubmit={handleCreateProduct}>
-                        <input 
-                            type="text" 
-                            value={newProduct.name} 
-                            onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} 
-                            placeholder="Nombre del Producto *" 
-                            required 
-                        />
-                        <textarea 
-                            value={newProduct.description} 
-                            onChange={e => setNewProduct({ ...newProduct, description: e.target.value })} 
-                            placeholder="Descripción del producto (opcional)"
-                            rows="3"
-                        />
+                        <div className="form-row">
+                            <div className="form-group">
+                                <label>Nombre del Producto *</label>
+                                <input 
+                                    type="text" 
+                                    value={newProduct.name} 
+                                    onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} 
+                                    placeholder="Nombre del Producto *" 
+                                    required 
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>Descripción del Producto</label>
+                                <textarea 
+                                    value={newProduct.description} 
+                                    onChange={e => setNewProduct({ ...newProduct, description: e.target.value })} 
+                                    placeholder="Descripción del producto (opcional)"
+                                    rows="3"
+                                />
+                            </div>
+                        </div>
+                       
                         
-                        <p>Categoría</p>
-                        <select 
-                            value={newProduct.category} 
-                            onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
-                            required
-                        >
-                            <option value="Producto">Producto</option>
-                            <option value="Insumo">Insumo</option>
-                        </select>
+                        
 
                         <p>Unidad de Medida</p>
                         <select 
@@ -2682,6 +2650,18 @@ const App = () => {
                 products: '' 
             });
             const [message, setMessage] = useState('');
+            
+            // Estados de filtros (copiados de DataConsultation.js)
+            const [suppliersNameFilter, setSuppliersNameFilter] = useState('');
+            const [suppliersNameFilterOp, setSuppliersNameFilterOp] = useState('contains');
+            const [suppliersCuitFilter, setSuppliersCuitFilter] = useState('');
+            const [suppliersCuitFilterOp, setSuppliersCuitFilterOp] = useState('contains');
+            const [suppliersPhoneFilter, setSuppliersPhoneFilter] = useState('');
+            const [suppliersPhoneFilterOp, setSuppliersPhoneFilterOp] = useState('contains');
+            const [suppliersAddressFilter, setSuppliersAddressFilter] = useState('');
+            const [suppliersAddressFilterOp, setSuppliersAddressFilterOp] = useState('contains');
+            const [suppliersProductFilter, setSuppliersProductFilter] = useState('');
+            const [suppliersProductFilterOp, setSuppliersProductFilterOp] = useState('contains');
     
             const validateCUIT = (cuit) => /^\d{11}$/.test(cuit);
             const validatePhone = (phone) => /^\d{8,}$/.test(phone);
@@ -2760,6 +2740,119 @@ const App = () => {
                 setEditingSupplier({ ...supplier });
                 setShowAddSupplier(false);
             };
+            
+            // Lógica de filtrado (copiada de DataConsultation.js)
+            const getFilteredSuppliers = () => {
+                let filteredSuppliers = suppliers;
+
+                // 1. Filtro de nombre (independiente)
+                if (suppliersNameFilter.trim()) {
+                    filteredSuppliers = filteredSuppliers.filter(supplier => {
+                        const name = String(supplier.name || '').toLowerCase();
+                        const filterValue = suppliersNameFilter.toLowerCase();
+                        
+                        switch (suppliersNameFilterOp) {
+                            case 'equals':
+                                return name === filterValue;
+                            case 'contains':
+                                return name.includes(filterValue);
+                            default:
+                                return name.includes(filterValue);
+                        }
+                    });
+                }
+
+                // 2. Filtro de CUIT (independiente)
+                if (suppliersCuitFilter.trim()) {
+                    filteredSuppliers = filteredSuppliers.filter(supplier => {
+                        const cuit = String(supplier.cuit || '').toLowerCase();
+                        const filterValue = suppliersCuitFilter.toLowerCase();
+                        
+                        switch (suppliersCuitFilterOp) {
+                            case 'equals':
+                                return cuit === filterValue;
+                            case 'contains':
+                                return cuit.includes(filterValue);
+                            default:
+                                return cuit.includes(filterValue);
+                        }
+                    });
+                }
+
+                // 3. Filtro de teléfono (independiente)
+                if (suppliersPhoneFilter.trim()) {
+                    filteredSuppliers = filteredSuppliers.filter(supplier => {
+                        const phone = String(supplier.phone || '').toLowerCase();
+                        const filterValue = suppliersPhoneFilter.toLowerCase();
+                        
+                        switch (suppliersPhoneFilterOp) {
+                            case 'equals':
+                                return phone === filterValue;
+                            case 'contains':
+                                return phone.includes(filterValue);
+                            default:
+                                return phone.includes(filterValue);
+                        }
+                    });
+                }
+
+                // 4. Filtro de dirección (independiente)
+                if (suppliersAddressFilter.trim()) {
+                    filteredSuppliers = filteredSuppliers.filter(supplier => {
+                        const address = String(supplier.address || '').toLowerCase();
+                        const filterValue = suppliersAddressFilter.toLowerCase();
+                        
+                        switch (suppliersAddressFilterOp) {
+                            case 'equals':
+                                return address === filterValue;
+                            case 'contains':
+                                return address.includes(filterValue);
+                            default:
+                                return address.includes(filterValue);
+                        }
+                    });
+                }
+
+                // 5. Filtro de producto/insumo (independiente)
+                if (suppliersProductFilter.trim()) {
+                    filteredSuppliers = filteredSuppliers.filter(supplier => {
+                        const filterValue = suppliersProductFilter.toLowerCase().trim();
+                        
+                        // Si products es un array, buscar en cada elemento
+                        if (Array.isArray(supplier.products)) {
+                            return supplier.products.some(product => {
+                                const productName = String(product.name || product.productName || product || '').toLowerCase().trim();
+                                
+                                switch (suppliersProductFilterOp) {
+                                    case 'equals':
+                                        return productName === filterValue;
+                                    case 'contains':
+                                        return productName.includes(filterValue);
+                                    default:
+                                        return productName.includes(filterValue);
+                                }
+                            });
+                        } else {
+                            // Si products es un string, dividir por comas y buscar en cada producto
+                            const productsStr = String(supplier.products || '');
+                            const productList = productsStr.split(',').map(p => p.toLowerCase().trim());
+                            
+                            switch (suppliersProductFilterOp) {
+                                case 'equals':
+                                    // Buscar coincidencia exacta en alguno de los productos
+                                    return productList.some(product => product === filterValue);
+                                case 'contains':
+                                    // Buscar si algún producto contiene el texto
+                                    return productList.some(product => product.includes(filterValue));
+                                default:
+                                    return productList.some(product => product.includes(filterValue));
+                            }
+                        }
+                    });
+                }
+
+                return filteredSuppliers;
+            };
 
             const renderContent = () => {
                 if (editingSupplier) {
@@ -2804,9 +2897,90 @@ const App = () => {
                     <h2>Gestión de Proveedores</h2>
                     {message && <p className="message">{message}</p>}
                     {renderContent()}
+                    
+                    {/* Filtros de Proveedores (copiados de DataConsultation.js) */}
+                    <div className="suppliers-filters" style={{marginBottom: '20px', padding: '15px', background: '#f8f9fa', borderRadius: '8px'}}>
+                        <h4 style={{marginTop: '0'}}>Filtros de Proveedores</h4>
+                        
+                        {/* Filtro de Nombre */}
+                        <div className="filter-row">
+                            <label>Nombre:</label>
+                            <select value={suppliersNameFilterOp} onChange={e => setSuppliersNameFilterOp(e.target.value)}>
+                                <option value="contains">Contiene</option>
+                                <option value="equals">Es igual</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                value={suppliersNameFilter} 
+                                onChange={e => setSuppliersNameFilter(e.target.value)} 
+                                placeholder="Nombre del proveedor..." 
+                            />
+                        </div>
+
+                        {/* Filtro de CUIT */}
+                        <div className="filter-row">
+                            <label>CUIT:</label>
+                            <select value={suppliersCuitFilterOp} onChange={e => setSuppliersCuitFilterOp(e.target.value)}>
+                                <option value="contains">Contiene</option>
+                                <option value="equals">Es igual</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                value={suppliersCuitFilter} 
+                                onChange={e => setSuppliersCuitFilter(e.target.value)} 
+                                placeholder="CUIT del proveedor..." 
+                            />
+                        </div>
+
+                        {/* Filtro de Teléfono */}
+                        <div className="filter-row">
+                            <label>Teléfono:</label>
+                            <select value={suppliersPhoneFilterOp} onChange={e => setSuppliersPhoneFilterOp(e.target.value)}>
+                                <option value="contains">Contiene</option>
+                                <option value="equals">Es igual</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                value={suppliersPhoneFilter} 
+                                onChange={e => setSuppliersPhoneFilter(e.target.value)} 
+                                placeholder="Teléfono del proveedor..." 
+                            />
+                        </div>
+
+                        {/* Filtro de Dirección */}
+                        <div className="filter-row">
+                            <label>Dirección:</label>
+                            <select value={suppliersAddressFilterOp} onChange={e => setSuppliersAddressFilterOp(e.target.value)}>
+                                <option value="contains">Contiene</option>
+                                <option value="equals">Es igual</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                value={suppliersAddressFilter} 
+                                onChange={e => setSuppliersAddressFilter(e.target.value)} 
+                                placeholder="Dirección del proveedor..." 
+                            />
+                        </div>
+
+                        {/* Filtro de Producto/Insumo */}
+                        <div className="filter-row">
+                            <label>Producto/Insumo:</label>
+                            <select value={suppliersProductFilterOp} onChange={e => setSuppliersProductFilterOp(e.target.value)}>
+                                <option value="contains">Contiene</option>
+                                <option value="equals">Es igual</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                value={suppliersProductFilter} 
+                                onChange={e => setSuppliersProductFilter(e.target.value)} 
+                                placeholder="Producto o insumo..." 
+                            />
+                        </div>
+                    </div>
+                    
                     <h3>Proveedores Registrados</h3>
                     <ul className="list-container">
-                        {suppliers.map(supplier => (
+                        {getFilteredSuppliers().map(supplier => (
                             <li key={supplier.id} className="list-item">
                                 <div className="supplier-info-container">
                                     <div><strong>{supplier.name}</strong> (CUIT: {supplier.cuit})</div>
@@ -3281,624 +3455,9 @@ const PurchaseRequests = () => {
     );
 };
     
-        // Componente de la interfaz de gestión de pedidos de clientes.
-        const OrderManagementComponent = () => {
-            const [showAddOrder, setShowAddOrder] = useState(false);
-            const [newOrder, setNewOrder] = useState({
-                customerName: '',
-                date: new Date().toISOString().split('T')[0], // Fecha actual por defecto
-                paymentMethod: '',
-                items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }],
-                notes: ''
-            });
-            const [message, setMessage] = useState('');
-            const [showAddPurchase, setShowAddPurchase] = useState(false);
-            const [confirmDelete, setConfirmDelete] = useState(null);
 
-            const calculatePurchaseTotal = () => {
-                return newOrder.items.reduce((sum, item) => sum + (item.total || 0), 0);
-            };
+    
 
-            const handleDeletePurchase = async (purchaseId) => {
-                console.warn('Attempted to delete purchase from a deprecated component.');
-            };
-
-            const handleCancelDelete = () => {
-                setConfirmDelete(null);
-            };
-    
-            // Función para agregar un nuevo item al pedido
-            const addItem = () => {
-                setNewOrder({
-                    ...newOrder,
-                    items: [...newOrder.items, { productName: '', quantity: 1, unitPrice: 0, total: 0 }]
-                });
-            };
-    
-            // Función para eliminar un item del pedido
-            const removeItem = (index) => {
-                if (newOrder.items.length > 1) {
-                    const updatedItems = newOrder.items.filter((_, i) => i !== index);
-                    setNewOrder({ ...newOrder, items: updatedItems });
-                }
-            };
-    
-            // Función para actualizar un item
-            const updateItem = (index, field, value) => {
-                const updatedItems = [...newOrder.items];
-                updatedItems[index] = { ...updatedItems[index], [field]: value };
-                
-                // Si se cambia el nombre del producto, buscar su precio en la lista de productos
-                if (field === 'productName') {
-                    const selectedProduct = products.find(p => p.name === value);
-                    if (selectedProduct) {
-                        updatedItems[index].unitPrice = selectedProduct.price;
-                        updatedItems[index].total = (updatedItems[index].quantity || 0) * selectedProduct.price;
-                    }
-                }
-                
-                // Recalcular el total del item si se cambia cantidad o precio
-                if (field === 'quantity' || field === 'unitPrice') {
-                    const quantity = field === 'quantity' ? (value || 0) : (updatedItems[index].quantity || 0);
-                    const unitPrice = field === 'unitPrice' ? (value || 0) : (updatedItems[index].unitPrice || 0);
-                    updatedItems[index].total = quantity * unitPrice;
-                }
-                
-                setNewOrder({ ...newOrder, items: updatedItems });
-            };
-
-            // Función para calcular el total del pedido
-            const calculateOrderTotal = () => {
-                return newOrder.items.reduce((sum, item) => sum + (item.total || 0), 0);
-            };
-    
-            const handleAddOrder = async (e) => {
-                e.preventDefault();
-                
-                // Validaciones
-                if (!newOrder.customerName.trim()) {
-                    setMessage('🚫 Error: Debe ingresar el nombre del cliente.');
-                    return;
-                }
-                
-                if (!newOrder.paymentMethod) {
-                    setMessage('🚫 Error: Debe seleccionar un método de pago.');
-                    return;
-                }
-                
-                // Validar que al menos un producto tenga cantidad mayor a 0 y precio válido
-                const validItems = newOrder.items.filter(item => 
-                    item.productName.trim() && item.quantity > 0 && item.unitPrice > 0
-                );
-                
-                if (validItems.length === 0) {
-                    setMessage('🚫 Error: Debe seleccionar al menos un producto con cantidad y precio válidos.');
-                    return;
-                }
-                
-                // Enviar pedido al backend para persistencia cross-browser
-                try {
-                    const payload = {
-                        customer_name: newOrder.customerName,
-                        date: newOrder.date,
-                        payment_method: newOrder.paymentMethod,
-                        items: validItems.map(i => ({ product_name: i.productName, quantity: Number(i.quantity), unit_price: Number(i.unitPrice), total: Number(i.total) })),
-                        notes: newOrder.notes
-                    };
-
-                    const res = await api.post('/orders/', payload);
-                    if (res && res.data) {
-                        // Insertar el pedido devuelto por el servidor
-                        const created = res.data;
-                        const createdNormalized = {
-                            id: created.id,
-                            date: created.created_at || created.date,
-                            customerName: created.customer_name || created.customerName || '',
-                            paymentMethod: created.payment_method || created.paymentMethod || '',
-                            items: Array.isArray(created.items) ? created.items.map(it => ({ productName: it.product_name || it.productName || '', quantity: it.quantity, unitPrice: it.unit_price || it.unitPrice || 0, total: it.total || 0 })) : [],
-                            totalAmount: created.total_amount || created.totalAmount || 0,
-                            status: created.status || 'Pendiente',
-                            notes: created.notes || ''
-                        };
-
-                        setOrders(prev => [...prev, createdNormalized]);
-                        setNewOrder({ customerName: '', date: new Date().toISOString().split('T')[0], paymentMethod: '', items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }], notes: '' });
-                        setShowAddOrder(false);
-                        setMessage('✅ Pedido de cliente registrado exitosamente.');
-                    } else {
-                        setMessage('⚠️ Pedido creado localmente, pero no se obtuvo confirmación del servidor.');
-                    }
-                } catch (err) {
-                    console.error('Error enviando pedido al backend:', err, err.response && err.response.data);
-                    setMessage('❌ Error guardando el pedido en el servidor. Revisar consola.');
-                }
-            };
-    
-            const handleUpdateOrderStatus = async (orderId, newStatus) => {
-                try {
-                    // Actualizar en el backend primero
-                    await updateOrderStatus(orderId, newStatus);
-                    
-                    // Si la llamada al backend es exitosa, actualizar el estado local
-                    setOrders(orders.map(order => 
-                        order.id === orderId 
-                            ? { ...order, status: newStatus }
-                            : order
-                    ));
-                    
-                    setMessage(`✅ Estado del pedido #${orderId} actualizado a "${newStatus}"`);
-                } catch (error) {
-                    console.error("Error actualizando estado del pedido:", error);
-                    setMessage("❌ Error al actualizar el estado del pedido. Revisa la consola.");
-                }
-            };
-    
-            return (
-                <div className="management-container">
-                    <h2>Gestión de Pedidos de Clientes</h2>
-                    {message && <p className="message">{message}</p>}
-                    {!showAddOrder ? (
-                        <button className="main-button" onClick={() => setShowAddOrder(true)}>Registrar Nuevo Pedido de Cliente</button>
-                    ) : (
-                        <form className="form-container" onSubmit={handleAddOrder}>
-                            <h3>Registrar Pedido de Cliente</h3>
-                            
-                            <input 
-                                type="text" 
-                                value={newOrder.customerName} 
-                                onChange={e => setNewOrder({ ...newOrder, customerName: e.target.value })} 
-                                placeholder="Nombre del cliente" 
-                                required
-                            />
-                            
-                            <input 
-                                type="date" 
-                                value={newOrder.date} 
-                                onChange={e => setNewOrder({ ...newOrder, date: e.target.value })} 
-                                required
-                            />
-                            
-                            <select 
-                                value={newOrder.paymentMethod} 
-                                onChange={e => setNewOrder({ ...newOrder, paymentMethod: e.target.value })} 
-                                required
-                            >
-                                <option value="">Seleccionar método de pago</option>
-                                <option value="efectivo">Efectivo</option>
-                                <option value="debito">Débito</option>
-                                <option value="credito">Crédito</option>
-                                <option value="transferencia">Transferencia</option>
-                            </select>
-                            
-                            <h4>Productos del Pedido</h4>
-                            
-                            {newOrder.items.map((item, index) => (
-                                <div key={index} className="order-item">
-                                    <div className="item-row">
-                                        <input 
-                                            type="text" 
-                                            value={item.productName} 
-                                            onChange={e => updateItem(index, 'productName', e.target.value)} 
-                                            placeholder="Nombre del producto" 
-                                            list="products-list"
-                                            required
-                                        />
-                                        <datalist id="products-list">
-                                            {products.map((product, idx) => (
-                                                <option key={idx} value={product.name} />
-                                            ))}
-                                        </datalist>
-                                        <input 
-                                            type="number" 
-                                            value={item.quantity || ''} 
-                                            onChange={e => {
-                                                const value = e.target.value === '' ? 0 : parseInt(e.target.value);
-                                                updateItem(index, 'quantity', isNaN(value) ? 0 : value);
-                                            }}
-                                            placeholder="Cantidad" 
-                                            min="1"
-                                            required 
-                                        />
-                                        <input 
-                                            type="number" 
-                                            value={item.unitPrice || ''} 
-                                            onChange={e => {
-                                                const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                                updateItem(index, 'unitPrice', isNaN(value) ? 0 : value);
-                                            }}
-                                            placeholder="Precio Unitario" 
-                                            min="0.01"
-                                            step="0.01"
-                                            required 
-                                        />
-                                        <span className="item-total">${safeToFixed(item.total)}</span>
-                                        {newOrder.items.length > 1 && (
-                                            <button 
-                                                type="button" 
-                                                onClick={() => removeItem(index)}
-                                                className="remove-item-button"
-                                            >
-                                                ❌
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                            
-                            <button type="button" onClick={addItem} className="add-item-button">
-                                ➕ Agregar Producto
-                            </button>
-                            
-                            <div className="purchase-total">
-                                <strong>Total de la Compra: ${safeToFixed(calculatePurchaseTotal())}</strong>
-                            </div>
-                            
-                            <div className="button-group">
-                                <button type="submit" className="action-button primary">Registrar Compra</button>
-                                <button type="button" className="action-button secondary" onClick={() => setShowAddPurchase(false)}>Cancelar</button>
-                            </div>
-                        </form>
-                    )}
-    
-                    <h3>Historial de Compras</h3>
-                    <ul className="list-container">
-                        {purchases.map(purchase => (
-                            <li key={purchase.id} className="purchase-list-item">
-                                <div className="purchase-header">
-                                    <strong>Compra #{purchase.id} - {purchase.date}</strong>
-                                    <div className="purchase-actions">
-                                        <span className="purchase-status">{purchase.status}</span>
-                                        {userRole === 'Gerente' && (
-                                            <div className="delete-controls">
-                                                {confirmDelete === purchase.id ? (
-                                                    <div className="confirm-delete">
-                                                        <button 
-                                                            className="action-button danger small"
-                                                            onClick={() => handleDeletePurchase(purchase.id)}
-                                                        >
-                                                            ✓ Confirmar
-                                                        </button>
-                                                        <button 
-                                                            className="action-button secondary small"
-                                                            onClick={handleCancelDelete}
-                                                        >
-                                                            ✕ Cancelar
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <button 
-                                                        className="action-button danger small"
-                                                        onClick={() => handleDeletePurchase(purchase.id)}
-                                                    >
-                                                        🗑️ Eliminar
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="purchase-supplier">
-                                    <strong>Proveedor:</strong> {purchase.supplierName}
-                                </div>
-                                <div className="purchase-items">
-                                    <strong>Productos:</strong>
-                                    <ul>
-                                        {purchase.items.map((item, index) => (
-                                            <li key={index}>
-                                                {item.productName} - {item.quantity} x ${item.unitPrice} = ${safeToFixed(item.total)}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                                <div className="purchase-total-display">
-                                    <strong>Total: ${safeToFixed(purchase.totalAmount)}</strong>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            );
-        };
-    
-        // Componente de la interfaz de gestión de pedidos de clientes (solo para Gerente).
-        const OrderManagement = () => {
-            const [showAddOrder, setShowAddOrder] = useState(false);
-            const [newOrder, setNewOrder] = useState({
-                customerName: '',
-                date: new Date().toISOString().split('T')[0], // Fecha actual por defecto
-                paymentMethod: '',
-                items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }],
-                notes: ''
-            });
-            const [message, setMessage] = useState('');
-    
-            // Función para agregar un nuevo item al pedido
-            const addItem = () => {
-                setNewOrder({
-                    ...newOrder,
-                    items: [...newOrder.items, { productName: '', quantity: 1, unitPrice: 0, total: 0 }]
-                });
-            };
-    
-            // Función para eliminar un item del pedido
-            const removeItem = (index) => {
-                if (newOrder.items.length > 1) {
-                    const updatedItems = newOrder.items.filter((_, i) => i !== index);
-                    setNewOrder({ ...newOrder, items: updatedItems });
-                }
-            };
-    
-            // Función para actualizar un item
-            const updateItem = (index, field, value) => {
-                const updatedItems = [...newOrder.items];
-                updatedItems[index] = { ...updatedItems[index], [field]: value };
-                
-                // Si se cambia el nombre del producto, buscar su precio en la lista de productos
-                if (field === 'productName') {
-                    const selectedProduct = products.find(p => p.name === value);
-                    if (selectedProduct) {
-                        updatedItems[index].unitPrice = selectedProduct.price;
-                        updatedItems[index].total = (updatedItems[index].quantity || 0) * selectedProduct.price;
-                    }
-                }
-                
-                // Recalcular el total del item si se cambia cantidad o precio
-                if (field === 'quantity' || field === 'unitPrice') {
-                    const quantity = field === 'quantity' ? (value || 0) : (updatedItems[index].quantity || 0);
-                    const unitPrice = field === 'unitPrice' ? (value || 0) : (updatedItems[index].unitPrice || 0);
-                    updatedItems[index].total = quantity * unitPrice;
-                }
-                
-                setNewOrder({ ...newOrder, items: updatedItems });
-            };
-
-            // Función para calcular el total del pedido
-            const calculateOrderTotal = () => {
-                return newOrder.items.reduce((sum, item) => sum + (item.total || 0), 0);
-            };
-    
-            const handleAddOrder = async (e) => {
-                e.preventDefault();
-                
-                // Validaciones
-                if (!newOrder.customerName.trim()) {
-                    setMessage('🚫 Error: Debe ingresar el nombre del cliente.');
-                    return;
-                }
-                
-                if (!newOrder.paymentMethod) {
-                    setMessage('🚫 Error: Debe seleccionar un método de pago.');
-                    return;
-                }
-                
-                // Validar que al menos un producto tenga cantidad mayor a 0 y precio válido
-                const validItems = newOrder.items.filter(item => 
-                    item.productName.trim() && item.quantity > 0 && item.unitPrice > 0
-                );
-                
-                if (validItems.length === 0) {
-                    setMessage('🚫 Error: Debe seleccionar al menos un producto con cantidad y precio válidos.');
-                    return;
-                }
-                
-                // Enviar pedido al backend para persistencia cross-browser
-                try {
-                    const payload = {
-                        customer_name: newOrder.customerName,
-                        date: newOrder.date,
-                        payment_method: newOrder.paymentMethod,
-                        items: validItems.map(i => ({ product_name: i.productName, quantity: Number(i.quantity), unit_price: Number(i.unitPrice), total: Number(i.total) })),
-                        notes: newOrder.notes
-                    };
-
-                    const res = await api.post('/orders/', payload);
-                    if (res && res.data) {
-                        // Insertar el pedido devuelto por el servidor
-                        const created = res.data;
-                        const createdNormalized = {
-                            id: created.id,
-                            date: created.created_at || created.date,
-                            customerName: created.customer_name || created.customerName || '',
-                            paymentMethod: created.payment_method || created.paymentMethod || '',
-                            items: Array.isArray(created.items) ? created.items.map(it => ({ productName: it.product_name || it.productName || '', quantity: it.quantity, unitPrice: it.unit_price || it.unitPrice || 0, total: it.total || 0 })) : [],
-                            totalAmount: created.total_amount || created.totalAmount || 0,
-                            status: created.status || 'Pendiente',
-                            notes: created.notes || ''
-                        };
-
-                        setOrders(prev => [...prev, createdNormalized]);
-                        setNewOrder({ customerName: '', date: new Date().toISOString().split('T')[0], paymentMethod: '', items: [{ productName: '', quantity: 1, unitPrice: 0, total: 0 }], notes: '' });
-                        setShowAddOrder(false);
-                        setMessage('✅ Pedido de cliente registrado exitosamente.');
-                    } else {
-                        setMessage('⚠️ Pedido creado localmente, pero no se obtuvo confirmación del servidor.');
-                    }
-                } catch (err) {
-                    console.error('Error enviando pedido al backend:', err, err.response && err.response.data);
-                    setMessage('❌ Error guardando el pedido en el servidor. Revisar consola.');
-                }
-            };
-    
-            const handleUpdateOrderStatus = async (orderId, newStatus) => {
-                try {
-                    // Actualizar en el backend primero
-                    await updateOrderStatus(orderId, newStatus);
-                    
-                    // Si la llamada al backend es exitosa, actualizar el estado local
-                    setOrders(orders.map(order => 
-                        order.id === orderId 
-                            ? { ...order, status: newStatus }
-                            : order
-                    ));
-                    
-                    setMessage(`✅ Estado del pedido #${orderId} actualizado a "${newStatus}"`);
-                } catch (error) {
-                    console.error("Error actualizando estado del pedido:", error);
-                    setMessage("❌ Error al actualizar el estado del pedido. Revisa la consola.");
-                }
-            };
-    
-            return (
-                <div className="management-container">
-                    <h2>Gestión de Pedidos de Clientes</h2>
-                    {message && <p className="message">{message}</p>}
-                    {!showAddOrder ? (
-                        <button className="main-button" onClick={() => setShowAddOrder(true)}>Registrar Nuevo Pedido de Cliente</button>
-                    ) : (
-                        <form className="form-container" onSubmit={handleAddOrder}>
-                            <h3>Registrar Pedido de Cliente</h3>
-                            
-                            <input 
-                                type="text" 
-                                value={newOrder.customerName} 
-                                onChange={e => setNewOrder({ ...newOrder, customerName: e.target.value })} 
-                                placeholder="Nombre del cliente" 
-                                required
-                            />
-                            
-                            <input 
-                                type="date" 
-                                value={newOrder.date} 
-                                onChange={e => setNewOrder({ ...newOrder, date: e.target.value })} 
-                                required
-                            />
-                            
-                            <select 
-                                value={newOrder.paymentMethod} 
-                                onChange={e => setNewOrder({ ...newOrder, paymentMethod: e.target.value })} 
-                                required
-                            >
-                                <option value="">Seleccionar método de pago</option>
-                                <option value="efectivo">Efectivo</option>
-                                <option value="debito">Débito</option>
-                                <option value="credito">Crédito</option>
-                                <option value="transferencia">Transferencia</option>
-                            </select>
-                            
-                            <h4>Productos del Pedido</h4>
-                            
-                            {newOrder.items.map((item, index) => (
-                                <div key={index} className="order-item">
-                                    <div className="item-row">
-                                        <Select
-                                            options={products.filter(p => !p.is_ingredient && p.category === 'Producto').map(p => ({ value: p.name, label: p.name }))}
-                                            value={products.filter(p => !p.is_ingredient && p.category === 'Producto').map(p => ({ value: p.name, label: p.name })).find(opt => opt.value === item.productName) || null}
-                                            onChange={selectedOption => updateItem(index, 'productName', selectedOption ? selectedOption.value : '')}
-                                            placeholder="Buscar y seleccionar producto..."
-                                            isClearable
-                                        />
-                                        <input 
-                                            type="number" 
-                                            value={item.quantity || ''} 
-                                            onChange={e => {
-                                                const value = e.target.value === '' ? 0 : parseInt(e.target.value);
-                                                updateItem(index, 'quantity', isNaN(value) ? 0 : value);
-                                            }}
-                                            placeholder="Cantidad" 
-                                            min="1"
-                                            required 
-                                        />
-                                        <input 
-                                            type="number" 
-                                            value={item.unitPrice || ''} 
-                                            onChange={e => {
-                                                const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                                updateItem(index, 'unitPrice', isNaN(value) ? 0 : value);
-                                            }}
-                                            placeholder="Precio Unitario" 
-                                            min="0.01"
-                                            step="0.01"
-                                            required 
-                                        />
-                                        <span className="item-total">${safeToFixed(item.total)}</span>
-                                        {newOrder.items.length > 1 && (
-                                            <button 
-                                                type="button" 
-                                                onClick={() => removeItem(index)}
-                                                className="remove-item-button"
-                                            >
-                                                ❌
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                            
-                            <button type="button" onClick={addItem} className="add-item-button">
-                                ➕ Agregar Producto
-                            </button>
-                            
-                            <textarea 
-                                value={newOrder.notes} 
-                                onChange={e => setNewOrder({ ...newOrder, notes: e.target.value })} 
-                                placeholder="Notas adicionales del pedido" 
-                            />
-                            
-                            <div className="purchase-total">
-                                <strong>Total del Pedido: ${safeToFixed(calculateOrderTotal())}</strong>
-                            </div>
-                            
-                            <div className="button-group">
-                                <button type="submit" className="action-button primary">Registrar Pedido</button>
-                                <button type="button" className="action-button secondary" onClick={() => setShowAddOrder(false)}>Cancelar</button>
-                            </div>
-                        </form>
-                    )}
-    
-                    <h3>Historial de Pedidos de Clientes</h3>
-                    <ul className="list-container">
-                        {orders.map(order => (
-                            <li key={order.id} className="order-list-item">
-                                    <div className="order-header">
-                                        <strong>Pedido #{order.id} - {formatMovementDate(order.date)}</strong>
-                                    <div className="order-status-controls">
-                                        <span className={`order-status ${order.status.toLowerCase()}`}>
-                                            {order.status}
-                                        </span>
-                                        <select 
-                                            value={order.status} 
-                                            onChange={e => handleUpdateOrderStatus(order.id, e.target.value)}
-                                            className="status-select"
-                                        >
-                                            <option value="Pendiente">Pendiente</option>
-                                            <option value="En Preparación">En Preparación</option>
-                                            <option value="Listo">Listo</option>
-                                            <option value="Entregado">Entregado</option>
-                                            <option value="Cancelado">Cancelado</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="order-customer">
-                                    <strong>Cliente:</strong> {order.customerName}
-                                </div>
-                                <div className="order-payment">
-                                    <strong>Método de Pago:</strong> {order.paymentMethod}
-                                </div>
-                                <div className="order-items">
-                                    <strong>Productos solicitados:</strong>
-                                    <ul>
-                                        {order.items.map((item, index) => (
-                                            <li key={index}>
-                                                {item.productName} - {item.quantity || 0} unidades 
-                                                x ${safeToFixed(item.unitPrice)} = ${safeToFixed(item.total)}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                                <div className="order-total-display">
-                                    <strong>Total: ${safeToFixed(order.totalAmount)}</strong>
-                                </div>
-                                {order.notes && (
-                                    <div className="order-notes">
-                                        <strong>Notas:</strong> {order.notes}
-                                    </div>
-                                )}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            );
-        };
     
         // Mapeo de traducción para encabezados de tablas
         const headerTranslationMap = {
@@ -3970,6 +3529,7 @@ const PurchaseRequests = () => {
             const [message, setMessage] = useState('');
             const [confirmDelete, setConfirmDelete] = useState(false);
             const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
+            const [showLoadingMessage, setShowLoadingMessage] = useState(false);
             
             // Estados para manejo de recetas
             const [recipeIngredients, setRecipeIngredients] = useState([]);
@@ -3983,11 +3543,39 @@ const PurchaseRequests = () => {
 
             // Cargar ingredientes disponibles al montar el componente
             useEffect(() => {
+                // Limpiar mensaje al montar el componente
+                setMessage('');
+                // Al montar el componente, no mostrar loading message inicialmente
+                setShowLoadingMessage(false);
                 loadAvailableIngredients();
                 // Después del primer render, marcar como no primera vez
-                const timer = setTimeout(() => setIsFirstRender(false), 100);
+                const timer = setTimeout(() => setIsFirstRender(false), 300);
                 return () => clearTimeout(timer);
             }, []);
+
+            // Limpiar mensajes automáticamente después de 5 segundos
+            useEffect(() => {
+                if (message && !message.includes('⚠️') && !message.includes('¿Estás seguro')) {
+                    const timer = setTimeout(() => {
+                        setMessage('');
+                    }, 1);
+                    return () => clearTimeout(timer);
+                }
+            }, [message]);
+
+            // Controlar cuándo mostrar el mensaje de carga con delay mínimo
+            useEffect(() => {
+                if (isLoading && !isFirstRender) {
+                    // Solo mostrar el mensaje después de 5ms (imperceptible) y NO en el primer render
+                    const timer = setTimeout(() => {
+                        setShowLoadingMessage(true);
+                    }, 5);
+                    return () => clearTimeout(timer);
+                } else {
+                    // Si no está cargando o es el primer render, ocultar inmediatamente
+                    setShowLoadingMessage(false);
+                }
+            }, [isLoading, isFirstRender]);
 
             // Filtrar productos basado en el término de búsqueda
             useEffect(() => {
@@ -4528,8 +4116,8 @@ const PurchaseRequests = () => {
                                 return null;
                             }
                             
-                            // Si está cargando productos, mostrar indicador de carga
-                            if (isLoading) {
+                            // Si debe mostrar mensaje de carga (con delay) Y no es la primera carga, mostrar indicador
+                            if (showLoadingMessage && !isFirstRender) {
                                 return <p className="no-products">Cargando productos...</p>;
                             }
                             
@@ -5024,7 +4612,11 @@ const PurchaseRequests = () => {
                     ProductCreationViewComponent={ProductCreationViewComponent}
                 /> : <ProductCreationViewComponent />;
             case 'gestión de usuarios':
-                return userRole === 'Gerente' ? <UserManagement /> : <div>Acceso Denegado</div>;
+                return <UserManagement 
+                    users={users}
+                    loadUsers={loadUsers}
+                    userRole={userRole}
+                />;
             // legacy token generation view removed
             case 'proveedores':
                 return userRole === 'Gerente' ? <SupplierManagement /> : <div>Acceso Denegado</div>;
@@ -5040,7 +4632,9 @@ const PurchaseRequests = () => {
                         reloadProducts={loadProducts}
                     /> : <div>Acceso Denegado</div>;
             case 'pedidos':
-                return userRole === 'Gerente' ? <OrderManagement /> : <div>Acceso Denegado</div>;
+                return userRole === 'Gerente' ? (
+                    <Pedidos orders={orders} setOrders={setOrders} products={products} />
+                ) : <div>Acceso Denegado</div>;
             case 'consultas':
                 return <DataConsultation 
                     api={api}
@@ -5058,7 +4652,7 @@ const PurchaseRequests = () => {
             case 'datos de mi usuario':
                 return <MyUserData />;
             case 'editar productos':
-                return userRole === 'Gerente' ? <EditNewProducts /> : <div>Acceso Denegado</div>;
+                return userRole === 'Gerente' ? <EditNewProducts/> : <div>Acceso Denegado</div>;
             case 'reportar faltantes':
                 return <LowStockReport />;
             case 'ver reportes de faltantes':
@@ -5091,7 +4685,7 @@ const PurchaseRequests = () => {
                         const retryToken = getInMemoryToken();
             if (retryToken && isLoggedIn) {
               loadUsers();
-              loadProducts();
+              loadProducts(false); // Carga silenciosa en retry
               console.log('🔐 Usuario logueado - cargando usuarios y productos del servidor (retry)');
             }
           }, 200);
@@ -5100,7 +4694,7 @@ const PurchaseRequests = () => {
         
         // Cargar datos del servidor
         loadUsers();
-        loadProducts();
+        loadProducts(false); // Carga silenciosa al hacer login
         console.log('🔐 Usuario logueado - cargando usuarios y productos del servidor');
       }
     }, [isLoggedIn]);
@@ -5152,7 +4746,7 @@ const PurchaseRequests = () => {
           const recentInteraction = now - lastInteraction < 120000; // 2 minutos
           
           if (!isTyping && !hasOpenForms && !recentInteraction && !(isInConsultationPage && hasQueryResults)) {
-            loadProducts();
+            loadProducts(false); // Sincronización silenciosa automática
             // Sincronización automática de productos
           } else {
             console.log('⏸️ Sincronización pausada - usuario activo:', {
@@ -5236,7 +4830,7 @@ const PurchaseRequests = () => {
             const now = Date.now();
             
             if (now - lastSync > 30000) { // 30 segundos
-              loadProducts();
+              loadProducts(false); // false = no mostrar mensaje de carga
               window.lastFocusSync = now;
               console.log('👁️ Ventana enfocada - sincronizando productos (sin formularios abiertos)');
             } else {
@@ -5274,7 +4868,7 @@ const PurchaseRequests = () => {
             const now = Date.now();
             
             if (now - lastSync > 30000) { // 30 segundos
-              loadProducts();
+              loadProducts(false); // Sincronización silenciosa
               window.lastVisibilitySync = now;
               console.log('👁️ Pestaña visible - sincronizando productos (sin formularios abiertos)');
             }
@@ -5313,6 +4907,20 @@ const PurchaseRequests = () => {
                 Evita que la barra azul aparezca en la pantalla de inicio de sesión. */}
             {isLoggedIn && !['forgot-password', 'login'].includes(currentPage) && <Navbar />}
             {renderPage()}
+            
+            {/* Diálogo de Pedidos */}
+            {isPedDialogoOpen && (
+                <PedDialogo
+                    orders={orders}
+                    setOrders={setOrders}
+                    isOpen={isPedDialogoOpen}
+                    onClose={handleClosePedDialogo}
+                    onMinimize={handleMinimizePedDialogo}
+                    isMinimized={isPedDialogoMinimized}
+                    onOpenNewTab={handleOpenPedDialogoNewTab}
+                    isFullscreen={isPedDialogoFullscreen}
+                />
+            )}
         </div>
     );
     } catch (error) {

@@ -298,14 +298,24 @@ def login_view(request):
         # Verificar si la cuenta está bloqueada (con manejo de campos que pueden no existir)
         try:
             if hasattr(user, 'is_locked') and user.is_locked:
+                # Refrescar desde la BD para asegurar que tenemos el valor más reciente
+                user.refresh_from_db()
                 failed_attempts = getattr(user, 'failed_login_attempts', 5)
+                lock_type = getattr(user, 'lock_type', None)
+                print(f"🔍 DEBUG - Usuario: {user.username}, is_locked: {user.is_locked}, lock_type RAW: '{lock_type}' (tipo: {type(lock_type)})")
+                # Asegurar que lock_type nunca sea None
+                if lock_type is None or lock_type == '':
+                    print(f"⚠️ lock_type era None/vacío, cambiando a 'automatic'")
+                    lock_type = 'automatic'
+                print(f"📤 Enviando lock_type al frontend: '{lock_type}'")
                 return Response({
                     'success': False,
                     'error': {
                         'code': 'account_locked',
                         'message': 'La cuenta está bloqueada por múltiples intentos fallidos. Contacte al administrador.',
                         'failed_attempts': failed_attempts,
-                        'max_attempts': 5
+                        'max_attempts': 5,
+                        'lock_type': lock_type
                     }
                 }, status=status.HTTP_403_FORBIDDEN)
         except AttributeError:
@@ -327,6 +337,8 @@ def login_view(request):
                             user.is_locked = True
                         if hasattr(user, 'locked_at'):
                             user.locked_at = timezone.now()
+                        if hasattr(user, 'lock_type'):
+                            user.lock_type = 'automatic'
                     
                     # Construir lista de campos que realmente existen
                     fields_to_update = []
@@ -336,6 +348,8 @@ def login_view(request):
                         fields_to_update.append('is_locked')
                     if hasattr(user, 'locked_at'):
                         fields_to_update.append('locked_at')
+                    if hasattr(user, 'lock_type'):
+                        fields_to_update.append('lock_type')
                     
                     if fields_to_update:
                         user.save(update_fields=fields_to_update)
@@ -787,9 +801,28 @@ class UserViewSet(viewsets.ModelViewSet):
         user.is_locked = False
         user.failed_login_attempts = 0
         user.locked_at = None
-        user.save()
+        user.lock_type = None
+        user.save(update_fields=['is_locked', 'failed_login_attempts', 'locked_at', 'lock_type'])
+        print(f"🔓 Usuario desbloqueado: {user.username}, is_locked={user.is_locked}, lock_type={user.lock_type}")
         return Response({
             'message': f'Usuario {user.username} desbloqueado correctamente.',
+            'user': UserSerializer(user).data
+        }, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['post'], permission_classes=[IsGerente])
+    def lock(self, request, pk=None):
+        """
+        Bloquea manualmente un usuario.
+        Solo accesible por Gerentes.
+        """
+        user = self.get_object()
+        user.is_locked = True
+        user.locked_at = timezone.now()
+        user.lock_type = 'manual'
+        user.save(update_fields=['is_locked', 'locked_at', 'lock_type'])
+        print(f"🔒 Usuario bloqueado: {user.username}, lock_type={user.lock_type}")
+        return Response({
+            'message': f'Usuario {user.username} bloqueado correctamente.',
             'user': UserSerializer(user).data
         }, status=status.HTTP_200_OK)
 
@@ -1820,8 +1853,8 @@ class ExportDataView(APIView):
         
         
     def _generate_inventory_table(self, data):
-        # Encabezados igual que la interfaz gráfica
-        table_data = [['Producto/Insumo', 'Stock', 'Tipo', 'Precio', 'Estado']]
+        # Encabezados igual que la interfaz gráfica, incluyendo ID
+        table_data = [['ID', 'Producto/Insumo', 'Stock', 'Tipo', 'Precio', 'Estado']]
         for item in data:
             precio = item.get('price')
             # Si el precio es None, mostrar vacío, si no, formatear con dos decimales
@@ -1833,6 +1866,7 @@ class ExportDataView(APIView):
             else:
                 precio_str = ''
             table_data.append([
+                str(item.get('id', '')),
                 item.get('name', ''),
                 str(item.get('stock', 0)),
                 item.get('type', ''),

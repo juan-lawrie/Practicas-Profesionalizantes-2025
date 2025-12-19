@@ -124,6 +124,9 @@ export default function DataConsultation(props) {
     const [purchasesDateToMinute, setPurchasesDateToMinute] = useState('');
     const [purchasesTypeFilter, setPurchasesTypeFilter] = useState([]); // Array de tipos: Producto, Insumo, Mixto
     const [purchasesProductFilter, setPurchasesProductFilter] = useState(''); // Búsqueda por nombre de producto/insumo
+    const [purchasesQuantityFilter, setPurchasesQuantityFilter] = useState(''); // Filtro por cantidad
+    const [purchasesQuantityFilterOp, setPurchasesQuantityFilterOp] = useState('equals'); // Operador para cantidad
+    const [purchasesQuantityUnit, setPurchasesQuantityUnit] = useState('Kg'); // Unidad para cantidad
     
     // Filtros independientes para proveedores
     const [suppliersIdFilter, setSuppliersIdFilter] = useState('');
@@ -548,12 +551,12 @@ export default function DataConsultation(props) {
         // 6. Filtro de producto/insumo (independiente)
         if (suppliersProductFilter.trim()) {
             filteredSuppliers = filteredSuppliers.filter(supplier => {
-                const filterValue = suppliersProductFilter.toLowerCase();
+                const filterValue = suppliersProductFilter.toLowerCase().trim();
                 
                 // Si products es un array, buscar en cada elemento
                 if (Array.isArray(supplier.products)) {
                     return supplier.products.some(product => {
-                        const productName = String(product.name || product.productName || product || '').toLowerCase();
+                        const productName = String(product.name || product.productName || product || '').toLowerCase().trim();
                         
                         switch (suppliersProductFilterOp) {
                             case 'equals':
@@ -565,16 +568,19 @@ export default function DataConsultation(props) {
                         }
                     });
                 } else {
-                    // Si products es un string, buscar directamente en el string
-                    const productsStr = String(supplier.products || '').toLowerCase();
+                    // Si products es un string, dividir por comas y buscar en cada producto
+                    const productsStr = String(supplier.products || '');
+                    const productList = productsStr.split(',').map(p => p.toLowerCase().trim());
                     
                     switch (suppliersProductFilterOp) {
                         case 'equals':
-                            return productsStr === filterValue;
+                            // Buscar coincidencia exacta en alguno de los productos
+                            return productList.some(product => product === filterValue);
                         case 'contains':
-                            return productsStr.includes(filterValue);
+                            // Buscar si algún producto contiene el texto
+                            return productList.some(product => product.includes(filterValue));
                         default:
-                            return productsStr.includes(filterValue);
+                            return productList.some(product => product.includes(filterValue));
                     }
                 }
             });
@@ -944,37 +950,57 @@ export default function DataConsultation(props) {
                 
                 let matches = true;
                 
-                // Filtros independientes "desde" - cada componente funciona por sí solo
+                // Filtros "desde" - usar >= para rangos, o === para valores exactos si no hay "hasta"
                 if (purchasesDateFromYear) {
-                    matches = matches && purchaseDate.getFullYear() === parseInt(purchasesDateFromYear);
+                    if (purchasesDateToYear) {
+                        matches = matches && purchaseDate.getFullYear() >= parseInt(purchasesDateFromYear);
+                    } else {
+                        matches = matches && purchaseDate.getFullYear() === parseInt(purchasesDateFromYear);
+                    }
                 }
                 if (purchasesDateFromMonth) {
-                    matches = matches && purchaseDate.getMonth() === (parseInt(purchasesDateFromMonth) - 1);
+                    if (purchasesDateToMonth) {
+                        matches = matches && purchaseDate.getMonth() >= (parseInt(purchasesDateFromMonth) - 1);
+                    } else {
+                        matches = matches && purchaseDate.getMonth() === (parseInt(purchasesDateFromMonth) - 1);
+                    }
                 }
                 if (purchasesDateFromDay) {
-                    matches = matches && purchaseDate.getDate() === parseInt(purchasesDateFromDay);
+                    if (purchasesDateToDay) {
+                        matches = matches && purchaseDate.getDate() >= parseInt(purchasesDateFromDay);
+                    } else {
+                        matches = matches && purchaseDate.getDate() === parseInt(purchasesDateFromDay);
+                    }
                 }
                 if (purchasesDateFromHour) {
-                    matches = matches && purchaseDate.getHours() === parseInt(purchasesDateFromHour);
+                    if (purchasesDateToHour) {
+                        matches = matches && purchaseDate.getHours() >= parseInt(purchasesDateFromHour);
+                    } else {
+                        matches = matches && purchaseDate.getHours() === parseInt(purchasesDateFromHour);
+                    }
                 }
                 if (purchasesDateFromMinute) {
-                    matches = matches && purchaseDate.getMinutes() === parseInt(purchasesDateFromMinute);
+                    if (purchasesDateToMinute) {
+                        matches = matches && purchaseDate.getMinutes() >= parseInt(purchasesDateFromMinute);
+                    } else {
+                        matches = matches && purchaseDate.getMinutes() === parseInt(purchasesDateFromMinute);
+                    }
                 }
                 
-                // Filtros independientes "hasta" - solo se aplican si hay valores correspondientes "desde"
-                if (purchasesDateToYear && purchasesDateFromYear) {
+                // Filtros "hasta" - siempre usar <=
+                if (purchasesDateToYear) {
                     matches = matches && purchaseDate.getFullYear() <= parseInt(purchasesDateToYear);
                 }
-                if (purchasesDateToMonth && purchasesDateFromMonth) {
+                if (purchasesDateToMonth) {
                     matches = matches && purchaseDate.getMonth() <= (parseInt(purchasesDateToMonth) - 1);
                 }
-                if (purchasesDateToDay && purchasesDateFromDay) {
+                if (purchasesDateToDay) {
                     matches = matches && purchaseDate.getDate() <= parseInt(purchasesDateToDay);
                 }
-                if (purchasesDateToHour && purchasesDateFromHour) {
+                if (purchasesDateToHour) {
                     matches = matches && purchaseDate.getHours() <= parseInt(purchasesDateToHour);
                 }
-                if (purchasesDateToMinute && purchasesDateFromMinute) {
+                if (purchasesDateToMinute) {
                     matches = matches && purchaseDate.getMinutes() <= parseInt(purchasesDateToMinute);
                 }
                 
@@ -1073,6 +1099,59 @@ export default function DataConsultation(props) {
             );
         }
         
+        // 7. Filtro por cantidad (independiente)
+        if (purchasesQuantityFilter.trim()) {
+            filteredPurchases = filteredPurchases.filter(purchase => {
+                return purchase.items.some(item => {
+                    const productName = item.productName || '';
+                    let itemQuantity = item.quantity || 0;
+                    
+                    // Buscar el producto en inventory para obtener su unidad
+                    const foundProduct = inventory.find(p => 
+                        p && p.name && p.name.toLowerCase() === productName.toLowerCase()
+                    );
+                    
+                    if (foundProduct) {
+                        const productUnit = foundProduct.unit;
+                        
+                        // Convertir la cantidad del item a la unidad seleccionada en el filtro
+                        if (purchasesQuantityUnit === 'Kg' && productUnit === 'g') {
+                            // itemQuantity ya está en Kg (así se almacenan las compras)
+                        } else if (purchasesQuantityUnit === 'L' && productUnit === 'ml') {
+                            // itemQuantity ya está en L (así se almacenan las compras)
+                        } else if (purchasesQuantityUnit === 'U' && (productUnit !== 'g' && productUnit !== 'ml')) {
+                            // itemQuantity ya está en unidades
+                        } else {
+                            // No coincide la unidad del producto con la unidad del filtro
+                            return false;
+                        }
+                    } else {
+                        // Si no se encuentra el producto, asumir unidades
+                        if (purchasesQuantityUnit !== 'U') {
+                            return false;
+                        }
+                    }
+                    
+                    const filterQuantity = Number(purchasesQuantityFilter);
+                    
+                    switch (purchasesQuantityFilterOp) {
+                        case 'equals':
+                            return itemQuantity === filterQuantity;
+                        case 'greater':
+                            return itemQuantity > filterQuantity;
+                        case 'greaterOrEqual':
+                            return itemQuantity >= filterQuantity;
+                        case 'less':
+                            return itemQuantity < filterQuantity;
+                        case 'lessOrEqual':
+                            return itemQuantity <= filterQuantity;
+                        default:
+                            return itemQuantity === filterQuantity;
+                    }
+                });
+            });
+        }
+        
         const results = { 
             title: 'Reporte de Compras', 
             summary: { 
@@ -1092,7 +1171,7 @@ export default function DataConsultation(props) {
                 supplier: p.supplier, 
                 total: p.total, 
                 type: p.type,
-                items: p.items.map(i => i.productName).filter(Boolean).join(', ')
+                items: p.items
             }))
         };
         setQueryResults(results);
@@ -1848,7 +1927,7 @@ export default function DataConsultation(props) {
 
                         {/* Filtro por Nombre */}
                         <div className="filter-row">
-                            <label>Nombre del Producto:</label>
+                            <label>Nombre del Producto / Insumo:</label>
                             <input type="text" value={stockNameFilter}
                                    onChange={e => setStockNameFilter(e.target.value)}
                                    placeholder="Buscar por nombre..." 
@@ -1962,13 +2041,14 @@ export default function DataConsultation(props) {
                         </div>
 
                         {/* Filtro por fechas granular */}
-                        <div className="filter-row">
-                            <label>Filtro por fechas (opcional):</label>
+                        <div className="filter-row"> 
+                         { // <label>Filtro por fechas (opcional):</label> 
+                         }
                             <div className="granular-date-filters">
                                 <p style={{margin: '0 0 10px', fontSize: '14px', color: '#6c757d', fontStyle: 'italic'}}>
                                     💡 <strong>Filtro inteligente:</strong> Puedes filtrar por cualquier combinación de componentes de fecha.
                                 </p>
-                                <h5>Desde (opcional):</h5>
+                                <h5>Desde:</h5>
                                 <div className="date-components" style={{display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap'}}>
                                     <label style={{margin: '0', minWidth: '35px', fontWeight: '500'}}>Año:</label>
                                     <input type="number" placeholder="Ej: 2024" min="2020" max="2030" 
@@ -2148,7 +2228,7 @@ export default function DataConsultation(props) {
                                 <p style={{margin: '0 0 10px', fontSize: '14px', color: '#6c757d', fontStyle: 'italic'}}>
                                     💡 <strong>Filtro inteligente:</strong> Si completas solo "Desde", filtra exactamente ese período (ej: Mes 11 = solo noviembre). Si completas "Hasta", filtra como rango.
                                 </p>
-                                <h5>Desde (opcional):</h5>
+                                <h5>Desde:</h5>
                                 <div className="date-components" style={{display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap'}}>
                                     <label style={{margin: '0', minWidth: '35px', fontWeight: '500'}}>Año:</label>
                                     <input type="number" placeholder="Ej: 2024" min="2020" max="2030" 
@@ -2287,7 +2367,7 @@ export default function DataConsultation(props) {
                                 <p style={{margin: '0 0 10px', fontSize: '14px', color: '#6c757d', fontStyle: 'italic'}}>
                                     💡 <strong>Filtro inteligente:</strong> Si completas solo "Desde", filtra exactamente ese período (ej: Mes 11 = solo noviembre). Si completas "Hasta", filtra como rango.
                                 </p>
-                                <h5>Desde (opcional):</h5>
+                                <h5>Desde:</h5>
                                 <div className="date-components" style={{display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap'}}>
                                     <label style={{margin: '0', minWidth: '35px', fontWeight: '500'}}>Año:</label>
                                     <input type="number" placeholder="Ej: 2024" min="2020" max="2030" 
@@ -2568,6 +2648,34 @@ export default function DataConsultation(props) {
                                 style={{flex: 1, padding: '8px', marginLeft: '10px'}}
                             />
                         </div>
+                        
+                        {/* Filtro de cantidad */}
+                        <div className="filter-row">
+                            <label>Cantidad:</label>
+                            <select value={purchasesQuantityFilterOp} 
+                                    onChange={e => setPurchasesQuantityFilterOp(e.target.value)}
+                                    style={{padding: '8px', marginLeft: '10px', marginRight: '5px', minWidth: '80px'}}>
+                                <option value="equals">=</option>
+                                <option value="greater">&gt;</option>
+                                <option value="greaterOrEqual">&gt;=</option>
+                                <option value="less">&lt;</option>
+                                <option value="lessOrEqual">&lt;=</option>
+                            </select>
+                            <input 
+                                type="number" 
+                                value={purchasesQuantityFilter} 
+                                onChange={e => setPurchasesQuantityFilter(e.target.value)} 
+                                placeholder="Cantidad..." 
+                                style={{width: '120px', padding: '8px'}}
+                            />
+                            <select value={purchasesQuantityUnit} 
+                                    onChange={e => setPurchasesQuantityUnit(e.target.value)} 
+                                    style={{minWidth: '60px', marginLeft: '10px', padding: '8px'}}>
+                                <option value="Kg">Kg</option>
+                                <option value="L">L</option>
+                                <option value="U">U</option>
+                            </select>
+                        </div>
                     </div>
                 )}
                 
@@ -2776,51 +2884,50 @@ export default function DataConsultation(props) {
                                         </table>
                                     );
                                 }
-                                if (selectedQuery === 'compras') {
-                                    const cols = ['id', 'date', 'supplier', 'type', 'items', 'total'];
-                                    const renderCompraItems = (items) => {
-                                        if (Array.isArray(items)) {
-                                            return items.map(item => {
-                                                if (typeof item === 'object' && item.productName && item.quantity) {
-                                                    // Simular lo que hace el backend: determinar unidad basada en tipo de producto
-                                                    const productName = item.productName || item.product_name || item.name || '';
-                                                    const quantity = item.quantity || 0;
-                                                    
-                                                    // Buscar el producto en inventory para obtener su unidad
-                                                    const foundProduct = inventory.find(p => 
-                                                        p && p.name && p.name.toLowerCase() === productName.toLowerCase()
-                                                    );
-                                                    
-                                                    if (foundProduct && quantity > 0) {
-                                                        const unit = foundProduct.unit;
-                                                        if (unit === 'g') {
-                                                            return `${productName} ${quantity}Kg`;
-                                                        } else if (unit === 'ml') {
-                                                            return `${productName} ${quantity}L`;
-                                                        } else {
-                                                            return `${productName} ${quantity}U`;
-                                                        }
-                                                    } else {
-                                                        return `${productName} ${quantity}U`;
-                                                    }
-                                                } else if (typeof item === 'object' && item.productName) {
-                                                    return item.productName || item.product_name || item.name || '';
-                                                } else {
-                                                    return String(item || '');
-                                                }
-                                            }).filter(Boolean).join(', ');
-                                        }
-                                        return String(items || '');
-                                    };
-                                    return (
-                                        <table>
-                                            <thead><tr>{cols.map(key=> <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>)}</tr></thead>
-                                            <tbody>{queryResults.data.map((row, index) => (<tr key={index}>{cols.map((k, ci) => (<td key={ci}>{k === 'items' ? renderCompraItems(row[k]) : renderCellValue(row[k], k)}</td>))}</tr>))}</tbody>
-                                        </table>
+                if (selectedQuery === 'compras') {
+                    const cols = ['id', 'date', 'supplier', 'type', 'items', 'total'];
+                    const renderCompraItems = (items) => {
+                        if (Array.isArray(items)) {
+                            return items.map(item => {
+                                if (typeof item === 'object' && item.productName) {
+                                    const productName = item.productName || item.product_name || item.name || '';
+                                    const quantity = item.quantity || 0;
+                                    
+                                    if (!productName) return '';
+                                    
+                                    // Buscar el producto en inventory para obtener su unidad
+                                    const foundProduct = inventory.find(p => 
+                                        p && p.name && p.name.toLowerCase() === productName.toLowerCase()
                                     );
+                                    
+                                    if (foundProduct && quantity > 0) {
+                                        const unit = foundProduct.unit;
+                                        if (unit === 'g') {
+                                            return `${productName} ${quantity}Kg`;
+                                        } else if (unit === 'ml') {
+                                            return `${productName} ${quantity}L`;
+                                        } else {
+                                            return `${productName} ${quantity}U`;
+                                        }
+                                    } else if (quantity > 0) {
+                                        return `${productName} ${quantity}U`;
+                                    } else {
+                                        return productName;
+                                    }
+                                } else {
+                                    return String(item || '');
                                 }
-
-                                const keys = Object.keys(sample);
+                            }).filter(Boolean).join(', ');
+                        }
+                        return String(items || '');
+                    };
+                    return (
+                        <table>
+                            <thead><tr>{cols.map(key=> <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>)}</tr></thead>
+                            <tbody>{queryResults.data.map((row, index) => (<tr key={index}>{cols.map((k, ci) => (<td key={ci}>{k === 'items' ? renderCompraItems(row[k]) : renderCellValue(row[k], k)}</td>))}</tr>))}</tbody>
+                        </table>
+                    );
+                }                                const keys = Object.keys(sample);
                                 return (
                                     <table>
                                         <thead><tr>{keys.map(key=> <th key={key}>{headerTranslationMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</th>)}</tr></thead>

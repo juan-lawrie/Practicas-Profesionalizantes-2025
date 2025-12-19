@@ -38,8 +38,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'role', 'role_id', 'is_active', 'is_locked', 'failed_login_attempts', 'locked_at')
-        read_only_fields = ('is_active', 'is_locked', 'failed_login_attempts', 'locked_at')
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'role', 'role_id', 'is_active', 'is_locked', 'failed_login_attempts', 'locked_at', 'lock_type')
+        read_only_fields = ('is_active', 'is_locked', 'failed_login_attempts', 'locked_at', 'lock_type')
 
 
 class ResetTokenSerializer(serializers.ModelSerializer):
@@ -59,16 +59,28 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'role_id', 'is_active')
+        fields = ('username', 'email', 'first_name', 'last_name', 'role_id', 'is_active', 'password')
         extra_kwargs = {
             'username': {'required': False},
             'email': {'required': False},
-            'is_active': {'required': False}
+            'first_name': {'required': False},
+            'last_name': {'required': False},
+            'is_active': {'required': False},
+            'password': {'write_only': True, 'required': False}
         }
 
     def update(self, instance, validated_data):
-        # El rol se maneja a través de role_id
+        # Manejar la contraseña por separado si se proporciona
+        password = validated_data.pop('password', None)
+        
+        # Actualizar otros campos
         instance = super().update(instance, validated_data)
+        
+        # Si se proporcionó una nueva contraseña, actualizarla
+        if password:
+            instance.set_password(password)
+            instance.save()
+        
         return instance
 
 
@@ -78,7 +90,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'role_name')
+        fields = ('username', 'email', 'first_name', 'last_name', 'password', 'role_name')
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
@@ -91,6 +103,8 @@ class UserCreateSerializer(serializers.ModelSerializer):
             username=validated_data['username'],
             email=validated_data['email'],
             password=validated_data['password'],
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', ''),
             role=role
         )
         return user
@@ -407,8 +421,8 @@ class OrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = ('id', 'customer_name', 'date', 'payment_method', 'items', 'total_amount', 'notes', 'status', 'created_at', 'user')
-        read_only_fields = ('id', 'created_at', 'user')
+        fields = ('id', 'customer_name', 'fecha_para_la_que_se_quiere_el_pedido', 'payment_method', 'items', 'total_amount', 'notes', 'status', 'fecha_de_orden_del_pedido', 'user')
+        read_only_fields = ('id', 'fecha_de_orden_del_pedido', 'user')
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])

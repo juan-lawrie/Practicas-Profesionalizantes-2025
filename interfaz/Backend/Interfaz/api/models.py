@@ -55,6 +55,11 @@ class User(AbstractUser):
     failed_login_attempts = models.IntegerField(default=0)
     is_locked = models.BooleanField(default=False)
     locked_at = models.DateTimeField(null=True, blank=True)
+    LOCK_TYPE_CHOICES = (
+        ('manual', 'Manual'),
+        ('automatic', 'Automatic'),
+    )
+    lock_type = models.CharField(max_length=10, choices=LOCK_TYPE_CHOICES, null=True, blank=True)
     
     # Permitir espacios en el username sobrescribiendo el campo
     username = models.CharField(
@@ -194,16 +199,16 @@ class Purchase(models.Model):
 
 class Order(models.Model):
     customer_name = models.CharField(max_length=255)
-    date = models.DateField(blank=True, null=True)
+    fecha_para_la_que_se_quiere_el_pedido = models.DateTimeField(blank=True, null=True)
     payment_method = models.CharField(max_length=100, blank=True, null=True)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     notes = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=50, default='Pendiente')
-    created_at = models.DateTimeField(auto_now_add=True)
+    fecha_de_orden_del_pedido = models.DateTimeField(auto_now_add=True)
     user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-fecha_de_orden_del_pedido']
 
     def __str__(self):
         return f"Order {self.id} - {self.customer_name}"
@@ -254,14 +259,14 @@ class LossRecord(models.Model):
         ('accidente_fisico', 'Accidentes físicos'),
         ('contaminacion', 'Contaminación'),
         ('vencimiento', 'Vencimiento'),
-        ('cadena_frio', 'Perdió la cadena de frío'),
+        ('cadena_frio', 'Perdió la cadena de frío - Temperatura inadecuada'),
     )
     
     INGREDIENT_LOSS_CATEGORIES = (
         ('empaque_danado', 'Empaque dañado'),
         ('sobreuso_receta', 'Sobreuso en receta'),
         ('vencimiento', 'Vencimiento'),
-        ('cadena_frio', 'Perdió la cadena de frío'),
+        ('cadena_frio', 'Perdió la cadena de frío - Temperatura inadecuada'),
     )
     
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='loss_records')
