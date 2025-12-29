@@ -243,14 +243,15 @@ class UserQuery(models.Model):
         return f"Query {self.query_type} by {self.user.username}"
 
 class LowStockReport(models.Model):
-    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    products = models.ManyToManyField(Product, related_name='low_stock_reports')
     message = models.TextField()
     reported_by = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     is_resolved = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"Report for {self.product.name} by {self.reported_by.username}"
+        product_names = ", ".join([p.name for p in self.products.all()[:3]])
+        return f"Report for {product_names} by {self.reported_by.username}"
 
 
 # Modelo para registrar pérdidas de productos e insumos

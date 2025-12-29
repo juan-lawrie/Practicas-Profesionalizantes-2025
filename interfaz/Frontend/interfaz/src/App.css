@@ -261,6 +261,14 @@ h2 {
   text-overflow: ellipsis;
 }
 
+.management-container{
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Pantallas grandes */
 @media (min-width: 1158px) {
   .logout-button {
@@ -1813,6 +1821,17 @@ textarea{
 .button-group {
   display: flex;
   gap: 1rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 590px) {
+  .button-group {
+    flex-direction: column;
+  }
+  
+  .action-button {
+    width: 100%;
+  }
 }
 
 .action-button {

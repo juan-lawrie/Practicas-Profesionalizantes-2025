@@ -527,9 +527,25 @@ class LossRecordSerializer(serializers.ModelSerializer):
 
 class LowStockReportSerializer(serializers.ModelSerializer):
     reported_by = serializers.ReadOnlyField(source='reported_by.username')
-    product_name = serializers.ReadOnlyField(source='product.name')
+    product_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Product.objects.all(),
+        source='products',
+        write_only=True
+    )
+    products_detail = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = LowStockReport
-        fields = ('id', 'product', 'product_name', 'message', 'reported_by', 'created_at', 'is_resolved')
-        read_only_fields = ('id', 'reported_by', 'created_at')
+        fields = ('id', 'product_ids', 'products_detail', 'message', 'reported_by', 'created_at', 'is_resolved')
+        read_only_fields = ('id', 'reported_by', 'created_at', 'products_detail')
+
+    def get_products_detail(self, obj):
+        products = obj.products.all()
+        return [{'id': p.id, 'name': p.name, 'category': p.category} for p in products]
+
+    def create(self, validated_data):
+        products = validated_data.pop('products', [])
+        report = LowStockReport.objects.create(**validated_data)
+        report.products.set(products)
+        return report

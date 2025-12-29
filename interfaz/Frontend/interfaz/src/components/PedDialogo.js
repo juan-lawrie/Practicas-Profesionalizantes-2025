@@ -209,31 +209,32 @@ function PedDialogo({ orders, setOrders, isOpen, onClose, onMinimize, isMinimize
             className={`fixed bg-white flex flex-col ${
                 isFullscreen 
                     ? 'inset-0 rounded-none' 
-                    : `rounded-lg shadow-2xl border-2 border-gray-300 ${isMinimized ? 'h-12' : 'min-h-[600px]'}`
+                    : `rounded-lg shadow-2xl border-2 border-gray-300 ${isMinimized ? 'h-auto' : 'min-h-[600px]'}`
             }`}
             style={{
                 left: isFullscreen ? 0 : `${position.x}px`,
                 top: isFullscreen ? 0 : `${position.y}px`,
-                width: isFullscreen ? '100vw' : (isMinimized ? '300px' : '90vw'),
-                maxWidth: isFullscreen ? '100vw' : (isMinimized ? '300px' : '1400px'),
+                width: isFullscreen ? '100vw' : (isMinimized ? 'auto' : '90vw'),
+                maxWidth: isFullscreen ? '100vw' : (isMinimized ? 'fit-content' : '1400px'),
                 height: isFullscreen ? '100vh' : 'auto',
-                maxHeight: isFullscreen ? '100vh' : (isMinimized ? '48px' : '85vh'),
+                maxHeight: isFullscreen ? '100vh' : 'auto',
                 zIndex: 1000,
                 resize: (isFullscreen || isMinimized) ? 'none' : 'both',
-                overflow: 'auto'
+                overflow: isMinimized ? 'hidden' : 'auto'
             }}
         >
             {/* Header */}
             <div 
-                className={`dialog-header bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 ${isFullscreen ? '' : 'rounded-t-lg cursor-move'} flex items-center justify-between`}
+                className={`dialog-header bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 ${isMinimized ? 'py-2 min-h-[56px]' : 'py-3'} ${isFullscreen ? '' : 'rounded-t-lg cursor-move'} flex items-center justify-between`}
                 onMouseDown={isFullscreen ? undefined : handleMouseDown}
+                style={isMinimized ? {overflow: 'hidden'} : {}}
             >
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  
+                <h3 className="text-lg font-bold flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis w-full">
                     <span>Historial de Pedidos</span>
+                    {/* No mostrar el contador de pedidos cuando está minimizado */}
                     {!isMinimized && <span className="text-sm font-normal">({filteredOrders.length} pedidos)</span>}
                 </h3>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-shrink-0">
                     {!isFullscreen && (
                         <button
                             onClick={onOpenNewTab}

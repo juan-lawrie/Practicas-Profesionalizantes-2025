@@ -8,6 +8,7 @@ import DataConsultation from './DataConsultation';
 import MyUserData from './components/MyUserData';
 import ForgotPassword from './components/ForgotPassword';
 import PurchaseManagement from './components/PurchaseManagement';
+import Proveedores from './components/Proveedores';
 import PurchaseRequests from './components/PurchaseRequests';
 import PurchaseHistory from './components/PurchaseHistory';
 import ProductManagement from './components/ProductManagement';
@@ -17,6 +18,8 @@ import Registrar_Venta from './components/Registrar_Venta';
 import Movimientos_De_Caja from './components/Movimientos_De_Caja';
 import Pedidos from './components/Pedidos';
 import PedDialogo from './components/PedDialogo';
+import Edicion from './components/Edicion';
+import Ver_Reportes_De_Faltantes from './components/Ver_Reportes_De_Faltantes';
 
 
 
@@ -160,7 +163,7 @@ const passwordPolicy = {
 };
 
 const rolePermissions = {
-    'Gerente': ['Dashboard', 'Inventario', 'Gestión de Usuarios', 'Ventas', 'Pedidos', 'Productos', 'Editar Productos', 'Proveedores', 'Compras', 'Consultas', 'Ver Reportes de Faltantes'],
+    'Gerente': ['Dashboard', 'Inventario', 'Gestión de Usuarios', 'Ventas', 'Pedidos', 'Productos', 'Edicion', 'Proveedores', 'Compras', 'Consultas', 'Ver Reportes de Faltantes'],
     'Panadero': ['Dashboard', 'Inventario', 'Ventas', 'Datos de mi Usuario', 'Reportar Faltantes'],
     'Encargado': ['Dashboard', 'Inventario', 'Ventas', 'Compras', 'Datos de mi Usuario', 'Gestión de Pérdidas'],
     'Cajero': ['Dashboard', 'Ventas', 'Inventario', 'Datos de mi Usuario', 'Reportar Faltantes'],
@@ -391,6 +394,13 @@ const App = () => {
         window.addEventListener('openPedDialogo', openDialog);
         return () => window.removeEventListener('openPedDialogo', openDialog);
     }, []);
+    
+    // Cerrar el diálogo de pedidos cuando se cambia de página
+    React.useEffect(() => {
+        if (isPedDialogoOpen && !isPedDialogoFullscreen) {
+            handleClosePedDialogo();
+        }
+    }, [currentPage]);
     // ...existing code...
 
         // Validación de contraseña mínima (se usa en creación de usuarios)
@@ -1510,8 +1520,8 @@ const App = () => {
     // Componente del tablero (Dashboard).
     const Dashboard = () => {
         // Estados para manejar el colapso de las secciones
-        const [showSuppliesAlerts, setShowSuppliesAlerts] = useState(true);
-        const [showProductsAlerts, setShowProductsAlerts] = useState(true);
+        const [showSuppliesAlerts, setShowSuppliesAlerts] = useState(false);
+        const [showProductsAlerts, setShowProductsAlerts] = useState(false);
 
         // Obtener productos e insumos con stock bajo según su umbral personalizado
         // Comparar en la misma unidad base (gramos/ml/unidades)
@@ -2147,19 +2157,19 @@ const App = () => {
 
                 {/* Content Area */}
                 <div className="max-w-full mx-auto px-2 sm:px-4 py-4">
-                    {activeTab === 'ventas' && (
+                    <div style={{ display: activeTab === 'ventas' ? 'block' : 'none' }}>
                         <Registrar_Venta 
                             products={products}
                             loadProducts={loadProducts}
                             loadCashMovements={loadCashMovements}
                         />
-                    )}
+                    </div>
                     
-                    {activeTab === 'caja' && (
+                    <div style={{ display: activeTab === 'caja' ? 'block' : 'none' }}>
                         <Movimientos_De_Caja 
                             cashMovements={cashMovements}
                         />
-                    )}
+                    </div>
                 </div>
             </div>
         );
@@ -2640,363 +2650,8 @@ const App = () => {
 
         // Componente de la interfaz de gestión de proveedores (solo para Gerente).
         const SupplierManagement = () => {
-            const [showAddSupplier, setShowAddSupplier] = useState(false);
-            const [editingSupplier, setEditingSupplier] = useState(null); // Nuevo estado para edición
-            const [newSupplier, setNewSupplier] = useState({ 
-                name: '', 
-                cuit: '', 
-                address: '', 
-                phone: '', 
-                products: '' 
-            });
-            const [message, setMessage] = useState('');
-            
-            // Estados de filtros (copiados de DataConsultation.js)
-            const [suppliersNameFilter, setSuppliersNameFilter] = useState('');
-            const [suppliersNameFilterOp, setSuppliersNameFilterOp] = useState('contains');
-            const [suppliersCuitFilter, setSuppliersCuitFilter] = useState('');
-            const [suppliersCuitFilterOp, setSuppliersCuitFilterOp] = useState('contains');
-            const [suppliersPhoneFilter, setSuppliersPhoneFilter] = useState('');
-            const [suppliersPhoneFilterOp, setSuppliersPhoneFilterOp] = useState('contains');
-            const [suppliersAddressFilter, setSuppliersAddressFilter] = useState('');
-            const [suppliersAddressFilterOp, setSuppliersAddressFilterOp] = useState('contains');
-            const [suppliersProductFilter, setSuppliersProductFilter] = useState('');
-            const [suppliersProductFilterOp, setSuppliersProductFilterOp] = useState('contains');
-    
-            const validateCUIT = (cuit) => /^\d{11}$/.test(cuit);
-            const validatePhone = (phone) => /^\d{8,}$/.test(phone);
-
-            const fetchSuppliers = async () => {
-                try {
-                    const response = await api.get('/suppliers/');
-                    setSuppliers(response.data);
-                } catch (error) {
-                    console.error('Error cargando proveedores:', error);
-                    setMessage('Error al cargar la lista de proveedores.');
-                }
-            };
-
-            const handleAddSupplier = async (e) => {
-                e.preventDefault();
-                if (!newSupplier.name.trim()) {
-                    setMessage('🚫 Error: El nombre es obligatorio.');
-                    return;
-                }
-                if (!validateCUIT(newSupplier.cuit)) {
-                    setMessage('🚫 Error: El CUIT debe ser un número de 11 dígitos.');
-                    return;
-                }
-                if (!validatePhone(newSupplier.phone)) {
-                    setMessage('🚫 Error: El teléfono debe contener solo números, con un mínimo de 8 dígitos.');
-                    return;
-                }
-                try {
-                    await api.post('/suppliers/', newSupplier);
-                    await fetchSuppliers(); // Recargar lista
-                    setMessage('Proveedor agregado correctamente.');
-                    setShowAddSupplier(false);
-                    setNewSupplier({ name: '', cuit: '', address: '', phone: '', products: '' });
-                } catch (error) {
-                    setMessage('Error al agregar proveedor.');
-                }
-            };
-
-            const handleUpdateSupplier = async (e) => {
-                e.preventDefault();
-                if (!editingSupplier) return;
-
-                if (!validateCUIT(editingSupplier.cuit)) {
-                    setMessage('🚫 Error: El CUIT debe ser un número de 11 dígitos.');
-                    return;
-                }
-                if (!validatePhone(editingSupplier.phone)) {
-                    setMessage('🚫 Error: El teléfono debe contener solo números, con un mínimo de 8 dígitos.');
-                    return;
-                }
-
-                try {
-                    await api.put(`/suppliers/${editingSupplier.id}/`, editingSupplier);
-                    await fetchSuppliers(); // Recargar lista
-                    setEditingSupplier(null);
-                    setMessage('✅ Proveedor actualizado exitosamente.');
-                } catch (error) {
-                    console.error('Error actualizando proveedor:', error.response?.data || error.message);
-                    setMessage('Error al actualizar el proveedor.');
-                }
-            };
-
-            const handleDeleteSupplier = async (supplierId) => {
-                if (!window.confirm('¿Estás seguro de que quieres eliminar este proveedor?')) return;
-                try {
-                    await api.delete(`/suppliers/${supplierId}/`);
-                    await fetchSuppliers(); // Recargar lista
-                    setMessage('Proveedor eliminado correctamente.');
-                } catch (error) {
-                    setMessage('Error al eliminar proveedor.');
-                }
-            };
-
-            const startEditing = (supplier) => {
-                setEditingSupplier({ ...supplier });
-                setShowAddSupplier(false);
-            };
-            
-            // Lógica de filtrado (copiada de DataConsultation.js)
-            const getFilteredSuppliers = () => {
-                let filteredSuppliers = suppliers;
-
-                // 1. Filtro de nombre (independiente)
-                if (suppliersNameFilter.trim()) {
-                    filteredSuppliers = filteredSuppliers.filter(supplier => {
-                        const name = String(supplier.name || '').toLowerCase();
-                        const filterValue = suppliersNameFilter.toLowerCase();
-                        
-                        switch (suppliersNameFilterOp) {
-                            case 'equals':
-                                return name === filterValue;
-                            case 'contains':
-                                return name.includes(filterValue);
-                            default:
-                                return name.includes(filterValue);
-                        }
-                    });
-                }
-
-                // 2. Filtro de CUIT (independiente)
-                if (suppliersCuitFilter.trim()) {
-                    filteredSuppliers = filteredSuppliers.filter(supplier => {
-                        const cuit = String(supplier.cuit || '').toLowerCase();
-                        const filterValue = suppliersCuitFilter.toLowerCase();
-                        
-                        switch (suppliersCuitFilterOp) {
-                            case 'equals':
-                                return cuit === filterValue;
-                            case 'contains':
-                                return cuit.includes(filterValue);
-                            default:
-                                return cuit.includes(filterValue);
-                        }
-                    });
-                }
-
-                // 3. Filtro de teléfono (independiente)
-                if (suppliersPhoneFilter.trim()) {
-                    filteredSuppliers = filteredSuppliers.filter(supplier => {
-                        const phone = String(supplier.phone || '').toLowerCase();
-                        const filterValue = suppliersPhoneFilter.toLowerCase();
-                        
-                        switch (suppliersPhoneFilterOp) {
-                            case 'equals':
-                                return phone === filterValue;
-                            case 'contains':
-                                return phone.includes(filterValue);
-                            default:
-                                return phone.includes(filterValue);
-                        }
-                    });
-                }
-
-                // 4. Filtro de dirección (independiente)
-                if (suppliersAddressFilter.trim()) {
-                    filteredSuppliers = filteredSuppliers.filter(supplier => {
-                        const address = String(supplier.address || '').toLowerCase();
-                        const filterValue = suppliersAddressFilter.toLowerCase();
-                        
-                        switch (suppliersAddressFilterOp) {
-                            case 'equals':
-                                return address === filterValue;
-                            case 'contains':
-                                return address.includes(filterValue);
-                            default:
-                                return address.includes(filterValue);
-                        }
-                    });
-                }
-
-                // 5. Filtro de producto/insumo (independiente)
-                if (suppliersProductFilter.trim()) {
-                    filteredSuppliers = filteredSuppliers.filter(supplier => {
-                        const filterValue = suppliersProductFilter.toLowerCase().trim();
-                        
-                        // Si products es un array, buscar en cada elemento
-                        if (Array.isArray(supplier.products)) {
-                            return supplier.products.some(product => {
-                                const productName = String(product.name || product.productName || product || '').toLowerCase().trim();
-                                
-                                switch (suppliersProductFilterOp) {
-                                    case 'equals':
-                                        return productName === filterValue;
-                                    case 'contains':
-                                        return productName.includes(filterValue);
-                                    default:
-                                        return productName.includes(filterValue);
-                                }
-                            });
-                        } else {
-                            // Si products es un string, dividir por comas y buscar en cada producto
-                            const productsStr = String(supplier.products || '');
-                            const productList = productsStr.split(',').map(p => p.toLowerCase().trim());
-                            
-                            switch (suppliersProductFilterOp) {
-                                case 'equals':
-                                    // Buscar coincidencia exacta en alguno de los productos
-                                    return productList.some(product => product === filterValue);
-                                case 'contains':
-                                    // Buscar si algún producto contiene el texto
-                                    return productList.some(product => product.includes(filterValue));
-                                default:
-                                    return productList.some(product => product.includes(filterValue));
-                            }
-                        }
-                    });
-                }
-
-                return filteredSuppliers;
-            };
-
-            const renderContent = () => {
-                if (editingSupplier) {
-                    return (
-                        <form className="form-container" onSubmit={handleUpdateSupplier}>
-                            <h3>Editando a {editingSupplier.name}</h3>
-                            <input type="text" value={editingSupplier.name} onChange={e => setEditingSupplier({ ...editingSupplier, name: e.target.value })} placeholder="Nombre del Proveedor" required />
-                            <input type="text" value={editingSupplier.cuit} onChange={e => setEditingSupplier({ ...editingSupplier, cuit: e.target.value })} placeholder="CUIT (11 dígitos)" required />
-                            <input type="text" value={editingSupplier.address} onChange={e => setEditingSupplier({ ...editingSupplier, address: e.target.value })} placeholder="Dirección" required />
-                            <input type="text" value={editingSupplier.phone} onChange={e => setEditingSupplier({ ...editingSupplier, phone: e.target.value })} placeholder="Teléfono" required />
-                            <input type="text" value={editingSupplier.products} onChange={e => setEditingSupplier({ ...editingSupplier, products: e.target.value })} placeholder="Productos que provee" />
-                            <div className="button-group">
-                                <button type="submit" className="action-button primary">Guardar Cambios</button>
-                                <button type="button" className="action-button secondary" onClick={() => setEditingSupplier(null)}>Cancelar</button>
-                            </div>
-                        </form>
-                    );
-                }
-
-                if (showAddSupplier) {
-                    return (
-                        <form className="form-container" onSubmit={handleAddSupplier}>
-                            <h3>Registrar Proveedor</h3>
-                            <input type="text" value={newSupplier.name} onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} placeholder="Nombre del Proveedor" required />
-                            <input type="text" value={newSupplier.cuit} onChange={e => setNewSupplier({ ...newSupplier, cuit: e.target.value })} placeholder="CUIT (11 dígitos)" required />
-                            <input type="text" value={newSupplier.address} onChange={e => setNewSupplier({ ...newSupplier, address: e.target.value })} placeholder="Dirección" required />
-                            <input type="text" value={newSupplier.phone} onChange={e => setNewSupplier({ ...newSupplier, phone: e.target.value })} placeholder="Teléfono" required />
-                            <input type="text" value={newSupplier.products} onChange={e => setNewSupplier({ ...newSupplier, products: e.target.value })} placeholder="Productos que provee" />
-                            <div className="button-group">
-                                <button type="submit" className="action-button primary">Registrar</button>
-                                <button type="button" className="action-button secondary" onClick={() => setShowAddSupplier(false)}>Cancelar</button>
-                            </div>
-                        </form>
-                    );
-                }
-
-                return <button className="main-button" onClick={() => setShowAddSupplier(true)}>Registrar Nuevo Proveedor</button>;
-            };
-
-            return (
-                <div className="management-container">
-                    <h2>Gestión de Proveedores</h2>
-                    {message && <p className="message">{message}</p>}
-                    {renderContent()}
-                    
-                    {/* Filtros de Proveedores (copiados de DataConsultation.js) */}
-                    <div className="suppliers-filters" style={{marginBottom: '20px', padding: '15px', background: '#f8f9fa', borderRadius: '8px'}}>
-                        <h4 style={{marginTop: '0'}}>Filtros de Proveedores</h4>
-                        
-                        {/* Filtro de Nombre */}
-                        <div className="filter-row">
-                            <label>Nombre:</label>
-                            <select value={suppliersNameFilterOp} onChange={e => setSuppliersNameFilterOp(e.target.value)}>
-                                <option value="contains">Contiene</option>
-                                <option value="equals">Es igual</option>
-                            </select>
-                            <input 
-                                type="text" 
-                                value={suppliersNameFilter} 
-                                onChange={e => setSuppliersNameFilter(e.target.value)} 
-                                placeholder="Nombre del proveedor..." 
-                            />
-                        </div>
-
-                        {/* Filtro de CUIT */}
-                        <div className="filter-row">
-                            <label>CUIT:</label>
-                            <select value={suppliersCuitFilterOp} onChange={e => setSuppliersCuitFilterOp(e.target.value)}>
-                                <option value="contains">Contiene</option>
-                                <option value="equals">Es igual</option>
-                            </select>
-                            <input 
-                                type="text" 
-                                value={suppliersCuitFilter} 
-                                onChange={e => setSuppliersCuitFilter(e.target.value)} 
-                                placeholder="CUIT del proveedor..." 
-                            />
-                        </div>
-
-                        {/* Filtro de Teléfono */}
-                        <div className="filter-row">
-                            <label>Teléfono:</label>
-                            <select value={suppliersPhoneFilterOp} onChange={e => setSuppliersPhoneFilterOp(e.target.value)}>
-                                <option value="contains">Contiene</option>
-                                <option value="equals">Es igual</option>
-                            </select>
-                            <input 
-                                type="text" 
-                                value={suppliersPhoneFilter} 
-                                onChange={e => setSuppliersPhoneFilter(e.target.value)} 
-                                placeholder="Teléfono del proveedor..." 
-                            />
-                        </div>
-
-                        {/* Filtro de Dirección */}
-                        <div className="filter-row">
-                            <label>Dirección:</label>
-                            <select value={suppliersAddressFilterOp} onChange={e => setSuppliersAddressFilterOp(e.target.value)}>
-                                <option value="contains">Contiene</option>
-                                <option value="equals">Es igual</option>
-                            </select>
-                            <input 
-                                type="text" 
-                                value={suppliersAddressFilter} 
-                                onChange={e => setSuppliersAddressFilter(e.target.value)} 
-                                placeholder="Dirección del proveedor..." 
-                            />
-                        </div>
-
-                        {/* Filtro de Producto/Insumo */}
-                        <div className="filter-row">
-                            <label>Producto/Insumo:</label>
-                            <select value={suppliersProductFilterOp} onChange={e => setSuppliersProductFilterOp(e.target.value)}>
-                                <option value="contains">Contiene</option>
-                                <option value="equals">Es igual</option>
-                            </select>
-                            <input 
-                                type="text" 
-                                value={suppliersProductFilter} 
-                                onChange={e => setSuppliersProductFilter(e.target.value)} 
-                                placeholder="Producto o insumo..." 
-                            />
-                        </div>
-                    </div>
-                    
-                    <h3>Proveedores Registrados</h3>
-                    <ul className="list-container">
-                        {getFilteredSuppliers().map(supplier => (
-                            <li key={supplier.id} className="list-item">
-                                <div className="supplier-info-container">
-                                    <div><strong>{supplier.name}</strong> (CUIT: {supplier.cuit})</div>
-                                    <div>{supplier.address} | Tel: {supplier.phone}</div>
-                                    <div>Productos: {supplier.products}</div>
-                                </div>
-                                <div className="button-group">
-                                    <button onClick={() => startEditing(supplier)} className="edit-button">Editar</button>
-                                    <button onClick={() => handleDeleteSupplier(supplier.id)} className="delete-button">Eliminar</button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            );
-        }
+            return <Proveedores suppliers={suppliers} setSuppliers={setSuppliers} />;
+        };
     
         // Componente de la interfaz de gestión de compras (para Gerente, Encargado, Cajero, Panadero).
         const PurchaseManagementInternal = () => {
@@ -3506,983 +3161,65 @@ const PurchaseRequests = () => {
             'period': 'Período'
         };
 
+    
         // DataConsultation moved to `src/DataConsultation.js` to provide a stable identity
         // and avoid remounts caused by defining the component inline within App.
     
-        // Componente de la interfaz de edición de productos nuevos (solo para Gerente).
-        const EditNewProducts = () => {
-            const [selectedProduct, setSelectedProduct] = useState(null);
-            const [searchTerm, setSearchTerm] = useState('');
-            const [filteredProducts, setFilteredProducts] = useState([]);
-            const [isFirstRender, setIsFirstRender] = useState(true);
-            const [editingProduct, setEditingProduct] = useState({
-                name: '',
-                price: 0,
-                category: 'Producto',
-                stock: 0,
-                description: '',
-                lowStockThreshold: 10,
-                highStockMultiplier: 2.0,
-                recipeYield: 1,
-                recipe_ingredients: []
-            });
-            const [message, setMessage] = useState('');
-            const [confirmDelete, setConfirmDelete] = useState(false);
-            const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
-            const [showLoadingMessage, setShowLoadingMessage] = useState(false);
-            
-            // Estados para manejo de recetas
-            const [recipeIngredients, setRecipeIngredients] = useState([]);
-            const [availableIngredients, setAvailableIngredients] = useState([]);
-            const [newIngredients, setNewIngredients] = useState([{
-                ingredient: null,
-                quantity: '',
-                unit: 'g'
-            }]);
-            const [editingIngredient, setEditingIngredient] = useState(null);
-
-            // Cargar ingredientes disponibles al montar el componente
-            useEffect(() => {
-                // Limpiar mensaje al montar el componente
-                setMessage('');
-                // Al montar el componente, no mostrar loading message inicialmente
-                setShowLoadingMessage(false);
-                loadAvailableIngredients();
-                // Después del primer render, marcar como no primera vez
-                const timer = setTimeout(() => setIsFirstRender(false), 300);
-                return () => clearTimeout(timer);
-            }, []);
-
-            // Limpiar mensajes automáticamente después de 5 segundos
-            useEffect(() => {
-                if (message && !message.includes('⚠️') && !message.includes('¿Estás seguro')) {
-                    const timer = setTimeout(() => {
-                        setMessage('');
-                    }, 1);
-                    return () => clearTimeout(timer);
-                }
-            }, [message]);
-
-            // Controlar cuándo mostrar el mensaje de carga con delay mínimo
-            useEffect(() => {
-                if (isLoading && !isFirstRender) {
-                    // Solo mostrar el mensaje después de 5ms (imperceptible) y NO en el primer render
-                    const timer = setTimeout(() => {
-                        setShowLoadingMessage(true);
-                    }, 5);
-                    return () => clearTimeout(timer);
-                } else {
-                    // Si no está cargando o es el primer render, ocultar inmediatamente
-                    setShowLoadingMessage(false);
-                }
-            }, [isLoading, isFirstRender]);
-
-            // Filtrar productos basado en el término de búsqueda
-            useEffect(() => {
-                if (!searchTerm.trim()) {
-                    setFilteredProducts(products);
-                } else {
-                    const filtered = products.filter(product =>
-                        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (product.description && product.description.toLowerCase().includes(searchTerm.toLowerCase()))
-                    );
-                    setFilteredProducts(filtered);
-                }
-            }, [products, searchTerm]);
-    
-            // Función para validar el nombre del producto
-            const validateProductName = (name) => {
-                return name.trim().length > 0 && name.trim().length <= 100;
-            };
-    
-            // Función para validar el precio
-            const validatePrice = (price) => {
-                return price > 0;
-            };
-    
-            // Función para validar la categoría
-            const validateCategory = (category) => {
-                return ['Producto', 'Insumo'].includes(category);
-            };
-    
-            // Función para validar el stock
-            const validateStock = (stock) => {
-                const num = parseFloat(stock);
-                return !isNaN(num) && num >= 0;
-            };
-            
-            // Función para validar el umbral de stock bajo
-            const validateLowStockThreshold = (threshold) => {
-                const num = parseInt(threshold);
-                return !isNaN(num) && num >= 0;
-            };
-
-            // Funciones para manejar recetas
-            const loadRecipe = async (productId) => {
-                try {
-                    const response = await getRecipe(productId);
-                    const ingredients = response.data || [];
-                    setRecipeIngredients(ingredients);
-                    
-                    // Actualizar también los ingredientes en editingProduct
-                    setEditingProduct(prev => ({
-                        ...prev,
-                        recipe_ingredients: ingredients
-                    }));
-                } catch (error) {
-                    setRecipeIngredients([]);
-                    setEditingProduct(prev => ({
-                        ...prev,
-                        recipe_ingredients: []
-                    }));
-                }
-            };
-
-            const loadAvailableIngredients = async () => {
-                try {
-                    const response = await getIngredientsWithSuggestedUnit();
-                    if (response.data.success) {
-                        setAvailableIngredients(response.data.data || []);
-                    } else {
-                        console.error('Error en respuesta:', response.data.error);
-                        setAvailableIngredients([]);
-                    }
-                } catch (error) {
-                    setAvailableIngredients([]);
-                }
-            };
-
-            const addIngredientsToRecipe = () => {
-                // Filtrar solo los ingredientes válidos (que tengan ingrediente y cantidad)
-                const validIngredients = newIngredients.filter(
-                    ing => ing.ingredient && ing.ingredient.value && ing.quantity && parseFloat(ing.quantity) > 0
-                );
-
-                if (validIngredients.length === 0) {
-                    setMessage('⚠️ Complete al menos un ingrediente con todos sus campos y cantidad mayor a 0.');
-                    return;
-                }
-
-                const ingredientsToAdd = validIngredients.map(ing => ({
-                    ingredient: ing.ingredient.value,
-                    ingredient_name: ing.ingredient.label.split(' (Stock:')[0], // Limpiar el texto del label
-                    quantity: parseFloat(ing.quantity),
-                    unit: ing.unit
-                }));
-
-                const currentIngredients = editingProduct.recipe_ingredients || [];
-                const updatedRecipe = [...currentIngredients, ...ingredientsToAdd];
-                
-                setEditingProduct(prev => ({
-                    ...prev,
-                    recipe_ingredients: updatedRecipe
-                }));
-
-                // También actualizar recipeIngredients para consistencia
-                setRecipeIngredients(prev => [...prev, ...ingredientsToAdd]);
-
-                // Limpiar solo los ingredientes que se agregaron y mantener uno vacío
-                setNewIngredients([{
-                    ingredient: null,
-                    quantity: '',
-                    unit: 'g'
-                }]);
-                setMessage(`✅ ${validIngredients.length} ingrediente(s) agregado(s) a la receta. Recuerde guardar los cambios del producto para confirmar.`);
-            };
-
-            const updateIngredientInRecipe = async (ingredientId, updatedData) => {
-                try {
-                    await updateRecipeIngredient(ingredientId, updatedData);
-                    await loadRecipe(selectedProduct.id);
-                    setEditingIngredient(null);
-                    setMessage('✅ Ingrediente actualizado exitosamente.');
-                } catch (error) {
-                    setMessage('❌ Error actualizando ingrediente.');
-                }
-            };
-
-            const deleteIngredientFromRecipe = async (ingredientId) => {
-                try {
-                    await deleteRecipeIngredient(ingredientId);
-                    // Actualizar estado local inmediatamente
-                    const updatedIngredients = recipeIngredients.filter(ing => ing.id !== ingredientId);
-                    setRecipeIngredients(updatedIngredients);
-                    setEditingProduct(prev => ({
-                        ...prev,
-                        recipe_ingredients: updatedIngredients
-                    }));
-                    setMessage('✅ Ingrediente eliminado de la receta exitosamente.');
-                } catch (error) {
-                    setMessage('❌ Error eliminando ingrediente de la receta.');
-                }
-            };
-
-            // Función para manejar el cambio de ingrediente - usa unidad del backend
-            const handleIngredientChange = (selectedOption, index) => {
-                const updatedIngredients = [...newIngredients];
-                if (selectedOption) {
-                    updatedIngredients[index] = {
-                        ...updatedIngredients[index],
-                        ingredient: selectedOption,
-                        unit: selectedOption.suggested_unit || 'g'
-                    };
-                } else {
-                    updatedIngredients[index] = {
-                        ...updatedIngredients[index],
-                        ingredient: null,
-                        unit: 'g'
-                    };
-                }
-                setNewIngredients(updatedIngredients);
-            };
-
-            // Función para agregar un nuevo campo de ingrediente vacío
-            const addNewIngredientField = () => {
-                setNewIngredients([...newIngredients, {
-                    ingredient: null,
-                    quantity: '',
-                    unit: 'g'
-                }]);
-            };
-
-            // Función para eliminar un campo de ingrediente
-            const removeIngredientField = (index) => {
-                if (newIngredients.length > 1) {
-                    const updatedIngredients = newIngredients.filter((_, i) => i !== index);
-                    setNewIngredients(updatedIngredients);
-                }
-            };
-
-            // Función para actualizar cantidad y unidad de un ingrediente
-            const updateIngredientField = (index, field, value) => {
-                const updatedIngredients = [...newIngredients];
-                updatedIngredients[index] = {
-                    ...updatedIngredients[index],
-                    [field]: value
-                };
-                setNewIngredients(updatedIngredients);
-            };
-    
-            // Función para seleccionar un producto para editar
-            const selectProductForEdit = async (product) => {
-                if (!product) {
-                    setMessage('⚠️ Producto no encontrado.');
-                    return;
-                }
-                setSelectedProduct(product);
-                
-                // Convertir umbral de stock de unidad base a unidad de visualización
-                const convertThresholdFromBaseUnit = (threshold, unit) => {
-                    if (unit === 'g') return threshold / 1000; // gramos a Kg
-                    if (unit === 'ml') return threshold / 1000; // mililitros a L
-                    return threshold; // unidades sin cambio
-                };
-                
-                setEditingProduct({
-                    name: product.name || '',
-                    price: product.price || 0,
-                    category: product.category || 'Producto',
-                    stock: product.stock || 0,
-                    description: product.description || '',
-                    lowStockThreshold: convertThresholdFromBaseUnit(product.lowStockThreshold ?? product.low_stock_threshold ?? 10, product.unit),
-                    highStockMultiplier: product.highStockMultiplier ?? product.high_stock_multiplier ?? 2.0,
-                    recipeYield: parseInt(product.recipe_yield) || 1,
-                    recipe_ingredients: []
-                });
-                setMessage('');
-                
-                // Cargar receta y ingredientes disponibles
-                await loadRecipe(product.id);
-                await loadAvailableIngredients();
-            };
-
-            // Función para guardar cambios del producto seleccionado
-            const handleSaveChanges = async (e) => {
-                if (e && typeof e.preventDefault === 'function') e.preventDefault();
-                if (!selectedProduct) return;
-
-                if (!validatePrice(editingProduct.price)) {
-                    setMessage('🚫 Error: El precio debe ser un número decimal positivo mayor a cero.');
-                    return;
-                }
-
-                if (!validateCategory(editingProduct.category)) {
-                    setMessage('🚫 Error: La categoría debe existir en la lista de categorías registradas.');
-                    return;
-                }
-
-                if (!validateStock(editingProduct.stock)) {
-                    setMessage('🚫 Error: El stock debe ser un número entero positivo o cero.');
-                    return;
-                }
-
-                if (!validateLowStockThreshold(editingProduct.lowStockThreshold)) {
-                    setMessage('🚫 Error: El umbral de stock bajo debe ser un número entero positivo o cero.');
-                    return;
-                }
-
-                if (!editingProduct.name.trim() || editingProduct.price <= 0 || !editingProduct.category) {
-                    setMessage('🚫 Error: No se pueden eliminar datos obligatorios (nombre, precio, categoría).');
-                    return;
-                }
-
-                try {
-                    // Preparar ingredientes nuevos para enviar al backend
-                    const newIngredientsData = editingProduct.recipe_ingredients
-                        .filter(ingredient => !ingredient.id) // Solo ingredientes nuevos
-                        .map(ingredient => ({
-                            ingredient: ingredient.ingredient,
-                            quantity: parseFloat(ingredient.quantity),
-                            unit: ingredient.unit
-                        }));
-
-                    // Validar recipe_yield
-                    const recipeYieldValue = parseInt(editingProduct.recipeYield) || 1;
-                    if (recipeYieldValue < 1) {
-                        setMessage('🚫 Error: El rendimiento de la receta debe ser al menos 1.');
-                        return;
-                    }
-
-                    // Convertir umbral de stock a unidad base antes de enviar
-                    const convertThresholdToBaseUnit = (threshold, unit) => {
-                        if (unit === 'g') return threshold * 1000; // Kg a gramos
-                        if (unit === 'ml') return threshold * 1000; // L a mililitros
-                        return threshold; // unidades sin cambio
-                    };
-
-                    const updatedProduct = {
-                        name: editingProduct.name,
-                        price: parseFloat(editingProduct.price),
-                        category: editingProduct.category,
-                        // stock: parseFloat(editingProduct.stock), // Eliminado: stock es solo visual, no editable
-                        description: editingProduct.description,
-                        low_stock_threshold: convertThresholdToBaseUnit(parseFloat(editingProduct.lowStockThreshold), selectedProduct.unit),
-                        high_stock_multiplier: parseFloat(editingProduct.highStockMultiplier),
-                        recipe_yield: recipeYieldValue
-                    };
-
-                    // Solo incluir recipe_ingredients si hay ingredientes nuevos
-                    if (newIngredientsData.length > 0) {
-                        updatedProduct.recipe_ingredients = newIngredientsData;
-                    }
-
-                    // Primer intento: actualizar producto normal
-                    const response = await api.put(`/products/${selectedProduct.id}/`, updatedProduct);
-                    
-                    let recipeYieldUpdated = false;
-                    
-                    // Verificar si recipe_yield se guardó correctamente (convertir ambos a números para comparar)
-                    const receivedRecipeYield = parseInt(response.data.recipe_yield) || 0;
-                    
-                    if (response.data && receivedRecipeYield === recipeYieldValue) {
-                        recipeYieldUpdated = true;
-                    } else {
-                        // Segundo intento: usar endpoint específico para recipe_yield
-                        try {
-                            const recipeYieldResponse = await api.patch(`/products/${selectedProduct.id}/update_recipe_yield/`, {
-                                recipe_yield: recipeYieldValue
-                            });
-                            
-                            const receivedRecipeYieldSecond = parseInt(recipeYieldResponse.data.recipe_yield) || 0;
-                            if (recipeYieldResponse.data && receivedRecipeYieldSecond === recipeYieldValue) {
-                                recipeYieldUpdated = true;
-                            }
-                        } catch (recipeYieldError) {
-                            console.error('Error en endpoint específico:', recipeYieldError);
-                        }
-                    }
-                    
-                    await loadProducts();
-
-                    setSelectedProduct(null);
-                    setEditingProduct({
-                        name: '',
-                        price: 0,
-                        category: 'Producto',
-                        stock: 0,
-                        description: '',
-                        lowStockThreshold: 10,
-                        highStockMultiplier: 2.0,
-                        recipeYield: 1,
-                        recipe_ingredients: []
-                    });
-                    
-                    // Limpiar estados de recetas
-                    setRecipeIngredients([]);
-                    setNewIngredients([{
-                        ingredient: null,
-                        quantity: '',
-                        unit: 'g'
-                    }]);
-                    setEditingIngredient(null);
-                    
-                    // Mensaje final basado en el estado real
-                    if (recipeYieldUpdated) {
-                        setMessage('✅ Producto actualizado correctamente en el servidor. Los cambios se reflejan en todas las secciones.');
-                    } else {
-                        setMessage(`⚠️ Producto actualizado parcialmente. El recipe_yield no se pudo guardar (enviado: ${recipeYieldValue}, actual: ${response.data.recipe_yield}). Otros cambios sí se guardaron.`);
-                    }
-                } catch (error) {
-                    if (error.response && error.response.data) {
-                        const errorData = error.response.data;
-                        if (typeof errorData === 'string') {
-                            setMessage(`❌ Error: ${errorData}`);
-                        } else if (errorData.detail) {
-                            setMessage(`❌ Error: ${errorData.detail}`);
-                        } else {
-                            setMessage('❌ Error: No se pudo actualizar el producto. Verifique los datos.');
-                        }
-                    } else {
-                        setMessage('❌ Error: No se pudo actualizar el producto en el servidor. Los cambios no fueron guardados.');
-                    }
-                }
-            };
-    
-            // Función para cancelar la edición
-            const handleCancelEdit = () => {
-                setSelectedProduct(null);
-                setEditingProduct({
-                    name: '',
-                    price: 0,
-                    category: 'Producto',
-                    stock: 0,
-                    description: '',
-                    lowStockThreshold: 10,
-                    recipeYield: 1,
-                    recipe_ingredients: []
-                });
-                setMessage('');
-                setConfirmDelete(false);
-                
-                // Limpiar estados de recetas
-                setRecipeIngredients([]);
-                setNewIngredients([{
-                    ingredient: null,
-                    quantity: '',
-                    unit: 'g'
-                }]);
-                setEditingIngredient(null);
-                setEditingIngredient(null);
-            };
-            
-            // Función para eliminar un producto
-            const handleDeleteProduct = async () => {
-                if (!selectedProduct) return;
-                
-                // Si el producto tiene ventas, no se puede eliminar
-                if (selectedProduct.hasSales) {
-                    const itemType = selectedProduct?.category === 'Insumo' ? 'insumo' : 'producto';
-                    setMessage(`⚠️ Error: No se puede eliminar un ${itemType} que ya tiene ventas registradas.`);
-                    setConfirmDelete(false);
-                    return;
-                }
-                
-                if (!confirmDelete) {
-                    setConfirmDelete(true);
-                    const itemType = selectedProduct?.category === 'Insumo' ? 'insumo' : 'producto';
-                    setMessage(`⚠️ ¿Estás seguro de que deseas eliminar este ${itemType}? Esta acción no se puede deshacer.`);
-                    return;
-                }
-                
-                try {
-                    // Eliminar del backend primero
-                    await api.delete(`/products/${selectedProduct.id}/`);
-                    
-                    // Si se elimina correctamente del backend, eliminar del estado local
-                    const updatedProducts = products.filter(product => product.id !== selectedProduct.id);
-                    
-                    setProducts(updatedProducts);
-                    setSelectedProduct(null);
-                    setEditingProduct({
-                        name: '',
-                        price: 0,
-                        category: 'Producto',
-                        stock: 0,
-                        description: '',
-                        lowStockThreshold: 10,
-                        recipeYield: 1
-                    });
-                    setConfirmDelete(false);
-                    const itemType = selectedProduct?.category === 'Insumo' ? 'Insumo' : 'Producto';
-                    setMessage(`✅ ${itemType} eliminado correctamente del servidor y todas las secciones.`);
-                } catch (error) {
-                    console.error('Error eliminando producto del servidor:', error);
-                    const itemType = selectedProduct?.category === 'Insumo' ? 'insumo' : 'producto';
-                    setMessage(`❌ Error: No se pudo eliminar el ${itemType} del servidor. El ${itemType} permanece en el sistema.`);
-                    setConfirmDelete(false);
-                }
-            };
-            
-            // Función para eliminar todos los productos
-            const handleDeleteAllProducts = async () => {
-                if (!deleteAllConfirm) {
-                    setDeleteAllConfirm(true);
-                    setMessage('⚠️ ¿Estás seguro de que deseas eliminar TODOS los productos e insumos sin ventas? Esta acción no se puede deshacer.');
-                    return;
-                }
-                
-                try {
-                    // Obtener productos sin ventas que se pueden eliminar
-                    const productsToDelete = products.filter(product => !product.hasSales);
-                    
-                    // Eliminar cada producto del backend
-                    const deletePromises = productsToDelete.map(product => 
-                        api.delete(`/products/${product.id}/`)
-                    );
-                    
-                    await Promise.all(deletePromises);
-                    
-                    // Si se eliminan correctamente del backend, actualizar estado local
-                    const productsWithSales = products.filter(product => product.hasSales);
-                    
-                    setProducts(productsWithSales);
-                    setDeleteAllConfirm(false);
-                    setMessage(`✅ ${productsToDelete.length} productos e insumos eliminados correctamente del servidor y todas las secciones.`);
-                } catch (error) {
-                    console.error('Error eliminando productos del servidor:', error);
-                    setMessage('❌ Error: No se pudieron eliminar todos los productos e insumos del servidor.');
-                    setDeleteAllConfirm(false);
-                }
-            };
-    
-            // Obtener solo productos nuevos (sin ventas registradas)
-            const newProducts = products.filter(product => !product.hasSales);
-    
-            return (
-                <div className="management-container">
-                    <div style={{marginBottom: '10px'}}>
-                        <h2>Editar Productos e Insumos</h2>
-                    </div>
-                    {message && <p className="message">{message}</p>}
-                    
-                    <div className="products-list">
-                        <h3>Productos e Insumos Disponibles para Edición</h3>
-                        
-                        
-                        {/* Buscador de productos */}
-                        <div className="search-container" style={{marginBottom: '20px'}}>
-                            <div style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
-                                <input
-                                    type="text"
-                                    placeholder="Buscar por nombre, categoría o descripción..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="search-input"
-                                    style={{
-                                        width: '100%',
-                                        padding: '10px 40px 10px 10px',
-                                        fontSize: '16px',
-                                        border: '1px solid #ddd',
-                                        borderRadius: '4px',
-                                        marginBottom: '10px'
-                                    }}
-                                />
-                                {searchTerm && (
-                                    <button
-                                        onClick={() => setSearchTerm('')}
-                                        style={{
-                                            position: 'absolute',
-                                            right: '10px',
-                                            top: '50%',
-                                            transform: 'translateY(-50%)',
-                                            background: 'none',
-                                            border: 'none',
-                                            fontSize: '18px',
-                                            cursor: 'pointer',
-                                            color: '#666',
-                                            marginBottom: '10px'
-                                        }}
-                                        title="Limpiar búsqueda"
-                                    >
-                                        ×
-                                    </button>
-                                )}
-                            </div>
-                            {searchTerm && (
-                                <p style={{fontSize: '14px', color: '#666', marginBottom: '10px'}}>
-                                    {filteredProducts.filter(p => !p.hasSales).length} resultado(s) encontrado(s) para "{searchTerm}"
-                                </p>
-                            )}
-                        </div>
-                        
-                        {(() => {
-                            // Usar products directamente si filteredProducts está vacío (carga inicial)
-                            const productsToShow = filteredProducts.length > 0 ? filteredProducts : products;
-                            const editableProducts = productsToShow.filter(p => !p.hasSales);
-                            
-                            // Durante el primer render, no mostrar nada para evitar parpadeo
-                            if (isFirstRender) {
-                                return null;
-                            }
-                            
-                            // Si debe mostrar mensaje de carga (con delay) Y no es la primera carga, mostrar indicador
-                            if (showLoadingMessage && !isFirstRender) {
-                                return <p className="no-products">Cargando productos...</p>;
-                            }
-                            
-                            // Si hay productos editables, mostrar la lista
-                            if (editableProducts.length > 0) {
-                                return (
-                            <ul className="list-container">
-                                {productsToShow.filter(p => !p.hasSales).map(product => (
-                                    <React.Fragment key={product.id}>
-                                        <li className="product-list-item">
-                                            <div className="product-info">
-                                                <strong>{product.name}</strong>
-                                                <span className="product-price">${product.price}</span>
-                                                <span className="product-category">{product.category}</span>
-                                                <span className="product-stock">Stock: {product.stock}</span>
-                                                <span className="product-threshold">Umbral Stock Bajo: {product.lowStockThreshold || 10}</span>
-                                                {product.description && (
-                                                    <span className="product-description">{product.description}</span>
-                                                )}
-                                            </div>
-                                            <button 
-                                                onClick={() => selectProductForEdit(product)}
-                                                className="edit-button"
-                                                disabled={selectedProduct?.id === product.id}
-                                            >
-                                                {selectedProduct?.id === product.id ? 'Editando...' : 'Editar'}
-                                            </button>
-                                        </li>
-                                        
-                                        {/* Formulario inline que aparece debajo del producto seleccionado */}
-                                        {selectedProduct?.id === product.id && (
-                                            <li className="edit-form-inline" style={{listStyle: 'none', padding: '20px', backgroundColor: '#f9f9f9', borderRadius: '8px', marginBottom: '20px'}}>
-                                                <h3>Editar Producto: {selectedProduct.name}</h3>
-                                                
-                                                <form onSubmit={handleSaveChanges} className="form-container">
-                                                    <div className="form-group">
-                                                        <label>Nombre del Producto *</label>
-                                                        <input 
-                                                            type="text" 
-                                                            value={editingProduct.name} 
-                                                            onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} 
-                                                            placeholder="Nombre del producto (máximo 100 caracteres)"
-                                                            maxLength="100"
-                                                            required 
-                                                        />
-                                                    </div>
-                                                    
-                                                    <div className="form-group">
-                                                        <label>Precio *</label>
-                                                        <input 
-                                                            type="number" 
-                                                            value={editingProduct.price} 
-                                                            onChange={e => setEditingProduct({...editingProduct, price: parseFloat(e.target.value)})} 
-                                                            placeholder="Precio (mayor a 0)"
-                                                            min="0.01"
-                                                            step="0.01"
-                                                            required 
-                                                        />
-                                                    </div>
-                                                    
-                                                    <div className="form-group">
-                                                        <label>Categoría *</label>
-                                                        <select 
-                                                            value={editingProduct.category} 
-                                                            onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
-                                                            required
-                                                        >
-                                                            <option value="Producto">Producto</option>
-                                                            <option value="Insumo">Insumo</option>
-                                                        </select>
-                                                    </div>
-                                                    
-                                                    <div className="form-group">
-                                                        <label>Stock Actual {selectedProduct?.unit && `(${selectedProduct.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'})`}</label>
-                                                        <input 
-                                                            type="number" 
-                                                            value={selectedProduct?.unit === 'g' ? (editingProduct.stock / 1000).toFixed(3) : 
-                                                                   selectedProduct?.unit === 'ml' ? (editingProduct.stock / 1000).toFixed(3) : 
-                                                                   editingProduct.stock} 
-                                                            readOnly
-                                                            disabled
-                                                            style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}
-                                                            placeholder={`Stock actual en ${selectedProduct?.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'} (solo lectura)`}
-                                                        />
-                                                        <small style={{ color: '#666', fontSize: '0.9em' }}>
-                                                            Este campo es solo informativo. El stock se actualiza automáticamente con las ventas y movimientos de inventario.
-                                                        </small>
-                                                    </div>
-                                                    
-                                                    <div className="form-group">
-                                                        <label>Descripción</label>
-                                                        <textarea 
-                                                            value={editingProduct.description} 
-                                                            onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} 
-                                                            placeholder="Descripción del producto (opcional)"
-                                                            rows="3"
-                                                        />
-                                                    </div>
-                                                    
-                                                    <div className="form-group">
-                                                        <label>Umbral de Stock Bajo * {selectedProduct?.unit && `(${selectedProduct.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'})`}</label>
-                                                        <input 
-                                                            type="number" 
-                                                            step="0.1"
-                                                            value={editingProduct.lowStockThreshold} 
-                                                            onChange={e => {
-                                                                const value = e.target.value === '' ? 0 : parseFloat(e.target.value) || 0;
-                                                                setEditingProduct({...editingProduct, lowStockThreshold: value});
-                                                            }} 
-                                                            placeholder={`Nivel de stock para alertas en ${selectedProduct?.unit === 'g' ? 'Kg' : selectedProduct.unit === 'ml' ? 'L' : 'Unidades'} (0 o mayor)`}
-                                                            min="0"
-                                                            required 
-                                                        />
-                                                        <small className="form-helper-text">
-                                                            Cantidad mínima de stock antes de mostrar alertas en el Dashboard
-                                                        </small>
-                                                    </div>
-
-                                                    <div className="form-group">
-                                                        <label>Multiplicador para Stock Alto *</label>
-                                                        <input 
-                                                            type="number" 
-                                                            step="0.1"
-                                                            value={editingProduct.highStockMultiplier} 
-                                                            onChange={e => {
-                                                                const value = e.target.value === '' ? 2.0 : parseFloat(e.target.value) || 2.0;
-                                                                setEditingProduct({...editingProduct, highStockMultiplier: value});
-                                                            }} 
-                                                            placeholder="Ej: 2.0 = duplicar, 3.5 = triplicar y medio"
-                                                            min="1.1"
-                                                            required 
-                                                        />
-                                                        <small className="form-helper-text">
-                                                            Factor para calcular stock alto: Stock Alto = Umbral × Multiplicador. Stock Medio queda entre ambos valores.
-                                                        </small>
-                                                    </div>
-
-                                                    {/* Campo de rendimiento solo para productos que no son insumos */}
-                                                    {editingProduct.category === 'Producto' && (
-                                                        <div className="form-group">
-                                                            <label>Rendimiento de la Receta *</label>
-                                                            <input 
-                                                                type="number" 
-                                                                value={editingProduct.recipeYield} 
-                                                                onChange={e => {
-                                                                    const value = e.target.value === '' ? 1 : parseInt(e.target.value) || 1;
-                                                                    setEditingProduct({...editingProduct, recipeYield: value});
-                                                                }} 
-                                                                placeholder="Unidades que produce esta receta"
-                                                                min="1"
-                                                                required 
-                                                            />
-                                                            <small className="form-helper-text">
-                                                                Número de unidades que produce una ejecución completa de esta receta
-                                                            </small>
-                                                        </div>
-                                                    )}
-
-                                                    {/* Sección de Recetas - Solo para productos que no son insumos */}
-                                                    {selectedProduct && editingProduct.category === 'Producto' && (
-                                                        <div className="recipe-section">
-                                                            <h4>Receta del Producto</h4>
-                                                            
-                                                            {/* Lista de ingredientes actuales */}
-                                                            <div className="current-ingredients">
-                                                                <h5>Ingredientes Actuales:</h5>
-                                                                {(!editingProduct.recipe_ingredients || editingProduct.recipe_ingredients.length === 0) ? (
-                                                                    <p>No hay ingredientes en la receta.</p>
-                                                                ) : (
-                                                                    <div className="ingredients-list">
-                                                                        {editingProduct.recipe_ingredients.map((ingredient, index) => (
-                                                                            <div key={index} className="ingredient-item">
-                                                                                <div className="ingredient-display">
-                                                                                    <span className="ingredient-info">
-                                                                                        <strong>{ingredient.ingredient_name}</strong>: {ingredient.quantity} {ingredient.unit}
-                                                                                    </span>
-                                                                                    <div className="ingredient-actions">
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() => {
-                                                                                                // Si el ingrediente tiene ID, usar la API para eliminarlo
-                                                                                                if (ingredient.id) {
-                                                                                                    deleteIngredientFromRecipe(ingredient.id);
-                                                                                                } else {
-                                                                                                    // Si no tiene ID, solo quitarlo del estado local
-                                                                                                    const updatedIngredients = editingProduct.recipe_ingredients.filter((_, i) => i !== index);
-                                                                                                    setEditingProduct(prev => ({
-                                                                                                        ...prev,
-                                                                                                        recipe_ingredients: updatedIngredients
-                                                                                                    }));
-                                                                                                }
-                                                                                            }}
-                                                                                            className="action-button delete small"
-                                                                                        >
-                                                                                            Eliminar
-                                                                                        </button>
-                                                                                    </div>
-                                                                                </div>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-
-                                                            {/* Formulario para agregar múltiples ingredientes */}
-                                                            <div className="add-ingredient-form">
-                                                                <h5>Agregar Ingredientes:</h5>
-                                                                {newIngredients.map((newIngredient, index) => (
-                                                                    <div key={index} className="form-row ingredient-row">
-                                                                        <div className="form-group">
-                                                                            <label>Ingrediente:</label>
-                                                                            <Select
-                                                                                value={newIngredient.ingredient}
-                                                                                onChange={(selectedOption) => handleIngredientChange(selectedOption, index)}
-                                                                                options={availableIngredients.map(ingredient => ({
-                                                                                        value: ingredient.id,
-                                                                                        label: `${ingredient.name} (Stock: ${ingredient.stock} ${ingredient.unit})`,
-                                                                                        unit: ingredient.unit,
-                                                                                        suggested_unit: ingredient.suggested_unit
-                                                                                    }))}
-                                                                                placeholder="Buscar ingrediente..."
-                                                                                isClearable
-                                                                                isSearchable
-                                                                                className="searchable-select"
-                                                                                menuPortalTarget={document.body}
-                                                                                styles={{
-                                                                                    menuPortal: (base) => ({ ...base, zIndex: 9999 })
-                                                                                }}
-                                                                            />
-                                                                        </div>
-                                                                        <div className="form-group">
-                                                                            <label>Cantidad:</label>
-                                                                            <input
-                                                                                type="number"
-                                                                                step="0.01"
-                                                                                placeholder="Cantidad"
-                                                                                value={newIngredient.quantity}
-                                                                                onChange={(e) => updateIngredientField(index, 'quantity', e.target.value)}
-                                                                            />
-                                                                        </div>
-                                                                        <div className="form-group">
-                                                                            <label>Unidad:</label>
-                                                                            <select
-                                                                                value={newIngredient.unit}
-                                                                                onChange={(e) => updateIngredientField(index, 'unit', e.target.value)}
-                                                                            >
-                                                                                <option value="g">Gramos</option>
-                                                                                <option value="ml">Mililitros</option>
-                                                                                <option value="unidades">Unidades</option>
-                                                                            </select>
-                                                                        </div>
-                                                                        <div className="form-group">
-                                                                            <label>&nbsp;</label>
-                                                                            <div className="ingredient-actions">
-                                                                                {index === newIngredients.length - 1 && (
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={addNewIngredientField}
-                                                                                        className="action-button secondary small"
-                                                                                        title="Agregar otro ingrediente"
-                                                                                    >
-                                                                                        +
-                                                                                    </button>
-                                                                                )}
-                                                                                {newIngredients.length > 1 && (
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => removeIngredientField(index)}
-                                                                                        className="action-button delete small"
-                                                                                        title="Eliminar este ingrediente"
-                                                                                    >
-                                                                                        ×
-                                                                                    </button>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                ))}
-                                                                <div className="form-actions">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={addIngredientsToRecipe}
-                                                                        className="action-button primary"
-                                                                    >
-                                                                        Agregar Todos los Ingredientes
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    
-                                                    <div className="button-group">
-                                                        <button type="submit" className="action-button primary">
-                                                            Guardar Cambios
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={handleCancelEdit}
-                                                            className="action-button secondary"
-                                                        >
-                                                            Cancelar
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={handleDeleteProduct}
-                                                            className="action-button delete"
-                                                        >
-                                                            {confirmDelete ? "Confirmar Eliminación" : 
-                                                             `Eliminar ${selectedProduct?.category === 'Insumo' ? 'Insumo' : 'Producto'}`}
-                                                        </button>
-                                                    </div>
-                                                </form>
-                                            </li>
-                                        )}
-                                    </React.Fragment>
-                                ))}
-                            </ul>
-                                );
-                            }
-                            
-                            // Si no hay productos editables y hay término de búsqueda
-                            if (searchTerm) {
-                                return <p className="no-products">No se encontraron productos que coincidan con la búsqueda.</p>;
-                            }
-                            
-                            // Si no hay productos en total o están cargando, no mostrar nada para evitar parpadeo
-                            if (products.length === 0) {
-                                return null;
-                            }
-                            
-                            // Si hay productos pero ninguno es editable
-                            return <p className="no-products">No hay productos nuevos disponibles para editar.</p>;
-                        })()}
-                    </div>
-    
-                    <div className="manage-all-products">
-                        <button 
-                            onClick={handleDeleteAllProducts}
-                            className="action-button delete-all"
-                            disabled={newProducts.length === 0}
-                        >
-                            {deleteAllConfirm ? "Confirmar Eliminación de Todos" : "Eliminar Todos los Productos/Insumos"}
-                        </button>
-                    </div>
-            </div>
-        )};
-
         const LowStockReport = () => {
-            const [productId, setProductId] = useState('');
+            const [selectedProducts, setSelectedProducts] = useState([{ id: '', product: null }]);
             const [message, setMessage] = useState('');
             const [notification, setNotification] = useState('');
         
+            // Función para formatear el stock con la unidad apropiada
+            const formatStock = (stock, unit) => {
+                if (!unit) return stock;
+                
+                switch(unit.toLowerCase()) {
+                    case 'g':
+                        return `${(stock / 1000).toFixed(2)} Kg`;
+                    case 'ml':
+                        return `${(stock / 1000).toFixed(2)} L`;
+                    case 'u':
+                        return `${Math.round(stock)} U`;
+                    default:
+                        return `${stock} ${unit}`;
+                }
+            };
+        
+            const handleAddProduct = () => {
+                setSelectedProducts([...selectedProducts, { id: Date.now(), product: null }]);
+            };
+            
+            const handleRemoveProduct = (id) => {
+                if (selectedProducts.length > 1) {
+                    setSelectedProducts(selectedProducts.filter(p => p.id !== id));
+                }
+            };
+            
+            const handleProductChange = (id, option) => {
+                setSelectedProducts(selectedProducts.map(p => 
+                    p.id === id ? { ...p, product: option } : p
+                ));
+            };
+        
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!productId || !message) {
-                    setNotification('Por favor, selecciona un producto y escribe un mensaje.');
+                const validProducts = selectedProducts.filter(p => p.product && p.product.value);
+                
+                if (validProducts.length === 0 || !message) {
+                    setNotification('Por favor, selecciona al menos un producto/insumo y escribe un mensaje.');
                     return;
                 }
+                
                 try {
+                    // Enviar un solo reporte con múltiples productos
                     await api.post('/low-stock-reports/create/', {
-                        product: productId,
+                        product_ids: validProducts.map(p => p.product.value),
                         message: message,
                     });
-                    setNotification('Reporte enviado con éxito.');
-                    setProductId('');
+                    
+                    setNotification(`Reporte con ${validProducts.length} producto(s)/insumo(s) enviado con éxito.`);
+                    setSelectedProducts([{ id: Date.now(), product: null }]);
                     setMessage('');
                 } catch (error) {
                     setNotification('Error al enviar el reporte.');
@@ -4495,12 +3232,71 @@ const PurchaseRequests = () => {
                     <h2>Reportar Faltantes o Bajo Stock</h2>
                     {notification && <p className="message">{notification}</p>}
                     <form onSubmit={handleSubmit} className="form-container">
-                        <Select
-                            options={products.map(p => ({ value: p.id, label: `${p.name} (Stock: ${p.stock})` }))}
-                            onChange={(option) => setProductId(option ? option.value : '')}
-                            placeholder="Selecciona un producto"
-                            isClearable
-                        />
+                        <div style={{ marginBottom: '20px' }}>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: window.innerWidth >= 2560 ? 'repeat(7, 1fr)' :
+                                                   window.innerWidth >= 1900 ? 'repeat(6, 1fr)' :
+                                                   window.innerWidth >= 1600 ? 'repeat(5, 1fr)' :
+                                                   window.innerWidth >= 1400 ? 'repeat(4, 1fr)' :
+                                                   window.innerWidth >= 1200 ? 'repeat(3, 1fr)' :
+                                                   window.innerWidth >= 740 ? 'repeat(2, 1fr)' : '1fr',
+                                gap: '15px',
+                                marginBottom: '15px'
+                            }}>
+                                {selectedProducts.map((item, index) => (
+                                    <div key={item.id} style={{ position: 'relative' }}>
+                                        <Select
+                                            value={item.product}
+                                            options={products.map(p => ({ 
+                                                value: p.id, 
+                                                label: `${p.name} (Stock: ${formatStock(p.stock, p.unit)})`,
+                                                category: p.category
+                                            }))}
+                                            onChange={(option) => handleProductChange(item.id, option)}
+                                            placeholder="Selecciona producto/insumo"
+                                            isClearable
+                                            isSearchable
+                                        />
+                                        {selectedProducts.length > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveProduct(item.id)}
+                                                style={{
+                                                    position: 'absolute',
+                                                    top: '-10px',
+                                                    right: '-10px',
+                                                    width: '25px',
+                                                    height: '25px',
+                                                    borderRadius: '50%',
+                                                    border: 'none',
+                                                    backgroundColor: '#dc3545',
+                                                    color: 'white',
+                                                    cursor: 'pointer',
+                                                    fontSize: '16px',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    padding: 0,
+                                                    zIndex: 10
+                                                }}
+                                                title="Eliminar"
+                                            >
+                                                ×
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={handleAddProduct}
+                                className="action-button secondary"
+                                style={{ marginTop: '10px' }}
+                            >
+                                + Agregar otro producto/insumo
+                            </button>
+                        </div>
                         <textarea
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
@@ -4514,64 +3310,6 @@ const PurchaseRequests = () => {
             );
         };
         
-        const ViewLowStockReports = () => {
-            const [reports, setReports] = useState([]);
-            const [loading, setLoading] = useState(true);
-            const [error, setError] = useState('');
-        
-            useEffect(() => {
-                const fetchReports = async () => {
-                    try {
-                        const response = await api.get('/low-stock-reports/');
-                        setReports(response.data);
-                    } catch (err) {
-                        setError('No se pudieron cargar los reportes.');
-                        console.error('Error fetching low stock reports:', err);
-                    } finally {
-                        setLoading(false);
-                    }
-                };
-                fetchReports();
-            }, []);
-        
-            const handleResolve = async (reportId) => {
-                try {
-                    await api.patch(`/low-stock-reports/${reportId}/update/`, { is_resolved: true });
-                    setReports(reports.map(r => r.id === reportId ? { ...r, is_resolved: true } : r));
-                } catch (err) {
-                    setError('Error al marcar como resuelto.');
-                    console.error('Error resolving report:', err);
-                }
-            };
-        
-            if (loading) return <div>Cargando reportes...</div>;
-            if (error) return <div className="error-message">{error}</div>;
-
-            return (
-                <div className="management-container">
-                    <h2>Reportes de Faltantes y Bajo Stock</h2>
-                    <ul className="list-container">
-                        {reports.map(report => (
-                            <li key={report.id} className={`list-item ${report.is_resolved ? 'resolved' : ''}`}>
-                                <div className="report-info">
-                                    <strong>Producto:</strong> {report.product_name} <br />
-                                    <strong>Reportado por:</strong> {report.reported_by} el {new Date(report.created_at).toLocaleString()} <br />
-                                    <strong>Mensaje:</strong> {report.message}
-                                </div>
-                                <div className="report-actions">
-                                    {report.is_resolved ? (
-                                        <span>Resuelto</span>
-                                    ) : (
-                                        <button onClick={() => handleResolve(report.id)} className="action-button primary">Marcar como Resuelto</button>
-                                    )}
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            );
-        };
-
     // Renderiza el componente de la página actual según el estado.
     const renderPage = () => {
         // Always allow forgot-password page even when not logged in
@@ -4588,7 +3326,7 @@ const PurchaseRequests = () => {
 
         // Defensive: ensure currentPage is a known page when logged in to avoid falling
         // into the default case which renders the "Página no encontrada." message
-    const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'editar productos','login', 'reportar faltantes', 'ver reportes de faltantes', 'gestión de pérdidas', 'generate-token']);
+    const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'edicion','login', 'reportar faltantes', 'ver reportes de faltantes', 'gestión de pérdidas', 'generate-token']);
         let pageToRender = currentPage;
         if (!validPages.has(String(currentPage))) {
             console.warn('⚠️ currentPage inválido detectado, forzando a dashboard:', currentPage);
@@ -4651,12 +3389,19 @@ const PurchaseRequests = () => {
                 />;
             case 'datos de mi usuario':
                 return <MyUserData />;
-            case 'editar productos':
-                return userRole === 'Gerente' ? <EditNewProducts/> : <div>Acceso Denegado</div>;
+            case 'edicion':
+                return userRole === 'Gerente' ? (
+                    <Edicion
+                        products={products}
+                        setProducts={setProducts}
+                        loadProducts={loadProducts}
+                        isLoading={isLoading}
+                    />
+                ) : <div>Acceso Denegado</div>;
             case 'reportar faltantes':
                 return <LowStockReport />;
             case 'ver reportes de faltantes':
-                return userRole === 'Gerente' ? <ViewLowStockReports /> : <div>Acceso Denegado</div>;
+                return userRole === 'Gerente' ? <Ver_Reportes_De_Faltantes products={products} /> : <div>Acceso Denegado</div>;
             case 'gestión de pérdidas':
                 return ['Gerente', 'Encargado'].includes(userRole) ? 
                     <LossManagement 
