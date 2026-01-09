@@ -170,9 +170,12 @@ const updateOrderStatus = (orderId, status) => {
   return api.patch(`/orders/${orderId}/`, { status });
 };
 
+// Funciones para Gestión de Pérdidas
+const getLossRecords = () => {
+  return api.get('/loss-records/');
+};
+
 // === FUNCIONES OFFLINE ===
-
-
 
 export default api;
 
@@ -196,5 +199,6 @@ export {
   getIngredientsWithSuggestedUnit,
   produceProduct,
   resetWithToken,
-  updateOrderStatus
+  updateOrderStatus,
+  getLossRecords // Nueva exportación
 };

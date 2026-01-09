@@ -4,7 +4,8 @@ from django.contrib.auth import get_user_model
 import math
 from .models import (
     Product, CashMovement, InventoryChange, Sale, SaleItem, Role, 
-    UserQuery, Supplier, UserStorage, LowStockReport, RecipeIngredient, LossRecord
+    UserQuery, Supplier, UserStorage, LowStockReport, RecipeIngredient, LossRecord,
+    Production, ProductionItem
 )
 from .models import ResetToken
 from .models import Purchase
@@ -452,12 +453,15 @@ class InventoryChangeAuditSerializer(serializers.ModelSerializer):
 # Serializer para registros de pérdidas
 class LossRecordSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
+    product_unit = serializers.CharField(source='product.unit', read_only=True)
+    product_stock = serializers.DecimalField(source='product.stock', max_digits=10, decimal_places=2, read_only=True)
+    product_category = serializers.CharField(source='product.category', read_only=True)
     user_name = serializers.CharField(source='user.username', read_only=True)
     category_display = serializers.CharField(source='get_category_display', read_only=True)
 
     class Meta:
         model = LossRecord
-        fields = ['id', 'product', 'product_name', 'quantity', 'category', 'category_display', 'description', 'cost_estimate', 'timestamp', 'user', 'user_name']
+        fields = ['id', 'product', 'product_name', 'product_unit', 'product_stock', 'product_category', 'quantity', 'category', 'category_display', 'description', 'cost_estimate', 'timestamp', 'user', 'user_name']
         read_only_fields = ['id', 'timestamp', 'user', 'cost_estimate']
 
     def validate(self, data):
@@ -468,7 +472,7 @@ class LossRecordSerializer(serializers.ModelSerializer):
             try:
                 from .models import Product
                 if product.category == 'Insumo':
-                    valid_categories = ['empaque_danado', 'sobreuso_receta', 'vencimiento', 'cadena_frio']
+                    valid_categories = ['empaque_danado', 'rotura_insumo', 'sobreuso_receta', 'vencimiento', 'cadena_frio']
                 else:
                     valid_categories = ['accidente_fisico', 'contaminacion', 'vencimiento', 'cadena_frio']
                 
@@ -524,6 +528,24 @@ class LossRecordSerializer(serializers.ModelSerializer):
             )
             
         return loss_record
+
+# Serializers para producción
+class ProductionItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+
+    class Meta:
+        model = __import__('api.models', fromlist=['ProductionItem']).ProductionItem
+        fields = ['id', 'product', 'product_name', 'quantity']
+        read_only_fields = ['id', 'product_name']
+
+class ProductionSerializer(serializers.ModelSerializer):
+    user = serializers.ReadOnlyField(source='user.username')
+    items = ProductionItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = __import__('api.models', fromlist=['Production']).Production
+        fields = ['id', 'user', 'created_at', 'total_units', 'items']
+        read_only_fields = ['id', 'user', 'created_at', 'total_units', 'items']
 
 class LowStockReportSerializer(serializers.ModelSerializer):
     reported_by = serializers.ReadOnlyField(source='reported_by.username')

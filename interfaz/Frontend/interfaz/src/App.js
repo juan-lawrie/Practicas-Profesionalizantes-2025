@@ -19,8 +19,9 @@ import Movimientos_De_Caja from './components/Movimientos_De_Caja';
 import Pedidos from './components/Pedidos';
 import PedDialogo from './components/PedDialogo';
 import Edicion from './components/Edicion';
+import DialogoHistorialDePerdidas from './components/dialogoHistorialDePerdidas';
 import Ver_Reportes_De_Faltantes from './components/Ver_Reportes_De_Faltantes';
-
+import CrearNuevoProducto from './components/crearNuevoProducto';
 
 
 // Helpers para usar el backend storage seguro
@@ -2249,400 +2250,16 @@ const App = () => {
     };
 
     // Componente de la interfaz de creación de nuevos productos.
-        // Componente de la interfaz de creación de nuevos productos.
+        // Componente que usa el módulo modularizado CrearNuevoProducto
         const ProductCreationViewComponent = () => {
-            // Función para convertir y formatear unidades (igual que en ProductionCreation)
-            const formatQuantityWithConversion = (quantity, unit) => {
-                const num = parseFloat(quantity);
-                
-                if (unit === 'g') {
-                    if (num >= 1000) {
-                        const kg = (num / 1000).toFixed(2);
-                        return `${num.toFixed(1)} g (${kg} kg)`;
-                    }
-                    return `${num.toFixed(1)} g`;
-                } else if (unit === 'ml') {
-                    if (num >= 1000) {
-                        const liters = (num / 1000).toFixed(2);
-                        return `${num.toFixed(1)} ml (${liters} L)`;
-                    }
-                    return `${num.toFixed(1)} ml`;
-                } else {
-                    return `${num.toFixed(1)} ${unit}`;
-                }
-            };
-
-            const [newProduct, setNewProduct] = useState({
-                name: '', 
-                description: '', 
-                price: 0, 
-                stock: 0, 
-                // Rendimiento de la receta: cuántas unidades produce una receta/lote
-                recipe_yield: 1,
-                low_stock_threshold: 10,
-                high_stock_multiplier: 2.0,
-                category: 'Producto',
-                unit: 'unidades'
-            });
-            const [recipeItems, setRecipeItems] = useState([{ ingredient: '', quantity: '', unit: '' }]);
-            const [message, setMessage] = useState('');
-
-            const handleRecipeChange = (index, field, value) => {
-                const newRecipeItems = [...recipeItems];
-                newRecipeItems[index][field] = value;
-
-                if (field === 'ingredient') {
-                    const selectedIngredient = products.find(p => p.id === value);
-                    if (selectedIngredient) {
-                        // Normalizar variantes de unidad que vengan del backend
-                        const normalizeUnit = (u) => {
-                            if (u === null || u === undefined) return '';
-                            const s = String(u).toLowerCase().trim();
-                            // Mapear a 'g'
-                            if (['g', 'gr', 'grs', 'gramo', 'gramos', 'grams', 'gram'].includes(s)) return 'g';
-                            // Mapear a 'ml'
-                            if (['ml', 'mililitro', 'mililitros', 'milil', 'millilitro', 'millilitros'].includes(s)) return 'ml';
-                            // Mapear a 'unidades'
-                            if (['unidad', 'unidades', 'u', 'uds', 'unidad(es)'].includes(s)) return 'unidades';
-                            return '';
-                        };
-
-                        const mapped = normalizeUnit(selectedIngredient.unit || '');
-                        if (mapped) {
-                            newRecipeItems[index]['unit'] = mapped;
-                        } else {
-                            // Si no se pudo mapear, dejar vacío y loggear para debug
-                            newRecipeItems[index]['unit'] = '';
-                        }
-                    }
-                }
-
-                setRecipeItems(newRecipeItems);
-            };
-
-            const addRecipeItem = () => {
-                setRecipeItems([...recipeItems, { ingredient: '', quantity: '', unit: '' }]);
-            };
-
-            const removeRecipeItem = (index) => {
-                const newRecipeItems = recipeItems.filter((_, i) => i !== index);
-                setRecipeItems(newRecipeItems);
-            };
-
-            const ingredientOptions = products
-                .filter(p => p.category === 'Insumo')
-                .map(p => ({ value: p.id, label: p.name }));
-    
-            const handleCreateProduct = async (e) => {
-                e.preventDefault();
-                
-                // Validaciones
-                if (!newProduct.name.trim()) {
-                    setMessage('🚫 Error: El nombre del producto es obligatorio.');
-                    return;
-                }
-                
-                if (newProduct.price <= 0) {
-                    setMessage('🚫 Error: El precio debe ser mayor a 0.');
-                    return;
-                }
-                
-                if (newProduct.stock < 0) {
-                    setMessage(' Error: El stock no puede ser negativo.');
-                    return;
-                }
-                
-                if (newProduct.low_stock_threshold < 0) {
-                    setMessage('🚫 Error: El umbral de stock bajo no puede ser negativo.');
-                    return;
-                }
-    
-                // Validar si el producto ya existe completamente (en inventario Y productos)
-                const productExistsInInventory = inventory.some(p => p.name.toLowerCase() === newProduct.name.trim().toLowerCase());
-                const productExistsInProducts = products.some(p => p.name.toLowerCase() === newProduct.name.trim().toLowerCase());
-                
-                if (productExistsInInventory && productExistsInProducts) {
-                    setMessage('⚠️ Error: El producto ya existe completamente en el sistema.');
-                    return;
-                }
-    
-                try {
-                    // Verificación específica para Safari antes de crear el producto
-                    const token = getInMemoryToken();
-                    if (!token) {
-                        setMessage('🚫 Error: No hay token de autenticación. Por favor, vuelve a iniciar sesión.');
-                        return;
-                    }
-                    
-                    // Verificar formato del token JWT
-                    try {
-                        const parts = token.split('.');
-                        if (parts.length !== 3) {
-                            setMessage('🚫 Error: Token de autenticación inválido. Por favor, vuelve a iniciar sesión.');
-                            return;
-                        }
-                    } catch (tokenError) {
-                        setMessage('🚫 Error: Token de autenticación malformado. Por favor, vuelve a iniciar sesión.');
-                        return;
-                    }
-
-                    if (newProduct.category === 'Producto' && newProduct.stock > 0) {
-                        for (const item of recipeItems) {
-                            if (!item.ingredient || !item.quantity || parseFloat(item.quantity) <= 0) {
-                                setMessage('🚫 Error: Todos los insumos de la receta deben tener un ingrediente seleccionado y una cantidad válida.');
-                                return;
-                            }
-    
-                            const ingredientInStore = products.find(p => p.id === item.ingredient);
-                            if (!ingredientInStore) {
-                                setMessage(`🚫 Error: El insumo con ID ${item.ingredient} no se encuentra en el inventario.`);
-                                return;
-                            }
-    
-                            // Calcular cantidad requerida proporcionalmente según el rendimiento por lote
-                            const recipeYield = parseFloat(newProduct.recipe_yield) || 1;
-                            const stockFloat = parseFloat(newProduct.stock) || 0;
-                            const multiplier = recipeYield > 0 ? (stockFloat / recipeYield) : 0;
-                            let requiredQuantity = parseFloat(item.quantity) * multiplier;
-
-                            // Si la unidad es 'unidades' redondear hacia arriba
-                            if ((item.unit || '').toString().toLowerCase() === 'unidades') {
-                                requiredQuantity = Math.ceil(requiredQuantity);
-                            }
-
-                            if (ingredientInStore.stock < requiredQuantity) {
-                                const requiredFormatted = formatQuantityWithConversion(requiredQuantity, item.unit);
-                                const availableFormatted = formatQuantityWithConversion(ingredientInStore.stock, ingredientInStore.unit || item.unit);
-                                setMessage(`🚫 Error: Stock insuficiente para el insumo "${ingredientInStore.name}". Se necesitan ${requiredFormatted} para crear ${newProduct.stock} unidades del producto (rendimiento por lote: ${recipeYield}), pero solo hay ${availableFormatted} disponibles.`);
-                                return;
-                            }
-                        }
-                    }
-
-                    let recipePayload = [];
-                    if (newProduct.category === 'Producto') {
-                        recipePayload = recipeItems
-                            .filter(item => item.ingredient && parseFloat(item.quantity) > 0)
-                            .map(item => ({
-                                ingredient: item.ingredient,
-                                quantity: parseFloat(item.quantity),
-                                unit: item.unit,
-                            }));
-    
-                        if (recipeItems.some(item => item.ingredient && (!item.quantity || parseFloat(item.quantity) <= 0))) {
-                            setMessage('🚫 Error: Todos los insumos de la receta deben tener una cantidad mayor a 0.');
-                            return;
-                        }
-                    }
-                    
-                    // Para productos finales, el stock inicial representa una producción inicial
-                    let finalStock = parseInt(newProduct.stock);
-
-                    // Convertir umbral de stock a unidad base antes de enviar
-                    const convertThresholdToBaseUnit = (threshold, unit) => {
-                        if (unit === 'g') return threshold * 1000; // Kg a gramos
-                        if (unit === 'ml') return threshold * 1000; // L a mililitros
-                        return threshold; // unidades sin cambio
-                    };
-
-                    // Convertir stock a unidad base antes de enviar
-                    const convertStockToBaseUnit = (stock, unit) => {
-                        if (unit === 'g') return stock * 1000; // Kg a gramos
-                        if (unit === 'ml') return stock * 1000; // L a mililitros
-                        return stock; // unidades sin cambio
-                    };
-
-                    const payload = {
-                        name: newProduct.name.trim(),
-                        description: newProduct.description.trim(),
-                        price: parseFloat(newProduct.price),
-                        stock: convertStockToBaseUnit(finalStock, newProduct.unit),
-                        recipe_yield: parseInt(newProduct.recipe_yield) || 1,
-                        low_stock_threshold: convertThresholdToBaseUnit(parseInt(newProduct.low_stock_threshold), newProduct.unit),
-                        high_stock_multiplier: parseFloat(newProduct.high_stock_multiplier),
-                        category: newProduct.category,
-                        unit: newProduct.unit,
-                        recipe_ingredients: recipePayload
-                    };
-                    
-                    // Crear producto
-                    const response = await api.post('/products/', payload);
-
-                    // Recargar productos desde PostgreSQL para mantener sincronización
-                    await loadProducts();
-                    setMessage('✅ Producto creado exitosamente y datos recargados desde PostgreSQL.');
-                    // Productos recargados desde PostgreSQL después de crear producto
-
-                    // Limpiar formulario
-                    setNewProduct({ 
-                        name: '', 
-                        description: '', 
-                        price: 0, 
-                        stock: 0, 
-                        recipe_yield: 1,
-                        low_stock_threshold: 10,
-                        high_stock_multiplier: 2.0,
-                        category: 'Producto',
-                        unit: 'unidades'
-                    });
-                    setRecipeItems([{ ingredient: '', quantity: '', unit: '' }]);
-                } catch (error) {
-                    console.log('❌ Error creando producto:', error);
-                    
-                    // Manejo específico de errores para Safari
-                    if (error.response) {
-                        // Error con respuesta del servidor
-                        if (error.response.status === 400) {
-                            setMessage('🚫 Error: ' + (error.response.data.detail || JSON.stringify(error.response.data)));
-                        } else if (error.response.status === 401) {
-                            setMessage('🚫 Error: No tienes autorización. Inicia sesión nuevamente.');
-                        } else if (error.response.status === 403) {
-                            setMessage('🚫 Error: No tienes permisos para realizar esta acción.');
-                        } else {
-                            setMessage(`🚫 Error del servidor: ${error.response.status}`);
-                        }
-                    } else if (error.request) {
-                        // Error de red o CORS
-                        setMessage('🚫 Error: No se pudo conectar con el servidor. Verifica tu conexión.');
-                    } else {
-                        // Error de configuración
-                        setMessage('🚫 Error: ' + (error.message || 'Error desconocido al crear el producto.'));
-                    }
-                }
-            };
-
-
-    
             return (
-                <div className="creation-container">
-                    <div style={{marginBottom: '10px'}}>
-                        <h2>Crear Productos Nuevos</h2>
-                    </div>
-                    {message && <p className="message">{message}</p>}
-                    <p className='Parrafo'>Crea nuevos productos e insumos. Los productos creados aparecerán automáticamente en la sección "Inventario" y "Editar Productos".</p>
-                    
-                    <h3>Agregar nuevo producto</h3>
-                    <form className="form-container" onSubmit={handleCreateProduct}>
-                        <div className="form-row">
-                            <div className="form-group">
-                                <label>Nombre del Producto *</label>
-                                <input 
-                                    type="text" 
-                                    value={newProduct.name} 
-                                    onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} 
-                                    placeholder="Nombre del Producto *" 
-                                    required 
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>Descripción del Producto</label>
-                                <textarea 
-                                    value={newProduct.description} 
-                                    onChange={e => setNewProduct({ ...newProduct, description: e.target.value })} 
-                                    placeholder="Descripción del producto (opcional)"
-                                    rows="3"
-                                />
-                            </div>
-                        </div>
-                       
-                        
-                        
-
-                        <p>Unidad de Medida</p>
-                        <select 
-                            value={newProduct.unit} 
-                            onChange={e => setNewProduct({ ...newProduct, unit: e.target.value })}
-                            required
-                        >
-                            <option value="unidades">Unidades</option>
-                            <option value="g">Gramos (se mostrará en Kg)</option>
-                            <option value="ml">Mililitros (se mostrará en L)</option>
-                        </select>
-                        
-                        <p>Precio</p>
-                        <input 
-                            type="number" 
-                            value={newProduct.price} 
-                            onChange={e => setNewProduct({ ...newProduct, price: parseFloat(e.target.value) || 0 })} 
-                            placeholder="Precio *" 
-                           min="0"
-                            //step="0.01"
-                            required 
-                        />
-                        <p>Stock ({newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'})</p>
-                        <input 
-                            type="number" 
-                            value={newProduct.stock} 
-                            onChange={e => setNewProduct({ ...newProduct, stock: parseInt(e.target.value) || 0 })} 
-                            placeholder={`Stock en ${newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'}`} 
-                            min="0"
-                            required 
-                        />
-                        
-                        <p>Rendimiento de la receta (unidades por lote)</p>
-                        <input
-                            type="number"
-                            value={newProduct.recipe_yield}
-                            onChange={e => setNewProduct({ ...newProduct, recipe_yield: parseInt(e.target.value) || 1 })}
-                            placeholder="Ej: 10 (la receta rinde 10 unidades)"
-                            min="1"
-                            required
-                        />
-
-                        <p>Umbral de Stock Bajo ({newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'})</p>
-                        <input 
-                            type="number" 
-                            value={newProduct.low_stock_threshold} 
-                            onChange={e => setNewProduct({ ...newProduct, low_stock_threshold: parseInt(e.target.value) || 10 })} 
-                            placeholder={`Umbral en ${newProduct.unit === 'g' ? 'Kg' : newProduct.unit === 'ml' ? 'L' : 'Unidades'} (por defecto: 10)`} 
-                            min="0"
-                        />
-
-                        <p>Multiplicador para Stock Alto</p>
-                        <input 
-                            type="number" 
-                            step="0.1"
-                            value={newProduct.high_stock_multiplier} 
-                            onChange={e => setNewProduct({ ...newProduct, high_stock_multiplier: parseFloat(e.target.value) || 2.0 })} 
-                            placeholder="Ej: 2.0 = duplicar, 3.5 = triplicar y medio (por defecto: 2.0)" 
-                            min="1.1"
-                        />
-
-                        {newProduct.category === 'Producto' && (
-                            <div className="recipe-builder">
-                                <h4>Receta (Insumos por receta / por lote)</h4>
-                                {recipeItems.map((item, index) => (
-                                    <div key={index} className="recipe-item">
-                                        <Select
-                                            options={ingredientOptions}
-                                            value={ingredientOptions.find(opt => opt.value === item.ingredient)}
-                                            onChange={selectedOption => handleRecipeChange(index, 'ingredient', selectedOption ? selectedOption.value : '')}
-                                            placeholder="Seleccionar insumo..."
-                                        />
-                                        <input
-                                            type="number"
-                                            value={item.quantity}
-                                            onChange={e => handleRecipeChange(index, 'quantity', e.target.value)}
-                                            placeholder="Cantidad"
-                                            min="0"
-                                        />
-                                        <select
-                                            value={item.unit}
-                                            onChange={e => handleRecipeChange(index, 'unit', e.target.value)}
-                                        >
-                                            <option value="g">Gramos (g)</option>
-                                            <option value="ml">Mililitros (ml)</option>
-                                            <option value="unidades">Unidades</option>
-                                        </select>
-                                        <button type="button" onClick={() => removeRecipeItem(index)}>Eliminar</button>
-                                    </div>
-                                ))}
-                                <button type="button" onClick={addRecipeItem}>Agregar Insumo</button>
-                            </div>
-                        )}
-                        <button type="submit" className="main-button">Crear Producto</button>
-                    </form>
-                </div>
+                <CrearNuevoProducto 
+                    products={products}
+                    inventory={inventory}
+                    loadProducts={loadProducts}
+                    getInMemoryToken={getInMemoryToken}
+                    api={api}
+                />
             );
         };
 
@@ -3250,7 +2867,7 @@ const PurchaseRequests = () => {
                                             value={item.product}
                                             options={products.map(p => ({ 
                                                 value: p.id, 
-                                                label: `${p.name} (Stock: ${formatStock(p.stock, p.unit)})`,
+                                                label: p.name,
                                                 category: p.category
                                             }))}
                                             onChange={(option) => handleProductChange(item.id, option)}
@@ -3631,6 +3248,22 @@ const PurchaseRequests = () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }, [isLoggedIn, currentPage]);
+
+    // IMPORTANTE: Estos hooks deben estar ANTES de cualquier return condicional
+    // Detectar si estamos en modo "Ventana Independiente" (Standalone)
+    const [isStandaloneMode, setIsStandaloneMode] = useState(false);
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('view') === 'loss-history-window') {
+            setIsStandaloneMode(true);
+        }
+    }, []);
+
+    // Si estamos en modo standalone, renderizamos SOLO el componente de historial a pantalla completa
+    if (isStandaloneMode) {
+        return <DialogoHistorialDePerdidas isWindowMode={true} />;
+    }
 
     if (!sessionChecked) {
         return (

@@ -273,8 +273,17 @@ const Movimientos_De_Caja = ({ cashMovements }) => {
                         .date-input { width: 48px; padding: 2px 4px; font-size: 0.95em; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
                         .date-input.year { width: 60px; }
                         .date-input:focus { outline: 2px solid #2563eb; border-color: #2563eb; }
+                        /* Fila 2 normal - visible por defecto */
+                        .description-row-normal { display: grid; }
+                        .description-row-ultrawide { display: none; }
                         @media (max-width: 900px) {
                             .filters-row { flex-direction: column; gap: 12px; }
+                        }
+                        /* Breakpoints para pantallas >= 1950px - una sola fila */
+                        @media (min-width: 1950px) {
+                            .description-row-normal { display: none !important; }
+                            .description-row-ultrawide { display: flex !important; }
+                            .filters-row { flex-wrap: nowrap; align-items: flex-end; }
                         }
                         /* Breakpoints personalizados para el grid */
                         @media (min-width: 1200px) and (max-width: 1279px) {
@@ -452,8 +461,8 @@ const Movimientos_De_Caja = ({ cashMovements }) => {
                                 </div>
                             </div>
 
-                            <!-- Fila 2: Select Descripción + Input Descripción -->
-                            <div class="grid gap-3 mb-3" style="grid-template-columns: 180px 1fr;">
+                            <!-- Fila 2: Select Descripción + Input Descripción (visible en pantallas < 1950px) -->
+                            <div class="description-row-normal grid gap-3 mb-3" style="grid-template-columns: 180px 1fr;">
                                 <div>
                                     <label class="block text-xs font-semibold text-gray-700 mb-1">TIPO BÚSQUEDA</label>
                                     <select onchange="updateFilter('descriptionFilterOp', this.value)" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
@@ -469,7 +478,7 @@ const Movimientos_De_Caja = ({ cashMovements }) => {
 
                             <!-- Métodos de pago + Fechas en una sola fila -->
                             <div class="filters-row">
-                                <div class="flex flex-wrap items-center gap-3 mr-4">
+                                <div class="flex flex-wrap items-center gap-3 mr-4" style="flex-shrink: 0;">
                                     <label class="block text-xs font-semibold text-gray-700 mr-2">MÉTODOS DE PAGO</label>
                                     <label class="flex items-center gap-1.5">
                                         <input type="checkbox" onclick="togglePaymentMethod('efectivo')" class="rounded text-blue-600">
@@ -488,7 +497,7 @@ const Movimientos_De_Caja = ({ cashMovements }) => {
                                         <span class="text-sm capitalize">Transferencia</span>
                                     </label>
                                 </div>
-                                <div class="date-group mr-4">
+                                <div class="date-group mr-4" style="flex-shrink: 0;">
                                     <span class="date-label">Fecha desde:</span>
                                     <input class="date-input year" id="dateFromYear" maxlength="4" placeholder="Año" oninput="updateFilter('dateFromYear', this.value)" />
                                     <input class="date-input" id="dateFromMonth" maxlength="2" placeholder="Mes" oninput="updateFilter('dateFromMonth', this.value)" />
@@ -496,13 +505,27 @@ const Movimientos_De_Caja = ({ cashMovements }) => {
                                     <input class="date-input" id="dateFromHour" maxlength="2" placeholder="Hora" oninput="updateFilter('dateFromHour', this.value)" />
                                     <input class="date-input" id="dateFromMinute" maxlength="2" placeholder="Min" oninput="updateFilter('dateFromMinute', this.value)" />
                                 </div>
-                                <div class="date-group">
+                                <div class="date-group" style="flex-shrink: 0;">
                                     <span class="date-label">Fecha hasta:</span>
                                     <input class="date-input year" id="dateToYear" maxlength="4" placeholder="Año" oninput="updateFilter('dateToYear', this.value)" />
                                     <input class="date-input" id="dateToMonth" maxlength="2" placeholder="Mes" oninput="updateFilter('dateToMonth', this.value)" />
                                     <input class="date-input" id="dateToDay" maxlength="2" placeholder="Día" oninput="updateFilter('dateToDay', this.value)" />
                                     <input class="date-input" id="dateToHour" maxlength="2" placeholder="Hora" oninput="updateFilter('dateToHour', this.value)" />
                                     <input class="date-input" id="dateToMinute" maxlength="2" placeholder="Min" oninput="updateFilter('dateToMinute', this.value)" />
+                                </div>
+                                <!-- Descripción inline para pantallas >= 1950px -->
+                                <div class="description-row-ultrawide" style="display: flex; flex: 1 1 auto; align-items: flex-end; gap: 12px; min-width: 540px;">
+                                    <div style="flex-shrink: 0;">
+                                        <label class="block text-xs font-semibold text-gray-700 mb-1">TIPO BÚSQUEDA</label>
+                                        <select id="descOpUltrawide" onchange="updateFilter('descriptionFilterOp', this.value)" class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" style="width: 120px;">
+                                            <option value="contains">Contiene</option>
+                                            <option value="equals">Es igual</option>
+                                        </select>
+                                    </div>
+                                    <div style="flex: 1 1 420px; min-width: 420px;">
+                                        <label class="block text-xs font-semibold text-gray-700 mb-1">BUSCAR DESCRIPCIÓN</label>
+                                        <input type="text" id="descInputUltrawide" oninput="updateFilter('descriptionFilter', this.value)" placeholder="Escribe para buscar..." class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                                    </div>
                                 </div>
                             </div>
                         </div>

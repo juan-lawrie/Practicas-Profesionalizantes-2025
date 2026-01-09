@@ -32,6 +32,18 @@ const Ver_Reportes_De_Faltantes = ({ products }) => {
         }
     };
 
+    const handleDeleteReport = async (reportId) => {
+        if (!window.confirm('¿Estás seguro de que quieres eliminar este reporte?')) return;
+        
+        try {
+            await api.delete(`/low-stock-reports/${reportId}/delete/`);
+            setReports(reports.filter(r => r.id !== reportId));
+        } catch (err) {
+            setError('Error al eliminar el reporte.');
+            console.error('Error deleting report:', err);
+        }
+    };
+
     if (loading) {
         return (
             <div className="px-4 py-4 max-w-full mx-auto">
@@ -67,7 +79,7 @@ const Ver_Reportes_De_Faltantes = ({ products }) => {
                 </div>
             ) : (
                 <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                    {reports.map((report, index) => {
+                    {reports.slice(0, 1).map((report, index) => {
                         const productos = report.products_detail?.filter(p => p.category === 'Producto') || [];
                         const insumos = report.products_detail?.filter(p => p.category === 'Insumo') || [];
                         
@@ -152,7 +164,7 @@ const Ver_Reportes_De_Faltantes = ({ products }) => {
                                 </div>
                                 
                                 {/* Footer con botón */}
-                                {!report.is_resolved && (
+                                {!report.is_resolved ? (
                                     <div className="px-2 pb-2">
                                         <button 
                                             onClick={() => handleResolve(report.id)} 
@@ -162,6 +174,18 @@ const Ver_Reportes_De_Faltantes = ({ products }) => {
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                             </svg>
                                             Marcar como Resuelto
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="px-2 pb-2">
+                                        <button 
+                                            onClick={() => handleDeleteReport(report.id)} 
+                                            className="w-full px-2 py-1.5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded text-xs font-semibold hover:from-red-600 hover:to-red-700 transition-all duration-200 hover:shadow-md flex items-center justify-center gap-1"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            Eliminar Reporte
                                         </button>
                                     </div>
                                 )}

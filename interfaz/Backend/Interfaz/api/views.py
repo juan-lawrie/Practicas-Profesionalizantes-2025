@@ -7,7 +7,7 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport, RecipeIngredient, LossRecord
+from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport, RecipeIngredient, LossRecord, Production, ProductionItem
 from .models import ResetToken
 from django.conf import settings
 from django.utils import timezone
@@ -15,7 +15,8 @@ from .serializers import (
     UserSerializer, UserCreateSerializer, ProductSerializer,
     CashMovementSerializer, InventoryChangeSerializer, SaleSerializer,
     UserQuerySerializer, SupplierSerializer, UserStorageSerializer, RoleSerializer, UserUpdateSerializer,
-    LowStockReportSerializer, InventoryChangeAuditSerializer, RecipeIngredientSerializer, RecipeIngredientWriteSerializer, LossRecordSerializer
+    LowStockReportSerializer, InventoryChangeAuditSerializer, RecipeIngredientSerializer, RecipeIngredientWriteSerializer, LossRecordSerializer,
+    ProductionSerializer
 )
 from .models import UserStorage
 from django.db import transaction
@@ -1585,6 +1586,215 @@ class UserQueryViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ViewSet para registros de producción
+class ProductionViewSet(viewsets.ModelViewSet):
+    serializer_class = __import__('api.serializers', fromlist=['ProductionSerializer']).ProductionSerializer
+    permission_classes = [IsAuthenticated, IsGerente]
+    
+    def get_queryset(self):
+        Production = __import__('api.models', fromlist=['Production']).Production
+        return Production.objects.prefetch_related('items__product').all()
+
+    @action(detail=False, methods=['post'], url_path='batch')
+    def batch_create(self, request):
+        """
+        Endpoint para crear múltiples producciones en lote.
+        Formato esperado:
+        {
+            "productions": [
+                {"product_id": 1, "quantity_produced": 10},
+                {"product_id": 2, "quantity_produced": 5}
+            ]
+        }
+        """
+        productions_data = request.data.get('productions', [])
+        
+        if not productions_data:
+            return Response(
+                {'error': 'No se proporcionaron producciones'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        Production = __import__('api.models', fromlist=['Production']).Production
+        ProductionItem = __import__('api.models', fromlist=['ProductionItem']).ProductionItem
+        Product = __import__('api.models', fromlist=['Product']).Product
+        RecipeIngredient = __import__('api.models', fromlist=['RecipeIngredient']).RecipeIngredient
+
+        try:
+            with transaction.atomic():
+                # Crear el registro de producción principal
+                total_units = sum(item.get('quantity_produced', 0) for item in productions_data)
+                production = Production.objects.create(
+                    user=request.user,
+                    total_units=total_units
+                )
+
+                # Contador para verificar que se crea al menos un item
+                items_created = 0
+                
+                # Listas para rastrear cambios en inventario
+                ingredients_changes = {}  # Para insumos usados totales (agregados por nombre)
+                products_changes = []  # Para productos creados con sus insumos específicos
+
+                # Crear los items individuales y actualizar stock
+                for item_data in productions_data:
+                    product_id = item_data.get('product_id')
+                    quantity = item_data.get('quantity_produced', 0)
+
+                    if not product_id or quantity <= 0:
+                        continue
+
+                    try:
+                        product = Product.objects.get(id=product_id)
+                        
+                        # Obtener la receta del producto
+                        recipe_ingredients = RecipeIngredient.objects.filter(product=product)
+                        
+                        # Función para formatear cantidad según unidad
+                        def format_quantity_with_unit(quantity, unit):
+                            quantity = Decimal(str(quantity))
+                            if unit == 'g':
+                                # Convertir gramos a kilogramos
+                                kg = quantity / 1000
+                                return f"{kg:.2f} Kg"
+                            elif unit == 'ml':
+                                # Convertir mililitros a litros
+                                liters = quantity / 1000
+                                return f"{liters:.2f} L"
+                            elif unit == 'u':
+                                # Unidades
+                                return f"{quantity:.0f} U"
+                            else:
+                                # Por defecto, mostrar sin conversión
+                                return f"{quantity:.2f} {unit}"
+                        
+                        # Verificar que hay suficientes insumos antes de producir
+                        insufficient_ingredients = []
+                        for recipe_item in recipe_ingredients:
+                            ingredient = recipe_item.ingredient
+                            # Calcular cantidad necesaria considerando el rendimiento de la receta
+                            recipe_yield = product.recipe_yield if product.recipe_yield else 1
+                            quantity_needed = (Decimal(str(recipe_item.quantity)) * Decimal(str(quantity))) / Decimal(str(recipe_yield))
+                            
+                            if ingredient.stock < quantity_needed:
+                                # Agregar a la lista de insuficientes
+                                needed_formatted = format_quantity_with_unit(quantity_needed, recipe_item.unit)
+                                available_formatted = format_quantity_with_unit(ingredient.stock, recipe_item.unit)
+                                insufficient_ingredients.append(
+                                    f"{ingredient.name}: Necesario {needed_formatted}, Disponible {available_formatted}"
+                                )
+                        
+                        # Si hay insumos insuficientes, devolver error con todos los detalles
+                        if insufficient_ingredients:
+                            error_message = "Stock insuficiente de los siguientes insumos:\n" + "\n".join(insufficient_ingredients)
+                            return Response(
+                                {'error': error_message},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                        
+                        # Guardar stock previo del producto antes de actualizar
+                        product_stock_before = Decimal(str(product.stock))
+                        
+                        # Lista de insumos usados para ESTE producto específico
+                        product_ingredients_used = []
+                        
+                        # Descontar insumos de la receta
+                        for recipe_item in recipe_ingredients:
+                            ingredient = recipe_item.ingredient
+                            recipe_yield = product.recipe_yield if product.recipe_yield else 1
+                            quantity_needed = (Decimal(str(recipe_item.quantity)) * Decimal(str(quantity))) / Decimal(str(recipe_yield))
+                            
+                            # Guardar stock previo del ingrediente
+                            ingredient_stock_before = Decimal(str(ingredient.stock))
+                            
+                            # Descontar del stock del ingrediente
+                            ingredient.stock = Decimal(str(ingredient.stock)) - quantity_needed
+                            ingredient.save()
+                            
+                            # Información del ingrediente usado para ESTE producto
+                            ingredient_info = {
+                                'name': ingredient.name,
+                                'quantity_used': float(quantity_needed),
+                                'unit': recipe_item.unit,
+                                'formatted_used': format_quantity_with_unit(quantity_needed, recipe_item.unit)
+                            }
+                            product_ingredients_used.append(ingredient_info)
+                            
+                            # Acumular en el diccionario de totales
+                            if ingredient.name not in ingredients_changes:
+                                ingredients_changes[ingredient.name] = {
+                                    'name': ingredient.name,
+                                    'stock_before': float(ingredient_stock_before),
+                                    'quantity_used': float(quantity_needed),
+                                    'stock_after': float(ingredient.stock),
+                                    'unit': recipe_item.unit,
+                                    'formatted_before': format_quantity_with_unit(ingredient_stock_before, recipe_item.unit),
+                                    'formatted_used': format_quantity_with_unit(quantity_needed, recipe_item.unit),
+                                    'formatted_after': format_quantity_with_unit(ingredient.stock, recipe_item.unit)
+                                }
+                            else:
+                                # Si ya existe, sumar la cantidad usada
+                                ingredients_changes[ingredient.name]['quantity_used'] += float(quantity_needed)
+                                ingredients_changes[ingredient.name]['stock_after'] = float(ingredient.stock)
+                                ingredients_changes[ingredient.name]['formatted_used'] = format_quantity_with_unit(
+                                    ingredients_changes[ingredient.name]['quantity_used'], 
+                                    recipe_item.unit
+                                )
+                                ingredients_changes[ingredient.name]['formatted_after'] = format_quantity_with_unit(
+                                    ingredient.stock, 
+                                    recipe_item.unit
+                                )
+                        
+                        # Crear el item de producción
+                        ProductionItem.objects.create(
+                            production=production,
+                            product=product,
+                            quantity=quantity
+                        )
+                        items_created += 1
+
+                        # Actualizar el stock del producto
+                        product.stock = Decimal(str(product.stock)) + Decimal(str(quantity))
+                        product.save()
+                        
+                        # Registrar el cambio en el producto CON sus insumos específicos
+                        products_changes.append({
+                            'name': product.name,
+                            'stock_before': float(product_stock_before),
+                            'quantity_produced': float(quantity),
+                            'stock_after': float(product.stock),
+                            'unit': 'u',
+                            'ingredients_used': product_ingredients_used  # Insumos específicos de este producto
+                        })
+
+                    except Product.DoesNotExist:
+                        return Response(
+                            {'error': f'Producto con ID {product_id} no encontrado'},
+                            status=status.HTTP_404_NOT_FOUND
+                        )
+
+                # Validar que se haya creado al menos un item
+                if items_created == 0:
+                    return Response(
+                        {'error': 'No se crearon items de producción. Verifique que los productos y cantidades sean válidos.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Retornar el registro creado con información detallada de cambios
+                serializer = self.get_serializer(production)
+                response_data = serializer.data
+                response_data['changes'] = {
+                    'ingredients': list(ingredients_changes.values()),  # Convertir diccionario a lista
+                    'products': products_changes
+                }
+                return Response(response_data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response(
+                {'error': f'Error al crear la producción: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 # Asegúrate de que ExportDataView esté definida solo aquí y no duplicada en urls.py
 class ExportDataView(APIView):

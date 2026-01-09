@@ -243,7 +243,7 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                 {/* Contenedor de filtros con flex wrap */}
                 <div className={`${showFilters ? 'block' : 'hidden min-[1240px]:block'} flex flex-wrap gap-3 sm:gap-4`}>
                     {/* Filtro de Nombre */}
-                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)]">
+                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)] min-[1900px]:w-[calc(20%-0.8rem)]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
                         <div className="flex gap-1.5 sm:gap-2">
                             <select 
@@ -265,7 +265,7 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                     </div>
 
                     {/* Filtro de CUIT */}
-                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)]">
+                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)] min-[1900px]:w-[calc(20%-0.8rem)]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">CUIT</label>
                         <div className="flex gap-1.5 sm:gap-2">
                             <select 
@@ -287,7 +287,7 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                     </div>
 
                     {/* Filtro de Teléfono */}
-                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)]">
+                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)] min-[1900px]:w-[calc(20%-0.8rem)]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
                         <div className="flex gap-1.5 sm:gap-2">
                             <select 
@@ -309,7 +309,7 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                     </div>
 
                     {/* Filtro de Dirección */}
-                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)]">
+                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)] min-[1900px]:w-[calc(20%-0.8rem)]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Dirección</label>
                         <div className="flex gap-1.5 sm:gap-2">
                             <select 
@@ -331,7 +331,7 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                     </div>
 
                     {/* Filtro de Producto/Insumo */}
-                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)]">
+                    <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)] min-[1900px]:w-[calc(20%-0.8rem)]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Producto/Insumo</label>
                         <div className="flex gap-1.5 sm:gap-2">
                             <select 

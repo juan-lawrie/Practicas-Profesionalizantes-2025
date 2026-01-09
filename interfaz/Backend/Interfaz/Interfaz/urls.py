@@ -28,7 +28,7 @@ from api.views import (
     LowStockReportCreateView, LowStockReportListView, LowStockReportUpdateView,
     RecipeIngredientViewSet, ProductProductionView, LossRecordViewSet,
     get_ingredients_with_suggested_unit, refresh_from_cookie, logout_view,
-    RoleViewSet, PurchaseViewSet, OrderViewSet
+    RoleViewSet, PurchaseViewSet, OrderViewSet, ProductionViewSet
 )
 from django.shortcuts import redirect
 from rest_framework_simplejwt.views import (
@@ -52,6 +52,7 @@ router.register(r'suppliers', SupplierViewSet, basename='supplier')
 router.register(r'inventory-change-audits', __import__('api.views', fromlist=['InventoryChangeAuditViewSet']).InventoryChangeAuditViewSet, basename='inventory-change-audit')
 router.register(r'recipe-ingredients', RecipeIngredientViewSet, basename='recipe-ingredient')
 router.register(r'loss-records', LossRecordViewSet, basename='loss-record')
+router.register(r'productions', ProductionViewSet, basename='production')
 
 
 def root_redirect(request):

@@ -690,7 +690,7 @@ const EditarProductos = ({ products, setProducts, loadProducts, isLoading, showE
                                                 <div key={index} className="ingredient-item">
                                                     <div className="ingredient-display">
                                                         <span className="ingredient-info">
-                                                            <strong>{ingredient.ingredient_name}</strong>: {ingredient.quantity} {ingredient.unit}
+                                                            <strong>{ingredient.ingredient_name}</strong>: {Math.round(ingredient.quantity)} {ingredient.unit}
                                                         </span>
                                                         <div className="ingredient-actions">
                                                             <button

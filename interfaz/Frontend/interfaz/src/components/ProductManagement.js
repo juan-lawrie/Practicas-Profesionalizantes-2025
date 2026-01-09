@@ -19,25 +19,28 @@ const ProductManagement = ({ userRole, products, inventory, loadProducts, Produc
     }
 
     return (
-        <div className="product-management-container">
-            <div className="tab-navigation">
+        <div className="product-management-container ">
+            <div className="tab-navigation flex flex-wrap gap-2 justify-center sm:justify-start">
                 <button
-                    className={`tab-button ${activeView === 'create' ? 'active' : ''}`}
+                    className={`tab-button flex-1 min-w-[100px] sm:min-w-[140px] text-xs sm:text-sm px-2 sm:px-4 py-2 whitespace-nowrap ${activeView === 'create' ? 'active' : ''}`}
                     onClick={() => setActiveView('create')}
                 >
-                    Crear Nuevo Producto
+                    <span className="hidden sm:inline">Crear Nuevo Producto</span>
+                    <span className="sm:hidden">Producto</span>
                 </button>
                 <button
-                    className={`tab-button ${activeView === 'produce' ? 'active' : ''}`}
+                    className={`tab-button flex-1 min-w-[100px] sm:min-w-[140px] text-xs sm:text-sm px-2 sm:px-4 py-2 whitespace-nowrap ${activeView === 'produce' ? 'active' : ''}`}
                     onClick={() => setActiveView('produce')}
                 >
-                    Crear Producción
+                    <span className="hidden sm:inline">Crear Producción</span>
+                    <span className="sm:hidden">Producción</span>
                 </button>
                 <button
-                    className={`tab-button ${activeView === 'losses' ? 'active' : ''}`}
+                    className={`tab-button flex-1 min-w-[100px] sm:min-w-[140px] text-xs sm:text-sm px-2 sm:px-4 py-2 whitespace-nowrap ${activeView === 'losses' ? 'active' : ''}`}
                     onClick={() => setActiveView('losses')}
                 >
-                    Pérdidas y Mermas
+                    <span className="hidden sm:inline">Pérdidas y Mermas</span>
+                    <span className="sm:hidden">Pérdidas</span>
                 </button>
             </div>
 

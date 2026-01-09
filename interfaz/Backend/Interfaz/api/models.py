@@ -265,6 +265,7 @@ class LossRecord(models.Model):
     
     INGREDIENT_LOSS_CATEGORIES = (
         ('empaque_danado', 'Empaque dañado'),
+        ('rotura_insumo', 'Rotura del insumo'),
         ('sobreuso_receta', 'Sobreuso en receta'),
         ('vencimiento', 'Vencimiento'),
         ('cadena_frio', 'Perdió la cadena de frío - Temperatura inadecuada'),
@@ -291,7 +292,7 @@ class LossRecord(models.Model):
 class RecipeIngredient(models.Model):
     product = models.ForeignKey(Product, related_name='recipe', on_delete=models.CASCADE)
     ingredient = models.ForeignKey(Product, on_delete=models.CASCADE, limit_choices_to={'is_ingredient': True})
-    quantity = models.DecimalField(max_digits=10, decimal_places=2)
+    quantity = models.DecimalField(max_digits=10, decimal_places=3)
     UNIT_CHOICES = (
         ('g', 'Gramos'),
         ('ml', 'Mililitros'),
@@ -323,3 +324,24 @@ class ResetToken(models.Model):
 
     def __str__(self):
         return f"ResetToken for {self.target_user.email} (used={self.used})"
+
+# Modelo para registros de producción
+class Production(models.Model):
+    user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    total_units = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Production {self.id} by {self.user.username if self.user else 'Unknown'} - {self.total_units} units"
+
+# Modelo para items individuales de producción
+class ProductionItem(models.Model):
+    production = models.ForeignKey(Production, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    quantity = models.IntegerField()
+
+    def __str__(self):
+        return f"{self.quantity} x {self.product.name}"
