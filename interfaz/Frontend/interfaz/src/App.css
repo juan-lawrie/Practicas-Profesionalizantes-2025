@@ -1604,6 +1604,29 @@ h2 {
   }
 }
 
+/* Pestañas de compras - pantallas muy pequeñas (<440px) - NO envolver, truncar con ellipsis */
+@media screen and (max-width: 439px) {
+  .purchase-tabs-container {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  
+  .purchase-tabs-container .purchase-tab-btn {
+    white-space: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 5px 6px;
+    font-size: 9px;
+  }
+  
+  .purchase-tabs-container .purchase-tab-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 /* Utilidades personalizadas para breakpoint 1440px */
 @media (min-width: 1440px) {
   .monto-row-1440\:flex-row {

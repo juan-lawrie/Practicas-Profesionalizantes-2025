@@ -31,10 +31,12 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://10.0.2.2:3000",
+
 ]
 
 # Configuración exhaustiva de CORS específica para Safari y compatibilidad cross-browser
-CORS_ALLOW_ALL_ORIGINS = False  # ❌ Cambiar esto
+CORS_ALLOW_ALL_ORIGINS = True  # ❌ Cambiar esto
 CORS_ALLOW_CREDENTIALS = True  # Necesario para enviar cookies de refresh entre frontend y backend
 CORS_ALLOW_HEADERS = [
     'accept',
@@ -236,6 +238,6 @@ X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 # Configuración para desarrollo - permitir localhost en Safari
 if DEBUG:
-    ALLOWED_HOSTS.extend(['localhost', '127.0.0.1', '0.0.0.0', '::1'])
+    ALLOWED_HOSTS.extend(['localhost', '127.0.0.1', '0.0.0.0', '::1', '10.0.2.2'])
     SECURE_SSL_REDIRECT = False
     SECURE_BROWSER_XSS_FILTER = False
