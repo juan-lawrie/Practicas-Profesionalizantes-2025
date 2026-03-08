@@ -1,342 +1,364 @@
-@startuml Diagrama de Clases - Sistema Churrería
+@startuml Diagrama_de_Clases_Churreria
 
 skinparam classAttributeIconSize 0
-skinparam classFontSize 12
-skinparam packageFontSize 13
+skinparam classFontSize 11
 skinparam shadowing false
+skinparam classBackgroundColor White
+skinparam classBorderColor Black
+skinparam arrowColor Black
+skinparam groupInheritance 2
 
-' ─────────────────────────────
+' =============================================
+'  BASE ABSTRACTA DE DJANGO
+' =============================================
+abstract class AbstractUser <<Django>> {
+  #id : int
+  #username : String
+  #email : String
+  #password : String
+  #first_name : String
+  #last_name : String
+  #is_active : bool
+  #is_staff : bool
+  #is_superuser : bool
+  #date_joined : datetime
+  --
+  +check_password(raw) : bool
+  +set_password(raw)
+}
+
+' =============================================
 '  USUARIOS Y ROLES
-' ─────────────────────────────
-package "Usuarios y Roles" {
-
-  class Role {
-    + id : int
-    + name : str
-    --
-    + __str__() : str
-  }
-
-  class User {
-    + id : int
-    + username : str
-    + email : str
-    + first_name : str
-    + last_name : str
-    + password : str
-    + is_active : bool
-    + is_staff : bool
-    + is_superuser : bool
-    + date_joined : datetime
-    + failed_login_attempts : int
-    + is_locked : bool
-    + locked_at : datetime
-    + lock_type : str  <<manual | automatic>>
-    --
-    + __str__() : str
-  }
-
-  class UserStorage {
-    + id : int
-    + key : str
-    + value : JSON
-    + updated_at : datetime
-    --
-    + __str__() : str
-  }
-
-  class ResetToken {
-    + id : UUID  <<PK>>
-    + token_hash : str
-    + created_at : datetime
-    + expires_at : datetime
-    + used : bool
-    + note : str
-    --
-    + __str__() : str
-  }
-
+' =============================================
+class Usuario {
+  -failed_login_attempts : int
+  -is_locked : bool
+  -locked_at : datetime
+  -lock_type : String
+  --
+  +iniciarSesion(email, password) : Token
+  +cerrarSesion()
+  +cambiarContrasena(nueva_contrasena)
+  +bloquear()
+  +desbloquear()
 }
 
-' ─────────────────────────────
-'  PRODUCTOS E INSUMOS
-' ─────────────────────────────
-package "Productos e Insumos" {
-
-  class Product {
-    + id : int
-    + name : str
-    + description : str
-    + price : Decimal
-    + stock : Decimal
-    + low_stock_threshold : int
-    + high_stock_multiplier : Decimal
-    + category : str
-    + is_ingredient : bool
-    + unit : str  <<g | ml | unidades>>
-    + recipe_yield : int
-    + loss_rate : Decimal
-    + is_active : bool
-    + deleted_at : datetime
-    --
-    + __str__() : str
-  }
-
-  class RecipeIngredient {
-    + id : int
-    + quantity : Decimal
-    + unit : str  <<g | ml | unidades>>
-    --
-    + __str__() : str
-  }
-
+class Rol {
+  -id : int
+  -nombre : String
+  --
+  +asignarUsuario(usuario)
+  +modificarPermisos()
 }
 
-' ─────────────────────────────
+class AlmacenamientoUsuario {
+  -id : int
+  -clave : String
+  -valor : JSON
+  -updated_at : datetime
+  --
+  +guardar(clave, valor)
+  +cargar(clave) : JSON
+  +eliminar(clave)
+}
+
+class TokenRestablecimiento {
+  -id : UUID
+  -token_hash : String
+  -created_at : datetime
+  -expires_at : datetime
+  -used : bool
+  -nota : String
+  --
+  +validar() : bool
+  +marcarUsado()
+  +expirado() : bool
+}
+
+AbstractUser <|-- Usuario
+Usuario "0..*" --> "1" Rol : tiene >
+Usuario "1" *-- "0..*" AlmacenamientoUsuario : almacena >
+Usuario "1" --> "0..*" TokenRestablecimiento : genera (gerente) >
+Usuario "1" --> "0..*" TokenRestablecimiento : es destinatario >
+
+' =============================================
+'  PRODUCTOS, MATERIAS PRIMAS Y RECETAS
+' =============================================
+class Producto {
+  -id : int
+  -nombre : String
+  -descripcion : String
+  -precio : Decimal
+  -stock : Decimal
+  -stockMinimo : int
+  -stockAltoMultiplicador : Decimal
+  -categoria : String
+  -unidad : String  <<g | ml | unidades>>
+  -rendimientoReceta : int
+  -tasaPerdida : Decimal
+  -is_active : bool
+  -deleted_at : datetime
+  --
+  +verificarStockBajo() : bool
+  +actualizarStock(cantidad, tipo)
+  +desactivar()
+}
+
+class MateriaPrima {
+  -es_insumo : bool = true
+  --
+  +calcularStockNecesario(unidades) : Decimal
+  +verificarStockBajo() : bool
+}
+
+class RecetaProducto {
+  -id : int
+  -cantidad : Decimal
+  -unidad : String  <<g | ml | unidades>>
+  --
+  +calcularCantidadNecesaria(unidades) : Decimal
+}
+
+Producto <|-- MateriaPrima
+RecetaProducto "0..*" --> "1" Producto : elabora >
+RecetaProducto "0..*" --> "1" MateriaPrima : usa >
+
+' =============================================
 '  PROVEEDORES
-' ─────────────────────────────
-package "Proveedores" {
-
-  class Supplier {
-    + id : int
-    + name : str
-    + cuit : str
-    + address : str
-    + phone : str
-    + products : str
-    + is_active : bool
-    + deleted_at : datetime
-    --
-    + __str__() : str
-  }
-
+' =============================================
+class Proveedor {
+  -id : int
+  -nombre : String
+  -cuit : String
+  -direccion : String
+  -telefono : String
+  -productosQueProvee : String
+  -is_active : bool
+  -deleted_at : datetime
+  --
+  +proveerMateriasPrimas()
+  +recibirPagos()
+  +desactivar()
 }
 
-' ─────────────────────────────
+Proveedor "0..*" --> "0..*" MateriaPrima : provee >
+
+' =============================================
 '  VENTAS
-' ─────────────────────────────
-package "Ventas" {
-
-  class Sale {
-    + id : int
-    + timestamp : datetime
-    + total_amount : Decimal
-    + payment_method : str
-    --
-    + __str__() : str
-  }
-
-  class SaleItem {
-    + id : int
-    + quantity : int
-    + price : Decimal
-    --
-    + __str__() : str
-  }
-
+' =============================================
+class Venta {
+  -id : int
+  -fecha : datetime
+  -montoTotal : Decimal
+  -metodoPago : String
+  --
+  +registrarVenta()
+  +generarRecibo()
+  +actualizarStock()
 }
 
-' ─────────────────────────────
+class Detalle_de_Venta {
+  -id : int
+  -cantidad : int
+  -precioUnitario : Decimal
+  --
+  +calcularSubtotal() : Decimal
+  +actualizarStockSalida()
+}
+
+Usuario "1" --> "0..*" Venta : registra >
+Venta "1" *-- "1..*" Detalle_de_Venta : contiene >
+Detalle_de_Venta "0..*" --> "1" Producto : referencia >
+
+' =============================================
 '  COMPRAS
-' ─────────────────────────────
-package "Compras" {
-
-  class Purchase {
-    + id : int
-    + date : str
-    + supplier : str
-    + supplier_id : int
-    + items : JSON
-    + total_amount : Decimal
-    + status : str  <<Pendiente | Aprobada | Rechazada>>
-    + created_at : datetime
-    + approved_at : datetime
-    + is_active : bool
-    + deleted_at : datetime
-    --
-    + __str__() : str
-  }
-
+' =============================================
+class Compra {
+  -id : int
+  -fecha : String
+  -montoTotal : Decimal
+  -estado : String  <<Pendiente | Aprobada | Rechazada>>
+  -created_at : datetime
+  -approved_at : datetime
+  -is_active : bool
+  -deleted_at : datetime
+  --
+  +registrarCompra()
+  +aprobar()
+  +rechazar()
+  +actualizarStock()
+  +generarOrden()
 }
 
-' ─────────────────────────────
-'  PEDIDOS
-' ─────────────────────────────
-package "Pedidos" {
-
-  class Order {
-    + id : int
-    + customer_name : str
-    + fecha_para_la_que_se_quiere_el_pedido : datetime
-    + payment_method : str
-    + total_amount : Decimal
-    + notes : str
-    + status : str
-    + fecha_de_orden_del_pedido : datetime
-    --
-    + __str__() : str
-  }
-
-  class OrderItem {
-    + id : int
-    + product_name : str
-    + quantity : int
-    + unit_price : Decimal
-    + total : Decimal
-    --
-    + __str__() : str
-  }
-
+class Detalle_de_Compra {
+  -nombreProducto : String
+  -cantidad : Decimal
+  -precioUnitario : Decimal
+  -unidad : String
+  --
+  +calcularSubtotal() : Decimal
+  +actualizarStockEntrada()
 }
 
-' ─────────────────────────────
-'  CAJA E INVENTARIO
-' ─────────────────────────────
-package "Caja e Inventario" {
+Usuario "1" --> "0..*" Compra : solicita >
+Usuario "1" --> "0..*" Compra : aprueba >
+Compra "0..*" --> "1" Proveedor : realizadaA >
+Compra "1" *-- "1..*" Detalle_de_Compra : contiene >
+Detalle_de_Compra "0..*" --> "1" MateriaPrima : referencia >
 
-  class CashMovement {
-    + id : int
-    + type : str  <<Entrada | Salida>>
-    + amount : Decimal
-    + description : str
-    + timestamp : datetime
-    + payment_method : str
-    --
-  }
-
-  class InventoryChange {
-    + id : int
-    + type : str  <<Entrada | Salida>>
-    + quantity : Decimal
-    + reason : str
-    + timestamp : datetime
-    --
-    + __str__() : str
-  }
-
-  class InventoryChangeAudit {
-    + id : int
-    + role : str
-    + change_type : str  <<Entrada | Salida>>
-    + quantity : Decimal
-    + previous_stock : Decimal
-    + new_stock : Decimal
-    + reason : str
-    + timestamp : datetime
-    --
-    + __str__() : str
-  }
-
+' =============================================
+'  PEDIDOS DE CLIENTES
+' =============================================
+class PedidoDeProductos {
+  -id : int
+  -nombreCliente : String
+  -fechaEntrega : datetime
+  -metodoPago : String
+  -montoTotal : Decimal
+  -notas : String
+  -estado : String
+  -fechaOrden : datetime
+  --
+  +registrarPedido()
+  +actualizarEstado(estado)
+  +generarRecibo()
 }
 
-' ─────────────────────────────
+class DetallePedido {
+  -id : int
+  -nombreProducto : String
+  -cantidad : int
+  -precioUnitario : Decimal
+  -total : Decimal
+  --
+  +calcularTotal() : Decimal
+}
+
+Usuario "1" --> "0..*" PedidoDeProductos : gestiona >
+PedidoDeProductos "1" *-- "1..*" DetallePedido : contiene >
+DetallePedido "0..*" --> "1" Producto : referencia >
+
+' =============================================
+'  MOVIMIENTOS DE STOCK
+' =============================================
+class Movimiento_Stock {
+  -id : int
+  -tipo : String  <<Entrada | Salida>>
+  -cantidad : Decimal
+  -motivo : String
+  -timestamp : datetime
+  --
+  +registrarEntrada()
+  +registrarSalida()
+}
+
+class AuditoriaMovimientoStock {
+  -id : int
+  -rolUsuario : String
+  -tipoCambio : String  <<Entrada | Salida>>
+  -cantidad : Decimal
+  -stockPrevio : Decimal
+  -stockNuevo : Decimal
+  -motivo : String
+  -timestamp : datetime
+  --
+  +generarRegistro()
+  +obtenerHistorial() : List
+}
+
+Usuario "1" --> "0..*" Movimiento_Stock : realiza >
+Movimiento_Stock "0..*" --> "1" Producto : afecta >
+Movimiento_Stock "1" *-- "0..*" AuditoriaMovimientoStock : genera >
+AuditoriaMovimientoStock "0..*" --> "1" Producto : registra >
+AuditoriaMovimientoStock "0..*" --> "1" Usuario : realizadoPor >
+
+' =============================================
 '  PRODUCCIÓN
-' ─────────────────────────────
-package "Producción" {
-
-  class Production {
-    + id : int
-    + created_at : datetime
-    + total_units : int
-    --
-    + __str__() : str
-  }
-
-  class ProductionItem {
-    + id : int
-    + quantity : int
-    --
-    + __str__() : str
-  }
-
+' =============================================
+class OrdenProduccion {
+  -id : int
+  -fecha : datetime
+  -totalUnidades : int
+  --
+  +registrarProduccion()
+  +calcularInsumos()
+  +ejecutarLote()
 }
 
-' ─────────────────────────────
-'  REPORTES Y CONSULTAS
-' ─────────────────────────────
-package "Reportes y Consultas" {
-
-  class LowStockReport {
-    + id : int
-    + message : str
-    + created_at : datetime
-    + is_resolved : bool
-    --
-    + __str__() : str
-  }
-
-  class LossRecord {
-    + id : int
-    + quantity : Decimal
-    + category : str
-    + description : str
-    + cost_estimate : Decimal
-    + timestamp : datetime
-    --
-    + __str__() : str
-    + get_category_display() : str
-  }
-
-  class UserQuery {
-    + id : int
-    + query_type : str
-    + start_date : date
-    + end_date : date
-    + results_data : JSON
-    + created_at : datetime
-    + updated_at : datetime
-    + is_active : bool
-    --
-    + __str__() : str
-  }
-
+class DetalleProduccion {
+  -id : int
+  -cantidad : int
+  --
+  +calcularInsumosNecesarios() : Decimal
 }
 
-' ─────────────────────────────
-'  RELACIONES
-' ─────────────────────────────
+Usuario "1" --> "0..*" OrdenProduccion : ejecuta >
+OrdenProduccion "1" *-- "1..*" DetalleProduccion : contiene >
+DetalleProduccion "0..*" --> "1" Producto : produce >
 
-' Usuarios y Roles
-Role "1" --o{ "0..*" User : "role"
-User "1" --o{ "0..*" UserStorage : "storage"
-User "1" --o{ "0..*" ResetToken : "target_user"
-User "1" --o{ "0..*" ResetToken : "generated_by"
+' =============================================
+'  PAGOS / MOVIMIENTOS DE CAJA
+' =============================================
+class Pago {
+  -id : int
+  -tipo : String  <<Entrada | Salida>>
+  -monto : Decimal
+  -descripcion : String
+  -metodoPago : String
+  -fecha : datetime
+  --
+  +procesarPago()
+  +generarRecibo()
+  +conciliarPagos()
+}
 
-' Productos
-Product "1" --o{ "0..*" RecipeIngredient : "product (elaborado)"
-Product "1" --o{ "0..*" RecipeIngredient : "ingredient (insumo)"
+Usuario "1" --> "0..*" Pago : registra >
 
-' Ventas
-User "1" --o{ "0..*" Sale : "user"
-Sale "1" --o{ "1..*" SaleItem : "sale"
-Product "1" --o{ "0..*" SaleItem : "product"
+' =============================================
+'  REPORTES Y ALERTAS  (CLASES NUEVAS)
+' =============================================
+class ReporteStockBajo {
+  -id : int
+  -mensaje : String
+  -created_at : datetime
+  -is_resolved : bool
+  --
+  +generarReporte()
+  +resolver()
+  +notificarGerente()
+}
 
-' Compras
-User "1" --o{ "0..*" Purchase : "user"
-User "1" --o{ "0..*" Purchase : "approved_by"
+class RegistroPerdida {
+  -id : int
+  -cantidad : Decimal
+  -categoria : String
+  -descripcion : String
+  -costoEstimado : Decimal
+  -timestamp : datetime
+  --
+  +registrarPerdida()
+  +calcularImpacto() : Decimal
+  +obtenerCategoria() : String
+}
 
-' Pedidos
-User "1" --o{ "0..*" Order : "user"
-Order "1" --o{ "1..*" OrderItem : "order"
+class ConsultaUsuario {
+  -id : int
+  -tipoConsulta : String
+  -fechaInicio : date
+  -fechaFin : date
+  -datosResultado : JSON
+  -created_at : datetime
+  -updated_at : datetime
+  --
+  +guardarConsulta()
+  +actualizarConsulta()
+  +limpiarConsulta()
+}
 
-' Caja e Inventario
-User "1" --o{ "0..*" CashMovement : "user"
-User "1" --o{ "0..*" InventoryChange : "user"
-Product "1" --o{ "0..*" InventoryChange : "product"
-InventoryChange "1" --o{ "0..*" InventoryChangeAudit : "inventory_change"
-Product "1" --o{ "0..*" InventoryChangeAudit : "product"
-User "1" --o{ "0..*" InventoryChangeAudit : "user"
-
-' Producción
-User "1" --o{ "0..*" Production : "user"
-Production "1" --o{ "1..*" ProductionItem : "production"
-Product "1" --o{ "0..*" ProductionItem : "product"
-
-' Reportes y Consultas
-User "1" --o{ "0..*" LowStockReport : "reported_by"
-LowStockReport }o--o{ Product : "products (M2M)"
-Product "1" --o{ "0..*" LossRecord : "product"
-User "1" --o{ "0..*" LossRecord : "user"
-User "1" --o{ "0..*" UserQuery : "user"
+Usuario "1" --> "0..*" ReporteStockBajo : reporta >
+ReporteStockBajo "0..*" --> "0..*" Producto : sobre >
+Usuario "1" --> "0..*" RegistroPerdida : registra >
+RegistroPerdida "0..*" --> "1" Producto : afecta >
+Usuario "1" *-- "0..*" ConsultaUsuario : guarda >
 
 @enduml
