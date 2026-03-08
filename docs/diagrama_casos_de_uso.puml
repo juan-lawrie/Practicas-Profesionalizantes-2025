@@ -123,10 +123,10 @@ rectangle "Sistema de Gestión — Churrería" {
   ' ─── Extensiones del login ───
   usecase "Restablecer\ncontraseña" as UC_ResetPwd
   usecase "Bloqueo automático por\nintentos fallidos" as UC_AutoLock
-  usecase "Sesión Gerente" as UC_SesionG
-  usecase "Sesión Encargado" as UC_SesionE
-  usecase "Sesión Cajero" as UC_SesionC
-  usecase "Sesión Panadero" as UC_SesionP
+  usecase "Ingreso de sesión\nGerente" as UC_SesionG
+  usecase "Ingreso de sesión\nEncargado" as UC_SesionE
+  usecase "Ingreso de sesión\nCajero" as UC_SesionC
+  usecase "Ingreso de sesión\nPanadero" as UC_SesionP
 
   ' ─── Adicionales (solo Gerente) ───
   usecase "Consultar agenda\ndigital" as UC_Agenda
