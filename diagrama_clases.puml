@@ -1,0 +1,342 @@
+@startuml Diagrama de Clases - Sistema Churrería
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+skinparam packageFontSize 13
+skinparam shadowing false
+
+' ─────────────────────────────
+'  USUARIOS Y ROLES
+' ─────────────────────────────
+package "Usuarios y Roles" {
+
+  class Role {
+    + id : int
+    + name : str
+    --
+    + __str__() : str
+  }
+
+  class User {
+    + id : int
+    + username : str
+    + email : str
+    + first_name : str
+    + last_name : str
+    + password : str
+    + is_active : bool
+    + is_staff : bool
+    + is_superuser : bool
+    + date_joined : datetime
+    + failed_login_attempts : int
+    + is_locked : bool
+    + locked_at : datetime
+    + lock_type : str  <<manual | automatic>>
+    --
+    + __str__() : str
+  }
+
+  class UserStorage {
+    + id : int
+    + key : str
+    + value : JSON
+    + updated_at : datetime
+    --
+    + __str__() : str
+  }
+
+  class ResetToken {
+    + id : UUID  <<PK>>
+    + token_hash : str
+    + created_at : datetime
+    + expires_at : datetime
+    + used : bool
+    + note : str
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  PRODUCTOS E INSUMOS
+' ─────────────────────────────
+package "Productos e Insumos" {
+
+  class Product {
+    + id : int
+    + name : str
+    + description : str
+    + price : Decimal
+    + stock : Decimal
+    + low_stock_threshold : int
+    + high_stock_multiplier : Decimal
+    + category : str
+    + is_ingredient : bool
+    + unit : str  <<g | ml | unidades>>
+    + recipe_yield : int
+    + loss_rate : Decimal
+    + is_active : bool
+    + deleted_at : datetime
+    --
+    + __str__() : str
+  }
+
+  class RecipeIngredient {
+    + id : int
+    + quantity : Decimal
+    + unit : str  <<g | ml | unidades>>
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  PROVEEDORES
+' ─────────────────────────────
+package "Proveedores" {
+
+  class Supplier {
+    + id : int
+    + name : str
+    + cuit : str
+    + address : str
+    + phone : str
+    + products : str
+    + is_active : bool
+    + deleted_at : datetime
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  VENTAS
+' ─────────────────────────────
+package "Ventas" {
+
+  class Sale {
+    + id : int
+    + timestamp : datetime
+    + total_amount : Decimal
+    + payment_method : str
+    --
+    + __str__() : str
+  }
+
+  class SaleItem {
+    + id : int
+    + quantity : int
+    + price : Decimal
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  COMPRAS
+' ─────────────────────────────
+package "Compras" {
+
+  class Purchase {
+    + id : int
+    + date : str
+    + supplier : str
+    + supplier_id : int
+    + items : JSON
+    + total_amount : Decimal
+    + status : str  <<Pendiente | Aprobada | Rechazada>>
+    + created_at : datetime
+    + approved_at : datetime
+    + is_active : bool
+    + deleted_at : datetime
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  PEDIDOS
+' ─────────────────────────────
+package "Pedidos" {
+
+  class Order {
+    + id : int
+    + customer_name : str
+    + fecha_para_la_que_se_quiere_el_pedido : datetime
+    + payment_method : str
+    + total_amount : Decimal
+    + notes : str
+    + status : str
+    + fecha_de_orden_del_pedido : datetime
+    --
+    + __str__() : str
+  }
+
+  class OrderItem {
+    + id : int
+    + product_name : str
+    + quantity : int
+    + unit_price : Decimal
+    + total : Decimal
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  CAJA E INVENTARIO
+' ─────────────────────────────
+package "Caja e Inventario" {
+
+  class CashMovement {
+    + id : int
+    + type : str  <<Entrada | Salida>>
+    + amount : Decimal
+    + description : str
+    + timestamp : datetime
+    + payment_method : str
+    --
+  }
+
+  class InventoryChange {
+    + id : int
+    + type : str  <<Entrada | Salida>>
+    + quantity : Decimal
+    + reason : str
+    + timestamp : datetime
+    --
+    + __str__() : str
+  }
+
+  class InventoryChangeAudit {
+    + id : int
+    + role : str
+    + change_type : str  <<Entrada | Salida>>
+    + quantity : Decimal
+    + previous_stock : Decimal
+    + new_stock : Decimal
+    + reason : str
+    + timestamp : datetime
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  PRODUCCIÓN
+' ─────────────────────────────
+package "Producción" {
+
+  class Production {
+    + id : int
+    + created_at : datetime
+    + total_units : int
+    --
+    + __str__() : str
+  }
+
+  class ProductionItem {
+    + id : int
+    + quantity : int
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  REPORTES Y CONSULTAS
+' ─────────────────────────────
+package "Reportes y Consultas" {
+
+  class LowStockReport {
+    + id : int
+    + message : str
+    + created_at : datetime
+    + is_resolved : bool
+    --
+    + __str__() : str
+  }
+
+  class LossRecord {
+    + id : int
+    + quantity : Decimal
+    + category : str
+    + description : str
+    + cost_estimate : Decimal
+    + timestamp : datetime
+    --
+    + __str__() : str
+    + get_category_display() : str
+  }
+
+  class UserQuery {
+    + id : int
+    + query_type : str
+    + start_date : date
+    + end_date : date
+    + results_data : JSON
+    + created_at : datetime
+    + updated_at : datetime
+    + is_active : bool
+    --
+    + __str__() : str
+  }
+
+}
+
+' ─────────────────────────────
+'  RELACIONES
+' ─────────────────────────────
+
+' Usuarios y Roles
+Role "1" --o{ "0..*" User : "role"
+User "1" --o{ "0..*" UserStorage : "storage"
+User "1" --o{ "0..*" ResetToken : "target_user"
+User "1" --o{ "0..*" ResetToken : "generated_by"
+
+' Productos
+Product "1" --o{ "0..*" RecipeIngredient : "product (elaborado)"
+Product "1" --o{ "0..*" RecipeIngredient : "ingredient (insumo)"
+
+' Ventas
+User "1" --o{ "0..*" Sale : "user"
+Sale "1" --o{ "1..*" SaleItem : "sale"
+Product "1" --o{ "0..*" SaleItem : "product"
+
+' Compras
+User "1" --o{ "0..*" Purchase : "user"
+User "1" --o{ "0..*" Purchase : "approved_by"
+
+' Pedidos
+User "1" --o{ "0..*" Order : "user"
+Order "1" --o{ "1..*" OrderItem : "order"
+
+' Caja e Inventario
+User "1" --o{ "0..*" CashMovement : "user"
+User "1" --o{ "0..*" InventoryChange : "user"
+Product "1" --o{ "0..*" InventoryChange : "product"
+InventoryChange "1" --o{ "0..*" InventoryChangeAudit : "inventory_change"
+Product "1" --o{ "0..*" InventoryChangeAudit : "product"
+User "1" --o{ "0..*" InventoryChangeAudit : "user"
+
+' Producción
+User "1" --o{ "0..*" Production : "user"
+Production "1" --o{ "1..*" ProductionItem : "production"
+Product "1" --o{ "0..*" ProductionItem : "product"
+
+' Reportes y Consultas
+User "1" --o{ "0..*" LowStockReport : "reported_by"
+LowStockReport }o--o{ Product : "products (M2M)"
+Product "1" --o{ "0..*" LossRecord : "product"
+User "1" --o{ "0..*" LossRecord : "user"
+User "1" --o{ "0..*" UserQuery : "user"
+
+@enduml
