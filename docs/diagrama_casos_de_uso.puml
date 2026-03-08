@@ -1,9 +1,9 @@
 @startuml Diagrama_Casos_de_Uso_Churreria
 
+!pragma layout smetana
 left to right direction
 skinparam backgroundColor white
 skinparam shadowing false
-skinparam linetype ortho
 
 skinparam usecase {
   BackgroundColor #DFF0D8
@@ -17,94 +17,91 @@ skinparam actor {
   FontSize 13
 }
 
-skinparam rectangle {
-  BackgroundColor #FAFAFA
-  BorderColor #2E7D32
-  FontSize 15
-  RoundCorner 15
-}
-
 skinparam arrow {
   FontSize 9
   Color #555555
 }
 
-title **Diagrama de Casos de Uso — Sistema de Gestión Churrería**
+title **Diagrama de Casos de Uso - Sistema de Gestión de Churrería**
 
 actor "Encargado" as E
 actor "Gerente" as G
 actor "Cajero" as C
 actor "Panadero" as P
 
-' Fix actor vertical ordering
-E -[hidden]down- G
-G -[hidden]down- C
-C -[hidden]down- P
+' ─── Gerente + Encargado ───
+usecase "Registrar compra" as UC_RegCompra
+usecase "Consultar historial\nde compras" as UC_HistCompra
+usecase "Registrar pérdidas" as UC_Losses
 
-rectangle "Sistema de Gestión — Churrería" {
+' ─── Solo Gerente: Administración ───
+usecase "Registrar usuarios\ncon roles" as UC_RegUser
+usecase "Eliminar usuarios" as UC_DelUser
+usecase "Bloquear / Desbloquear\nusuarios" as UC_LockUser
+usecase "Generar token de\nrestablecimiento" as UC_GenToken
 
-  ' ─── Gerente + Encargado ───
-  usecase "Registrar compra" as UC_RegCompra
-  usecase "Consultar historial\nde compras" as UC_HistCompra
-  usecase "Registrar pérdidas" as UC_Losses
+' ─── Solo Gerente: Proveedores ───
+usecase "Registrar proveedor" as UC_RegProv
+usecase "Ver estado de\nproveedores" as UC_ViewProv
+usecase "Eliminar proveedor" as UC_DelProv
 
-  ' ─── Solo Gerente: Administración ───
-  usecase "Registrar usuarios\ncon roles" as UC_RegUser
-  usecase "Eliminar usuarios" as UC_DelUser
-  usecase "Bloquear / Desbloquear\nusuarios" as UC_LockUser
-  usecase "Generar token de\nrestablecimiento" as UC_GenToken
+' ─── Solo Gerente: Productos ───
+usecase "Crear productos" as UC_CreateProd
+usecase "Editar productos" as UC_EditProd
+usecase "Gestionar recetas\ne ingredientes" as UC_Recipes
 
-  ' ─── Solo Gerente: Proveedores ───
-  usecase "Registrar proveedor" as UC_RegProv
-  usecase "Ver estado de\nproveedores" as UC_ViewProv
-  usecase "Eliminar proveedor" as UC_DelProv
+' ─── Solo Gerente: Inventario ───
+usecase "Registrar cambios\nen el inventario" as UC_RegCambios
 
-  ' ─── Solo Gerente: Productos ───
-  usecase "Crear productos" as UC_CreateProd
-  usecase "Editar productos" as UC_EditProd
-  usecase "Gestionar recetas\ne ingredientes" as UC_Recipes
+' ─── Consultar inventario + su extensión DemandOrder (juntos para arrow corto) ───
+usecase "Consultar inventario" as UC_ConsInv
+usecase "Generar pedido\nde demanda" as UC_DemandOrder
 
-  ' ─── Solo Gerente: Inventario y Producción ───
-  usecase "Registrar cambios\nen el inventario" as UC_RegCambios
-  usecase "Ver estado del stock" as UC_ViewStock
-  usecase "Registrar producción\nen lote" as UC_Prod
-  usecase "Gestionar alertas\nde stock bajo" as UC_ManageAlerts
-  usecase "Aprobar / Rechazar\ncompras" as UC_ApproveCompra
-  usecase "Consultar agenda\ndigital" as UC_Agenda
-  usecase "Ver información\nde la empresa" as UC_InfoEmpresa
+' ─── Consultar datos + su extensión GenPDF (juntos para arrow corto) ───
+usecase "Consultar datos" as UC_ConsData
+usecase "Generar reportes PDF" as UC_GenPDF
 
-  ' ─── Todos los roles ───
-  usecase "Iniciar sesión" as UC_Login
-  usecase "Consultar inventario" as UC_ConsInv
-  usecase "Gestionar pedidos" as UC_Orders
-  usecase "Consultar datos" as UC_ConsData
+' ─── Todos los roles ───
+usecase "Gestionar pedidos" as UC_Orders
 
-  ' ─── Solo Gerente: Reportes ───
-  usecase "Generar reportes PDF" as UC_GenPDF
-  usecase "Generar pedido\nde demanda" as UC_DemandOrder
+' ─── Ver stock + su extensión AlertLow (juntos para arrow corto) ───
+usecase "Ver estado del stock" as UC_ViewStock
+usecase "Alertar stock bajo" as UC_AlertLow
 
-  ' ─── Gerente + Cajero ───
-  usecase "Registrar venta" as UC_RegVenta
-  usecase "Registrar movimientos\nde caja" as UC_CashMov
+' ─── Solo Gerente: Alertas ───
+usecase "Gestionar alertas\nde stock bajo" as UC_ManageAlerts
 
-  ' ─── Cajero + Panadero ───
-  usecase "Reportar stock bajo" as UC_ReportLow
+' ─── Aprobar compras + include UpdateStock (juntos) ───
+usecase "Aprobar / Rechazar\ncompras" as UC_ApproveCompra
+usecase "Actualizar stock" as UC_UpdateStock
 
-  ' ─── Incluidos ───
-  usecase "Autenticación\n(validar credenciales)" as UC_Auth
-  usecase "Verificación\nde roles" as UC_VerifRoles
-  usecase "Actualizar stock" as UC_UpdateStock
-  usecase "Descontar ingredientes\nautomáticamente" as UC_DeductIng
+' ─── Solo Gerente: Adicionales ───
+usecase "Consultar agenda\ndigital" as UC_Agenda
+usecase "Ver información\nde la empresa" as UC_InfoEmpresa
 
-  ' ─── Extensiones del login ───
-  usecase "Ingreso de sesión\nGerente" as UC_SesionG
-  usecase "Ingreso de sesión\nEncargado" as UC_SesionE
-  usecase "Ingreso de sesión\nCajero" as UC_SesionC
-  usecase "Ingreso de sesión\nPanadero" as UC_SesionP
-  usecase "Restablecer\ncontraseña" as UC_ResetPwd
-  usecase "Bloqueo automático por\nintentos fallidos" as UC_AutoLock
-  usecase "Alertar stock bajo" as UC_AlertLow
-}
+' ─── Producción + sus includes (juntos para arrows cortos) ───
+usecase "Registrar producción\nen lote" as UC_Prod
+usecase "Descontar ingredientes\nautomáticamente" as UC_DeductIng
+
+' ─── Gerente + Cajero: Ventas ───
+usecase "Registrar venta" as UC_RegVenta
+usecase "Registrar movimientos\nde caja" as UC_CashMov
+
+' ─── Cajero + Panadero ───
+usecase "Reportar stock bajo" as UC_ReportLow
+
+' ─── Login + autenticación (include chain juntos) ───
+usecase "Iniciar sesión" as UC_Login
+usecase "Autenticación\n(validar credenciales)" as UC_Auth
+usecase "Verificación\nde roles" as UC_VerifRoles
+
+' ─── Extensiones del login (todas juntas debajo de Login) ───
+usecase "Ingreso de sesión\nGerente" as UC_SesionG
+usecase "Ingreso de sesión\nEncargado" as UC_SesionE
+usecase "Ingreso de sesión\nCajero" as UC_SesionC
+usecase "Ingreso de sesión\nPanadero" as UC_SesionP
+usecase "Restablecer\ncontraseña" as UC_ResetPwd
+usecase "Bloqueo automático por\nintentos fallidos" as UC_AutoLock
 
 ' === ENCARGADO ===
 E --> UC_RegCompra
