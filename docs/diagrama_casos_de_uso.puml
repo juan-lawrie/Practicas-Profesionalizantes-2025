@@ -1,5 +1,6 @@
 @startuml Diagrama_Casos_de_Uso_Churreria
 
+!pragma layout smetana
 ' =============================================================
 ' CONFIGURACIÓN DE DISEÑO
 ' =============================================================
@@ -26,115 +27,123 @@ skinparam rectangle {
   RoundCorner 15
 }
 
-skinparam package {
-  BackgroundColor #F5F5F5
-  BorderColor #AAAAAA
-  FontSize 11
-  FontStyle bold
-}
-
 skinparam arrow {
   FontSize 9
   Color #555555
 }
 
-title **Diagrama de Casos de Uso — Sistema de Gestión Churrería**\n(Actualizado con funcionalidades implementadas en el sistema)
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #F9A825
+  FontSize 10
+}
+
+title **Diagrama de Casos de Uso — Sistema de Gestión Churrería**
 
 ' =============================================================
-' ACTORES
+' ACTORES CON GENERALIZACIÓN
+' Los 4 roles heredan de "Usuario", que accede a los casos
+' de uso compartidos (Iniciar sesión, Consultar inventario,
+' Gestionar pedidos, Consultar datos).
 ' =============================================================
+actor "Usuario" as U
 actor "Gerente" as G
 actor "Encargado" as E
 actor "Cajero" as C
 actor "Panadero" as P
+
+G --|> U
+E --|> U
+C --|> U
+P --|> U
 
 ' =============================================================
 ' SISTEMA
 ' =============================================================
 rectangle "Sistema de Gestión — Churrería" {
 
-  ' ───────── AUTENTICACIÓN Y SEGURIDAD ─────────
-  package "Autenticación y Seguridad" {
-    usecase "Iniciar sesión" as UC_Login
-    usecase "Autenticación\n(validar credenciales)" as UC_Auth
-    usecase "Verificación\nde roles" as UC_VerifRoles
-    usecase "Restablecer\ncontraseña" as UC_ResetPwd
-    usecase "Bloqueo automático por\nintentos fallidos" as UC_AutoLock
-    usecase "Ingreso sesión Gerente" as UC_SesionG
-    usecase "Ingreso sesión Encargado" as UC_SesionE
-    usecase "Ingreso sesión Cajero" as UC_SesionC
-    usecase "Ingreso sesión Panadero" as UC_SesionP
-  }
+  ' ─── Administración de usuarios (solo Gerente) ───
+  usecase "Registrar usuarios\ncon roles" as UC_RegUser
+  usecase "Eliminar usuarios" as UC_DelUser
+  usecase "Bloquear / Desbloquear\nusuarios" as UC_LockUser
+  usecase "Generar token de\nrestablecimiento" as UC_GenToken
 
-  ' ───────── ADMINISTRACIÓN (USUARIOS Y PROVEEDORES) ─────────
-  package "Administración (Usuarios y Proveedores)" {
-    usecase "Registrar usuarios\ncon roles" as UC_RegUser
-    usecase "Eliminar usuarios" as UC_DelUser
-    usecase "Bloquear / Desbloquear\nusuarios" as UC_LockUser
-    usecase "Generar token de\nrestablecimiento" as UC_GenToken
-    usecase "Registrar proveedor" as UC_RegProv
-    usecase "Ver estado de\nproveedores" as UC_ViewProv
-    usecase "Eliminar proveedor" as UC_DelProv
-  }
+  ' ─── Proveedores (solo Gerente) ───
+  usecase "Registrar proveedor" as UC_RegProv
+  usecase "Ver estado de\nproveedores" as UC_ViewProv
+  usecase "Eliminar proveedor" as UC_DelProv
 
-  ' ───────── PRODUCTOS, INVENTARIO Y PRODUCCIÓN ─────────
-  package "Productos, Inventario y Producción" {
-    usecase "Crear productos" as UC_CreateProd
-    usecase "Editar productos" as UC_EditProd
-    usecase "Gestionar recetas\ne ingredientes" as UC_Recipes
-    usecase "Consultar inventario" as UC_ConsInv
-    usecase "Registrar cambios\nen el inventario" as UC_RegCambios
-    usecase "Ver estado del stock" as UC_ViewStock
-    usecase "Actualizar stock" as UC_UpdateStock
-    usecase "Registrar producción\nen lote" as UC_Prod
-    usecase "Descontar ingredientes\nautomáticamente" as UC_DeductIng
-  }
+  ' ─── Productos y recetas (solo Gerente) ───
+  usecase "Crear productos" as UC_CreateProd
+  usecase "Editar productos" as UC_EditProd
+  usecase "Gestionar recetas\ne ingredientes" as UC_Recipes
 
-  ' ───────── ALERTAS DE STOCK BAJO ─────────
-  package "Alertas de Stock Bajo" {
-    usecase "Reportar stock bajo" as UC_ReportLow
-    usecase "Alertar stock bajo" as UC_AlertLow
-    usecase "Gestionar alertas\nde stock bajo" as UC_ManageAlerts
-  }
+  ' ─── Inventario (Gerente modifica) ───
+  usecase "Registrar cambios\nen el inventario" as UC_RegCambios
+  usecase "Ver estado del stock" as UC_ViewStock
+  usecase "Actualizar stock" as UC_UpdateStock
 
-  ' ───────── OPERACIONES COMERCIALES ─────────
-  package "Operaciones Comerciales" {
-    usecase "Registrar venta" as UC_RegVenta
-    usecase "Registrar movimientos\nde caja" as UC_CashMov
-    usecase "Registrar compra" as UC_RegCompra
-    usecase "Aprobar / Rechazar\ncompras" as UC_ApproveCompra
-    usecase "Consultar historial\nde compras" as UC_HistCompra
-    usecase "Registrar pérdidas" as UC_Losses
-  }
+  ' ─── Producción (solo Gerente) ───
+  usecase "Registrar producción\nen lote" as UC_Prod
+  usecase "Descontar ingredientes\nautomáticamente" as UC_DeductIng
 
-  ' ───────── PEDIDOS, REPORTES Y CONSULTAS ─────────
-  package "Pedidos, Reportes y Consultas" {
-    usecase "Gestionar pedidos" as UC_Orders
-    usecase "Generar pedido\nde demanda" as UC_DemandOrder
-    usecase "Consultar datos" as UC_ConsData
-    usecase "Generar reportes PDF" as UC_GenPDF
-  }
+  ' ─── Compras ───
+  usecase "Aprobar / Rechazar\ncompras" as UC_ApproveCompra
+  usecase "Registrar compra" as UC_RegCompra
+  usecase "Consultar historial\nde compras" as UC_HistCompra
 
-  ' ───────── FUNCIONALIDADES ADICIONALES ─────────
-  package "Funcionalidades Adicionales" {
-    usecase "Realizar copias de\nseguridad automáticas" as UC_Backup
-    usecase "Operar offline y\nsincronizar al reconectar" as UC_Offline
-    usecase "Consultar agenda\ndigital" as UC_Agenda
-    usecase "Ver información\nde la empresa" as UC_InfoEmpresa
-  }
+  ' ─── Pérdidas ───
+  usecase "Registrar pérdidas" as UC_Losses
+
+  ' ─── Alertas ───
+  usecase "Gestionar alertas\nde stock bajo" as UC_ManageAlerts
+  usecase "Alertar stock bajo" as UC_AlertLow
+
+  ' ─── Ventas y caja ───
+  usecase "Registrar venta" as UC_RegVenta
+  usecase "Registrar movimientos\nde caja" as UC_CashMov
+
+  ' ─── Casos de uso compartidos (vía herencia de Usuario) ───
+  usecase "Consultar inventario" as UC_ConsInv
+  usecase "Gestionar pedidos" as UC_Orders
+  usecase "Consultar datos" as UC_ConsData
+  usecase "Iniciar sesión" as UC_Login
+
+  ' ─── Reportes ───
+  usecase "Generar reportes PDF" as UC_GenPDF
+  usecase "Generar pedido\nde demanda" as UC_DemandOrder
+
+  ' ─── Reportar stock bajo (Cajero + Panadero) ───
+  usecase "Reportar stock bajo" as UC_ReportLow
+
+  ' ─── Autenticación (cadena include) ───
+  usecase "Autenticación\n(validar credenciales)" as UC_Auth
+  usecase "Verificación\nde roles" as UC_VerifRoles
+
+  ' ─── Extensiones del login ───
+  usecase "Restablecer\ncontraseña" as UC_ResetPwd
+  usecase "Bloqueo automático por\nintentos fallidos" as UC_AutoLock
+  usecase "Sesión Gerente" as UC_SesionG
+  usecase "Sesión Encargado" as UC_SesionE
+  usecase "Sesión Cajero" as UC_SesionC
+  usecase "Sesión Panadero" as UC_SesionP
+
+  ' ─── Adicionales (solo Gerente) ───
+  usecase "Consultar agenda\ndigital" as UC_Agenda
+  usecase "Ver información\nde la empresa" as UC_InfoEmpresa
 }
 
 ' =============================================================
-' RELACIONES: ACTORES → CASOS DE USO
+' CONEXIONES — USUARIO (heredadas por todos los roles)
 ' =============================================================
+U --> UC_Login
+U --> UC_ConsInv
+U --> UC_Orders
+U --> UC_ConsData
 
-' ─── Todos los actores inician sesión ───
-G --> UC_Login
-E --> UC_Login
-C --> UC_Login
-P --> UC_Login
-
-' ─── GERENTE: Administración (Usuarios y Proveedores) ───
+' =============================================================
+' CONEXIONES — GERENTE (exclusivas del Gerente)
+' =============================================================
 G --> UC_RegUser
 G --> UC_DelUser
 G --> UC_LockUser
@@ -142,60 +151,42 @@ G --> UC_GenToken
 G --> UC_RegProv
 G --> UC_ViewProv
 G --> UC_DelProv
-
-' ─── GERENTE: Productos, Inventario y Producción ───
 G --> UC_CreateProd
 G --> UC_EditProd
 G --> UC_Recipes
-G --> UC_ConsInv
 G --> UC_RegCambios
 G --> UC_ViewStock
 G --> UC_Prod
-
-' ─── GERENTE: Alertas ───
-G --> UC_ManageAlerts
-
-' ─── GERENTE: Operaciones Comerciales ───
-G --> UC_RegVenta
-G --> UC_CashMov
-G --> UC_RegCompra
 G --> UC_ApproveCompra
+G --> UC_RegCompra
 G --> UC_HistCompra
 G --> UC_Losses
-
-' ─── GERENTE: Pedidos, Reportes ───
-G --> UC_Orders
-G --> UC_DemandOrder
-G --> UC_ConsData
+G --> UC_ManageAlerts
+G --> UC_RegVenta
+G --> UC_CashMov
 G --> UC_GenPDF
-
-' ─── GERENTE: Adicionales ───
-G --> UC_Backup
-G --> UC_Offline
+G --> UC_DemandOrder
 G --> UC_Agenda
 G --> UC_InfoEmpresa
 
-' ─── ENCARGADO ───
-E --> UC_ConsInv
+' =============================================================
+' CONEXIONES — ENCARGADO (exclusivas del Encargado)
+' =============================================================
 E --> UC_RegCompra
 E --> UC_HistCompra
 E --> UC_Losses
-E --> UC_Orders
-E --> UC_ConsData
 
-' ─── CAJERO ───
+' =============================================================
+' CONEXIONES — CAJERO (exclusivas del Cajero)
+' =============================================================
 C --> UC_RegVenta
 C --> UC_CashMov
 C --> UC_ReportLow
-C --> UC_ConsInv
-C --> UC_Orders
-C --> UC_ConsData
 
-' ─── PANADERO ───
+' =============================================================
+' CONEXIONES — PANADERO (exclusivas del Panadero)
+' =============================================================
 P --> UC_ReportLow
-P --> UC_ConsInv
-P --> UC_Orders
-P --> UC_ConsData
 
 ' =============================================================
 ' RELACIONES <<include>>
