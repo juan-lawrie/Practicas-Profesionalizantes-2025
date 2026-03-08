@@ -29,9 +29,14 @@ actor "Gerente" as G
 actor "Cajero" as C
 actor "Panadero" as P
 
-' ─── Gerente + Encargado ───
+' ─── Solo Gerente: Compras ───
 usecase "Registrar compra" as UC_RegCompra
 usecase "Consultar historial\nde compras" as UC_HistCompra
+
+' ─── Encargado: Solicitar compra ───
+usecase "Solicitar compra" as UC_SolCompra
+
+' ─── Gerente + Encargado ───
 usecase "Registrar pérdidas" as UC_Losses
 
 ' ─── Solo Gerente: Administración ───
@@ -57,7 +62,7 @@ usecase "Registrar cambios\nen el inventario" as UC_RegCambios
 usecase "Consultar inventario" as UC_ConsInv
 usecase "Generar pedido\nde demanda" as UC_DemandOrder
 
-' ─── Consultar datos + su extensión GenPDF (juntos para arrow corto) ───
+' ─── Solo Gerente: Consultar datos + su extensión GenPDF ───
 usecase "Consultar datos" as UC_ConsData
 usecase "Generar reportes PDF" as UC_GenPDF
 
@@ -71,6 +76,9 @@ usecase "Alertar stock bajo" as UC_AlertLow
 ' ─── Solo Gerente: Alertas ───
 usecase "Gestionar alertas\nde stock bajo" as UC_ManageAlerts
 
+' ─── Cajero + Panadero ───
+usecase "Reportar stock bajo" as UC_ReportLow
+
 ' ─── Aprobar compras + include UpdateStock (juntos) ───
 usecase "Aprobar / Rechazar\ncompras" as UC_ApproveCompra
 usecase "Actualizar stock" as UC_UpdateStock
@@ -83,12 +91,13 @@ usecase "Ver información\nde la empresa" as UC_InfoEmpresa
 usecase "Registrar producción\nen lote" as UC_Prod
 usecase "Descontar ingredientes\nautomáticamente" as UC_DeductIng
 
-' ─── Gerente + Cajero: Ventas ───
+' ─── Todos los roles: Ventas ───
 usecase "Registrar venta" as UC_RegVenta
 usecase "Registrar movimientos\nde caja" as UC_CashMov
 
-' ─── Cajero + Panadero ───
-usecase "Reportar stock bajo" as UC_ReportLow
+' ─── Solo Gerente: Reportes de faltantes ───
+usecase "Ver reportes de\nfaltantes" as UC_ViewReportLow
+usecase "Marcar faltante\ncomo resuelto" as UC_ResolveLow
 
 ' ─── Login + autenticación (include chain juntos) ───
 usecase "Iniciar sesión" as UC_Login
@@ -104,13 +113,14 @@ usecase "Restablecer\ncontraseña" as UC_ResetPwd
 usecase "Bloqueo automático por\nintentos fallidos" as UC_AutoLock
 
 ' === ENCARGADO ===
-E --> UC_RegCompra
+E --> UC_SolCompra
 E --> UC_HistCompra
 E --> UC_Losses
 E --> UC_Login
 E --> UC_ConsInv
 E --> UC_Orders
-E --> UC_ConsData
+E --> UC_RegVenta
+E --> UC_CashMov
 
 ' === GERENTE ===
 G --> UC_RegCompra
@@ -141,12 +151,13 @@ G --> UC_GenPDF
 G --> UC_DemandOrder
 G --> UC_RegVenta
 G --> UC_CashMov
+G --> UC_ViewReportLow
+G --> UC_ResolveLow
 
 ' === CAJERO ===
 C --> UC_Login
 C --> UC_ConsInv
 C --> UC_Orders
-C --> UC_ConsData
 C --> UC_RegVenta
 C --> UC_CashMov
 C --> UC_ReportLow
@@ -155,7 +166,8 @@ C --> UC_ReportLow
 P --> UC_Login
 P --> UC_ConsInv
 P --> UC_Orders
-P --> UC_ConsData
+P --> UC_RegVenta
+P --> UC_CashMov
 P --> UC_ReportLow
 
 ' === INCLUDE ===
