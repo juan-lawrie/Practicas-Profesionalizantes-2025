@@ -3,7 +3,6 @@
 ' ─────────────────────────────────────────
 '  Configuración visual
 ' ─────────────────────────────────────────
-left to right direction
 skinparam packageStyle rectangle
 skinparam actorStyle awesome
 skinparam usecase {
@@ -311,10 +310,10 @@ PAN --> UC_REP_REPORT_LOW
 ' ─────────────────────────────────────────
 '  Relaciones de inclusión / extensión
 ' ─────────────────────────────────────────
-UC_PUR_APPROVE    .> UC_INV_IN        : <<include>>\n(actualiza stock)
-UC_PROD_BATCH     .> UC_INV_OUT       : <<include>>\n(descuenta insumos)
-UC_SALE_CREATE    .> UC_INV_OUT       : <<include>>\n(descuenta stock)
+UC_PUR_APPROVE    .> UC_INV_IN        : <<include>>
+UC_PROD_BATCH     .> UC_INV_OUT       : <<include>>
+UC_SALE_CREATE    .> UC_INV_OUT       : <<include>>
 UC_REP_EXPORT     .> UC_REP_QUERY     : <<include>>
-UC_RESET_PW       .> UC_GEN_TOKEN     : <<include>>
+UC_REP_RESOLVE    .> UC_REP_LOW_STOCK : <<extend>>
 
 @enduml
