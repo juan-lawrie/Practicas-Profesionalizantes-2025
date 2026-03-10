@@ -55,9 +55,6 @@ usecase "Crear productos" as UC_CreateProd
 usecase "Editar productos" as UC_EditProd
 usecase "Gestionar recetas\ne ingredientes" as UC_Recipes
 
-' ─── Solo Gerente: Inventario ───
-usecase "Registrar cambios\nen el inventario" as UC_RegCambios
-
 ' ─── Consultar inventario + su extensión DemandOrder (juntos para arrow corto) ───
 usecase "Consultar inventario" as UC_ConsInv
 usecase "Generar pedido\nde demanda" as UC_DemandOrder
@@ -136,7 +133,6 @@ G --> UC_DelProv
 G --> UC_CreateProd
 G --> UC_EditProd
 G --> UC_Recipes
-G --> UC_RegCambios
 G --> UC_ViewStock
 G --> UC_Prod
 G --> UC_ManageAlerts
