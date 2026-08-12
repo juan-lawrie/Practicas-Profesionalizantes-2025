@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Select from 'react-select';
 import { updateOrderStatus, updateOrder } from '../services/api';
 import {
+    round2,
     calculateItemsTotal,
     PaymentDifferencePanel,
     ConfirmDeliveryModal,
@@ -165,6 +166,20 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
         return calculateItemsTotal(editOrderForm.items);
     };
 
+    const addEditItem = () => {
+        setEditOrderForm(prev => ({
+            ...prev,
+            items: [...prev.items, { productId: '', productName: '', quantity: 1, unitPrice: 0, total: 0 }],
+        }));
+    };
+
+    const removeEditItem = (index) => {
+        setEditOrderForm(prev => {
+            if (prev.items.length <= 1) return prev;
+            return { ...prev, items: prev.items.filter((_, i) => i !== index) };
+        });
+    };
+
     const updateEditItem = (index, field, value) => {
         setEditOrderForm(prev => {
             const updatedItems = [...prev.items];
@@ -179,7 +194,7 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
             }
             const quantity = Number(currentItem.quantity) || 0;
             const unitPrice = Number(currentItem.unitPrice) || 0;
-            currentItem.total = quantity * unitPrice;
+            currentItem.total = round2(quantity * unitPrice);
             updatedItems[index] = currentItem;
             return { ...prev, items: updatedItems };
         });
@@ -203,7 +218,7 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
                         product_name: i.productName,
                         quantity: qty,
                         unit_price: unitPrice,
-                        total: qty * unitPrice,
+                        total: round2(qty * unitPrice),
                     };
                 }),
                 notes: editOrderForm.notes,
@@ -683,10 +698,10 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
                             {editMessage && <p className="text-red-600 text-sm mb-3">{editMessage}</p>}
                             {editOrderForm.items.map((item, index) => (
                                 <div key={index} className="grid grid-cols-12 gap-3 items-center mb-2">
-                                    <div className="col-span-6">
+                                    <div className="col-span-5">
                                         <Select
                                             options={productOptions}
-                                            value={productOptions.find(opt => opt.value === item.productId)}
+                                            value={productOptions.find(opt => opt.value === item.productId) || null}
                                             onChange={selectedOption => updateEditItem(index, 'product', selectedOption)}
                                             placeholder="Producto..."
                                             isClearable
@@ -706,10 +721,31 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
                                         <input type="number" value={item.unitPrice} readOnly className="w-full px-2 py-1 bg-gray-100 border border-gray-300 rounded-md text-sm" />
                                     </div>
                                     <div className="col-span-2 text-right text-sm font-semibold">
-                                        ${safeToFixed((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))}
+                                        ${safeToFixed(round2((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)))}
+                                    </div>
+                                    <div className="col-span-1 text-center">
+                                        {editOrderForm.items.length > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => removeEditItem(index)}
+                                                title="Quitar producto"
+                                                className="text-red-500 hover:text-red-700"
+                                            >
+                                                &#x274C;
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
+
+                            <button
+                                type="button"
+                                onClick={addEditItem}
+                                className="mt-2 text-indigo-600 hover:text-indigo-900 text-sm font-medium"
+                            >
+                                &#x2795; Agregar Producto
+                            </button>
+
                             <PaymentDifferencePanel
                                 paidTotal={editOrderForm.paidTotal}
                                 newTotal={calculateEditOrderTotal()}
