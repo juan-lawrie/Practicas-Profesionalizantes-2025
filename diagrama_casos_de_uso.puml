@@ -1,0 +1,319 @@
+@startuml Diagrama_Casos_de_Uso_Churreria
+
+' ─────────────────────────────────────────
+'  Configuración visual
+' ─────────────────────────────────────────
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam usecase {
+    BackgroundColor #FAFAFA
+    BorderColor #555555
+    ArrowColor #333333
+}
+skinparam actor {
+    BackgroundColor #D6EAF8
+    BorderColor #2980B9
+}
+skinparam package {
+    BackgroundColor #F9F9F9
+    BorderColor #AAAAAA
+    FontStyle bold
+}
+
+title Sistema de Gestión - Churrería\nDiagrama de Casos de Uso
+
+' ─────────────────────────────────────────
+'  Actores
+' ─────────────────────────────────────────
+actor "Gerente"   as GER
+actor "Encargado" as ENC
+actor "Panadero"  as PAN
+actor "Cajero"    as CAJ
+
+' Jerarquía de herencia entre actores
+GER --|> ENC
+
+' ─────────────────────────────────────────
+'  PAQUETE: Autenticación
+' ─────────────────────────────────────────
+package "Autenticación" {
+    usecase "Iniciar sesión"              as UC_LOGIN
+    usecase "Cerrar sesión"               as UC_LOGOUT
+    usecase "Recuperar contraseña"        as UC_RESET_PW
+    usecase "Generar token de\nrestablecimiento de contraseña" as UC_GEN_TOKEN
+    usecase "Ver mis datos de usuario"    as UC_MY_DATA
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Gestión de Usuarios
+' ─────────────────────────────────────────
+package "Gestión de Usuarios" {
+    usecase "Ver listado de usuarios"     as UC_USER_LIST
+    usecase "Crear usuario"               as UC_USER_CREATE
+    usecase "Editar usuario"              as UC_USER_EDIT
+    usecase "Desactivar usuario"          as UC_USER_DELETE
+    usecase "Bloquear usuario\n(manual)"  as UC_USER_LOCK
+    usecase "Desbloquear usuario"         as UC_USER_UNLOCK
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Gestión de Productos e Insumos
+' ─────────────────────────────────────────
+package "Gestión de Productos e Insumos" {
+    usecase "Ver productos e insumos"     as UC_PROD_LIST
+    usecase "Crear producto / insumo"     as UC_PROD_CREATE
+    usecase "Editar producto / insumo"    as UC_PROD_EDIT
+    usecase "Eliminar producto / insumo"  as UC_PROD_DELETE
+    usecase "Configurar tasa\nde pérdida" as UC_PROD_LOSS_RATE
+    usecase "Configurar rendimiento\nde receta" as UC_PROD_RECIPE_YIELD
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Gestión de Recetas
+' ─────────────────────────────────────────
+package "Gestión de Recetas" {
+    usecase "Ver receta de producto"      as UC_REC_VIEW
+    usecase "Agregar ingrediente\na receta" as UC_REC_ADD
+    usecase "Editar ingrediente\nde receta" as UC_REC_EDIT
+    usecase "Eliminar ingrediente\nde receta" as UC_REC_DELETE
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Control de Inventario
+' ─────────────────────────────────────────
+package "Control de Inventario" {
+    usecase "Registrar entrada\nde inventario"  as UC_INV_IN
+    usecase "Registrar salida\nde inventario"   as UC_INV_OUT
+    usecase "Ver historial /\nauditoria de inventario" as UC_INV_AUDIT
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Gestión de Ventas
+' ─────────────────────────────────────────
+package "Gestión de Ventas" {
+    usecase "Registrar venta"             as UC_SALE_CREATE
+    usecase "Ver historial de ventas"     as UC_SALE_LIST
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Gestión de Compras
+' ─────────────────────────────────────────
+package "Gestión de Compras" {
+    usecase "Crear solicitud de compra"   as UC_PUR_CREATE
+    usecase "Ver solicitudes pendientes"  as UC_PUR_PENDING
+    usecase "Aprobar solicitud de compra" as UC_PUR_APPROVE
+    usecase "Rechazar solicitud de compra" as UC_PUR_REJECT
+    usecase "Ver historial de compras"    as UC_PUR_HISTORY
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Gestión de Proveedores
+' ─────────────────────────────────────────
+package "Gestión de Proveedores" {
+    usecase "Ver proveedores"             as UC_SUP_LIST
+    usecase "Crear proveedor"             as UC_SUP_CREATE
+    usecase "Editar proveedor"            as UC_SUP_EDIT
+    usecase "Eliminar proveedor"          as UC_SUP_DELETE
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Gestión de Pedidos
+' ─────────────────────────────────────────
+package "Gestión de Pedidos de Clientes" {
+    usecase "Crear pedido de cliente"     as UC_ORD_CREATE
+    usecase "Ver pedidos"                 as UC_ORD_LIST
+    usecase "Actualizar estado\nde pedido" as UC_ORD_STATUS
+    usecase "Eliminar pedido"             as UC_ORD_DELETE
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Producción
+' ─────────────────────────────────────────
+package "Producción" {
+    usecase "Registrar producción\n(lote de productos)" as UC_PROD_BATCH
+    usecase "Ver historial\nde producción"              as UC_PROD_HISTORY
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Registro de Pérdidas
+' ─────────────────────────────────────────
+package "Registro de Pérdidas" {
+    usecase "Registrar pérdida\nde producto / insumo"  as UC_LOSS_CREATE
+    usecase "Ver historial\nde pérdidas"               as UC_LOSS_LIST
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Movimientos de Caja
+' ─────────────────────────────────────────
+package "Movimientos de Caja" {
+    usecase "Registrar movimiento\nde caja (entrada/salida)" as UC_CASH_CREATE
+    usecase "Ver movimientos de caja" as UC_CASH_LIST
+}
+
+' ─────────────────────────────────────────
+'  PAQUETE: Reportes y Consultas
+' ─────────────────────────────────────────
+package "Reportes y Consultas" {
+    usecase "Consultar datos\n(ventas / inventario / compras\n/ pedidos / pérdidas)" as UC_REP_QUERY
+    usecase "Exportar reporte\na PDF"                  as UC_REP_EXPORT
+    usecase "Ver reportes de\nstock bajo"              as UC_REP_LOW_STOCK
+    usecase "Reportar producto\ncon stock bajo"        as UC_REP_REPORT_LOW
+    usecase "Marcar reporte de\nstock bajo como resuelto" as UC_REP_RESOLVE
+}
+
+' ─────────────────────────────────────────
+'  Relaciones — Autenticación
+' ─────────────────────────────────────────
+GER  --> UC_LOGIN
+ENC  --> UC_LOGIN
+PAN  --> UC_LOGIN
+CAJ  --> UC_LOGIN
+
+GER  --> UC_LOGOUT
+ENC  --> UC_LOGOUT
+PAN  --> UC_LOGOUT
+CAJ  --> UC_LOGOUT
+
+GER  --> UC_RESET_PW
+ENC  --> UC_RESET_PW
+PAN  --> UC_RESET_PW
+CAJ  --> UC_RESET_PW
+
+GER  --> UC_GEN_TOKEN
+
+GER  --> UC_MY_DATA
+ENC  --> UC_MY_DATA
+PAN  --> UC_MY_DATA
+CAJ  --> UC_MY_DATA
+
+' ─────────────────────────────────────────
+'  Relaciones — Gestión de Usuarios
+' ─────────────────────────────────────────
+GER --> UC_USER_LIST
+GER --> UC_USER_CREATE
+GER --> UC_USER_EDIT
+GER --> UC_USER_DELETE
+GER --> UC_USER_LOCK
+GER --> UC_USER_UNLOCK
+
+' ─────────────────────────────────────────
+'  Relaciones — Productos e Insumos
+' ─────────────────────────────────────────
+GER --> UC_PROD_LIST
+ENC --> UC_PROD_LIST
+PAN --> UC_PROD_LIST
+CAJ --> UC_PROD_LIST
+
+GER --> UC_PROD_CREATE
+GER --> UC_PROD_EDIT
+GER --> UC_PROD_DELETE
+GER --> UC_PROD_LOSS_RATE
+GER --> UC_PROD_RECIPE_YIELD
+
+' ─────────────────────────────────────────
+'  Relaciones — Recetas
+' ─────────────────────────────────────────
+GER --> UC_REC_VIEW
+GER --> UC_REC_ADD
+GER --> UC_REC_EDIT
+GER --> UC_REC_DELETE
+
+PAN --> UC_REC_VIEW
+
+' ─────────────────────────────────────────
+'  Relaciones — Control de Inventario
+' ─────────────────────────────────────────
+GER --> UC_INV_IN
+GER --> UC_INV_OUT
+GER --> UC_INV_AUDIT
+
+' ─────────────────────────────────────────
+'  Relaciones — Ventas
+' ─────────────────────────────────────────
+CAJ --> UC_SALE_CREATE
+GER --> UC_SALE_LIST
+ENC --> UC_SALE_LIST
+CAJ --> UC_SALE_LIST
+
+' ─────────────────────────────────────────
+'  Relaciones — Compras
+' ─────────────────────────────────────────
+GER  --> UC_PUR_CREATE
+ENC  --> UC_PUR_CREATE
+GER  --> UC_PUR_PENDING
+GER  --> UC_PUR_APPROVE
+GER  --> UC_PUR_REJECT
+GER  --> UC_PUR_HISTORY
+ENC  --> UC_PUR_HISTORY
+
+' ─────────────────────────────────────────
+'  Relaciones — Proveedores
+' ─────────────────────────────────────────
+GER --> UC_SUP_LIST
+ENC --> UC_SUP_LIST
+GER --> UC_SUP_CREATE
+GER --> UC_SUP_EDIT
+GER --> UC_SUP_DELETE
+
+' ─────────────────────────────────────────
+'  Relaciones — Pedidos de Clientes
+' ─────────────────────────────────────────
+GER --> UC_ORD_CREATE
+ENC --> UC_ORD_CREATE
+CAJ --> UC_ORD_CREATE
+
+GER --> UC_ORD_LIST
+ENC --> UC_ORD_LIST
+CAJ --> UC_ORD_LIST
+
+GER --> UC_ORD_STATUS
+ENC --> UC_ORD_STATUS
+
+GER --> UC_ORD_DELETE
+
+' ─────────────────────────────────────────
+'  Relaciones — Producción
+' ─────────────────────────────────────────
+GER --> UC_PROD_BATCH
+GER --> UC_PROD_HISTORY
+
+' ─────────────────────────────────────────
+'  Relaciones — Pérdidas
+' ─────────────────────────────────────────
+GER --> UC_LOSS_CREATE
+ENC --> UC_LOSS_CREATE
+GER --> UC_LOSS_LIST
+ENC --> UC_LOSS_LIST
+
+' ─────────────────────────────────────────
+'  Relaciones — Movimientos de Caja
+' ─────────────────────────────────────────
+GER --> UC_CASH_CREATE
+ENC --> UC_CASH_CREATE
+CAJ --> UC_CASH_CREATE
+
+GER --> UC_CASH_LIST
+ENC --> UC_CASH_LIST
+CAJ --> UC_CASH_LIST
+
+' ─────────────────────────────────────────
+'  Relaciones — Reportes y Consultas
+' ─────────────────────────────────────────
+GER --> UC_REP_QUERY
+GER --> UC_REP_EXPORT
+GER --> UC_REP_LOW_STOCK
+GER --> UC_REP_RESOLVE
+
+CAJ --> UC_REP_REPORT_LOW
+PAN --> UC_REP_REPORT_LOW
+
+' ─────────────────────────────────────────
+'  Relaciones de inclusión / extensión
+' ─────────────────────────────────────────
+UC_PUR_APPROVE    .> UC_INV_IN        : <<include>>
+UC_PROD_BATCH     .> UC_INV_OUT       : <<include>>
+UC_SALE_CREATE    .> UC_INV_OUT       : <<include>>
+UC_REP_EXPORT     .> UC_REP_QUERY     : <<include>>
+UC_REP_RESOLVE    .> UC_REP_LOW_STOCK : <<extend>>
+
+@enduml
