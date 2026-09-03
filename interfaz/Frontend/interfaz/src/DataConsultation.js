@@ -143,7 +143,10 @@ export default function DataConsultation(props) {
                 setSelectedQuery(response.data.query_type);
                 setStartDate(response.data.start_date || '');
                 setEndDate(response.data.end_date || '');
-                if (!queryResults) setQueryResults(response.data.results_data);
+                if (!queryResults && response.data.results_data) {
+                    // El tipo debe viajar junto a los datos para que la exportación no los mezcle
+                    setQueryResults({ ...response.data.results_data, queryType: response.data.query_type });
+                }
                 setMessage('');
             }
         } catch (error) {
@@ -1150,12 +1153,14 @@ export default function DataConsultation(props) {
 
     const exportData = async () => {
         if (!queryResults) { setMessage('🚫 Error: No hay datos para exportar.'); return; }
+        const queryType = queryResults.queryType || selectedQuery;
+        if (queryType !== selectedQuery) { setMessage('🚫 Cambiaste el tipo de consulta. Presioná "Consultar" antes de exportar.'); return; }
         try {
             const token = getInMemoryToken && getInMemoryToken();
-            const response = await fetch('/api/export-data/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : undefined }, body: JSON.stringify({ query_type: selectedQuery, data: queryResults.data, summary: queryResults.summary }) });
+            const response = await fetch('/api/export-data/', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : undefined }, body: JSON.stringify({ query_type: queryType, data: queryResults.data, summary: queryResults.summary }) });
             if (!response.ok) { setMessage('🚫 Error al exportar PDF.'); return; }
             const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${selectedQuery}_reporte.pdf`; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url); setMessage('✅ PDF exportado correctamente.');
+            const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${queryType}_reporte.pdf`; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url); setMessage('✅ PDF exportado correctamente.');
         } catch (error) { setMessage('🚫 Error al exportar PDF.'); }
     };
 
@@ -1175,9 +1180,11 @@ export default function DataConsultation(props) {
                 default: setMessage('🚫 Error: Tipo de consulta no válido.'); return;
             }
             if (results) {
-                setQueryResults(results);
-                try { await saveQueryToBackend(selectedQuery, startDate, endDate, results); } catch (e) { }
-                setQueryResults(results);
+                // Se guarda el tipo que generó los datos: el desplegable puede cambiar después
+                // y exportar con el tipo nuevo produciría un PDF con datos de otro reporte.
+                const stamped = { ...results, queryType: selectedQuery };
+                setQueryResults(stamped);
+                try { await saveQueryToBackend(selectedQuery, startDate, endDate, stamped); } catch (e) { }
             }
         } catch (error) { setMessage('🚫 Error ejecutando la consulta: ' + (error.message || error)); }
         finally { setIsLoading(false); isRunningQueryRef.current = false; }
@@ -1299,7 +1306,7 @@ export default function DataConsultation(props) {
                                         <div className="relative">
                                             <select 
                                                 value={selectedQuery} 
-                                                onChange={e => { setSelectedQuery(e.target.value); setShowAdvancedFilters(true); }} 
+                                                onChange={e => { setSelectedQuery(e.target.value); setQueryResults(null); setShowAdvancedFilters(true); }} 
                                                 className="w-full appearance-none pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
                                             >
                                                 <option value="">-- Elige una consulta --</option>

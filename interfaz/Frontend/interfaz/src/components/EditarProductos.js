@@ -6,7 +6,7 @@ import { formatStockDisplay, parseLocaleDecimal, formatDecimalInput, isValidDeci
 
 const EditarProductos = ({ products, setProducts, loadProducts, isLoading, showEditPanel, setShowEditPanel }) => {
     // Solo mostrar productos (category === 'Producto')
-    const productosOnly = products.filter(p => p.category === 'Producto' && !p.hasSales);
+    const productosOnly = products.filter(p => p.category === 'Producto');
     
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -25,10 +25,8 @@ const EditarProductos = ({ products, setProducts, loadProducts, isLoading, showE
     });
     const [message, setMessage] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
-    const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
     const [showLoadingMessage, setShowLoadingMessage] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
-    const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
     const [highStockMultiplierInput, setHighStockMultiplierInput] = useState(null);
     
     // Estados para manejo de recetas
@@ -396,28 +394,6 @@ const EditarProductos = ({ products, setProducts, loadProducts, isLoading, showE
         }
     };
     
-    const handleDeleteAllProducts = async () => {
-        if (!showDeleteAllModal) {
-            setShowDeleteAllModal(true);
-            return;
-        }
-        
-        try {
-            const productsToDelete = productosOnly;
-            const deletePromises = productsToDelete.map(product => 
-                api.delete(`/products/${product.id}/`)
-            );
-            await Promise.all(deletePromises);
-            const productsWithSales = products.filter(product => product.hasSales || product.category !== 'Producto');
-            setProducts(productsWithSales);
-            setShowDeleteAllModal(false);
-            setMessage(`✅ ${productsToDelete.length} productos eliminados correctamente del servidor y todas las secciones.`);
-        } catch (error) {
-            setMessage('❌ Error: No se pudieron eliminar todos los productos del servidor.');
-            setShowDeleteAllModal(false);
-        }
-    };
-
     const productsToShow = filteredProducts.length > 0 ? filteredProducts : productosOnly;
 
     if (isFirstRender) {
@@ -513,16 +489,6 @@ const EditarProductos = ({ products, setProducts, loadProducts, isLoading, showE
                         <p className="no-products">No hay productos nuevos disponibles para editar.</p>
                     )
                 )}
-            </div>
-
-            <div className="manage-all-products">
-                <button 
-                    onClick={handleDeleteAllProducts}
-                    className="action-button delete-all"
-                    disabled={productosOnly.length === 0}
-                >
-                    Eliminar Todos los Productos
-                </button>
             </div>
 
             {/* Formulario de edición de producto */}
@@ -907,63 +873,6 @@ const EditarProductos = ({ products, setProducts, loadProducts, isLoading, showE
                                 }}
                             >
                                 Eliminar
-                            </button>
-                        </div>
-                    </div>
-                </div>, document.body
-            )}
-
-            {/* Modal de confirmación para eliminar todos los productos */}
-            {showDeleteAllModal && ReactDOM.createPortal(
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 1100
-                }}>
-                    <div style={{
-                        backgroundColor: 'white',
-                        padding: '30px',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-                        maxWidth: '400px',
-                        width: '90%'
-                    }}>
-                        <h3 style={{ marginBottom: '20px', fontSize: '18px', fontWeight: 'bold' }}>
-                            ¿Estás seguro de eliminar todos los productos?
-                        </h3>
-                        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                            <button
-                                onClick={() => setShowDeleteAllModal(false)}
-                                style={{
-                                    padding: '10px 20px',
-                                    backgroundColor: '#6c757d',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '5px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={handleDeleteAllProducts}
-                                style={{
-                                    padding: '10px 20px',
-                                    backgroundColor: '#dc3545',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '5px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Eliminar Todos
                             </button>
                         </div>
                     </div>

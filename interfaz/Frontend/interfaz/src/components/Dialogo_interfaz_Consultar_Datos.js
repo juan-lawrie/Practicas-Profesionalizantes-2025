@@ -4,7 +4,6 @@ import {
     safeToFixed as defaultSafeToFixed,
     formatStockWithUnit,
     formatCompraItemLine,
-    formatMoney,
     formatNumber,
 } from '../utils/format';
 
@@ -371,7 +370,8 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
         const results = {
             title: 'Información de Proveedores',
             summary: {
-                totalSuppliers: filteredSuppliers.length
+                totalSuppliers: filteredSuppliers.length,
+                activeSuppliers: filteredSuppliers.length
             },
             data: filteredSuppliers.map(s => ({
                 id: s.id,
@@ -527,7 +527,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
             title: 'Reporte de Ventas',
             summary: {
                 totalSales: filtered.length,
-                totalRevenue: formatMoney(totalRevenue),
+                totalRevenue,
                 period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
             },
             data: filtered.map(s => ({
@@ -675,6 +675,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
                     customerName: order.customerName || order.customer_name || '',
                     paymentMethod: order.paymentMethod || order.payment_method || '',
                     status: order.status,
+                    items: itemsArray,
                     products: productsList.join(', '),
                     units: unitsList.join(', ')
                 };
@@ -828,7 +829,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
             title: 'Reporte de Compras',
             summary: {
                 totalPurchases: filtered.length,
-                totalAmount: formatMoney(totalAmount),
+                totalAmount,
                 byType: {
                     Producto: filtered.filter(p => p.type === 'Producto').length,
                     Insumo: filtered.filter(p => p.type === 'Insumo').length,
@@ -935,8 +936,8 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
             title: 'Movimientos de Caja',
             summary: {
                 totalMovements: filtered.length,
-                totalIncome: formatMoney(totalIncome),
-                totalExpenses: formatMoney(totalExpenses),
+                totalIncome: safeToFixed(totalIncome),
+                totalExpenses: safeToFixed(totalExpenses),
                 period: startDate && endDate ? `${formatDateForDisplay(startDate)} - ${formatDateForDisplay(endDate)}` : 'Todos los períodos'
             },
             data: filtered.map(m => ({
@@ -983,7 +984,9 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
                 default: setMessage('Tipo de consulta no válido.'); return;
             }
             if (results) {
-                setQueryResults(results);
+                // Se guarda el tipo que generó los datos: el desplegable puede cambiar después
+                // y exportar con el tipo nuevo produciría un PDF con datos de otro reporte.
+                setQueryResults({ ...results, queryType: selectedQuery });
             }
         } catch (error) {
             setMessage('Error ejecutando la consulta: ' + (error.message || error));
@@ -995,20 +998,22 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
     const exportData = async () => {
         if (!queryResults) return;
+        const queryType = queryResults.queryType || selectedQuery;
+        if (queryType !== selectedQuery) { setMessage('Cambiaste el tipo de consulta. Presioná "Consultar" antes de exportar.'); return; }
         try {
             const token = getInMemoryToken && getInMemoryToken();
             const response = await fetch('/api/export-data/', {
                 method: 'POST',
                 credentials: 'include',
                 headers: { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : undefined },
-                body: JSON.stringify({ query_type: selectedQuery, data: queryResults.data, summary: queryResults.summary })
+                body: JSON.stringify({ query_type: queryType, data: queryResults.data, summary: queryResults.summary })
             });
             if (!response.ok) { setMessage('Error al exportar PDF.'); return; }
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${selectedQuery}_reporte.pdf`;
+            a.download = `${queryType}_reporte.pdf`;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -1132,7 +1137,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
                     <label className={labelClass}>Tipo de Consulta</label>
                     <select 
                         value={selectedQuery} 
-                        onChange={e => setSelectedQuery(e.target.value)} 
+                        onChange={e => { setSelectedQuery(e.target.value); setQueryResults(null); }} 
                         className={selectClass}
                     >
                         <option value="">Seleccionar tipo de consulta</option>

@@ -30,6 +30,31 @@ import urllib.parse
 import json
 from datetime import timedelta
 
+# Los resúmenes de los reportes llegan desde dos interfaces distintas y una de ellas
+# puede enviar los montos ya formateados en es-AR ("$1.234,56"), por lo que float() falla.
+def parse_amount_for_pdf(value, default=0.0):
+    if value is None or value == '':
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace('$', '').replace(' ', '')
+    if not text:
+        return default
+    if ',' in text:
+        text = text.replace('.', '').replace(',', '.')
+    try:
+        return float(text)
+    except ValueError:
+        return default
+
+
+def parse_count_for_pdf(value, default=0):
+    try:
+        return int(parse_amount_for_pdf(value, default))
+    except (TypeError, ValueError):
+        return default
+
+
 # Función de formateo de fecha para replicar el formato del frontend
 def format_date_for_pdf(date_input):
     """
@@ -1824,7 +1849,15 @@ class ExportDataView(APIView):
             print(f"Data received: {query_data}")
             
             buffer = BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=A4)
+            # Márgenes reducidos: con los de fábrica (72pt) las tablas anchas se salen de la hoja.
+            doc = SimpleDocTemplate(
+                buffer,
+                pagesize=A4,
+                leftMargin=36,
+                rightMargin=36,
+                topMargin=48,
+                bottomMargin=48,
+            )
             story = []
             styles = getSampleStyleSheet()
             
@@ -1891,15 +1924,9 @@ class ExportDataView(APIView):
                     # Si el frontend envió un resumen (summary), renderizarlo arriba
                     summary = data.get('summary') or {}
                     if summary:
-                        try:
-                            # Crear tres recuadros: Total de Ventas, Ingresos Totales, Período
-                            total_sales = int(summary.get('totalSales') or summary.get('total_sales') or 0)
-                        except Exception:
-                            total_sales = 0
-                        try:
-                            total_revenue = float(summary.get('totalRevenue') or summary.get('total_revenue') or 0) or 0.0
-                        except Exception:
-                            total_revenue = 0.0
+                        # Crear tres recuadros: Total de Ventas, Ingresos Totales, Período
+                        total_sales = parse_count_for_pdf(summary.get('totalSales') or summary.get('total_sales'))
+                        total_revenue = parse_amount_for_pdf(summary.get('totalRevenue') or summary.get('total_revenue'))
                         period = summary.get('period') or summary.get('date_range') or ''
 
                         # Estilo para recuadros
@@ -1934,23 +1961,15 @@ class ExportDataView(APIView):
                     # Agregar resumen para movimientos de caja
                     summary = data.get('summary') or {}
                     if summary:
-                        try:
-                            total_movements = int(summary.get('totalMovements') or 0)
-                            total_income = str(summary.get('totalIncome') or '0.00')
-                            total_expenses = str(summary.get('totalExpenses') or '0.00')
-                            period = str(summary.get('period') or '')
-                        except Exception:
-                            total_movements = 0
-                            total_income = '0.00'
-                            total_expenses = '0.00'
-                            period = ''
+                        total_movements = parse_count_for_pdf(summary.get('totalMovements'))
+                        total_income = str(summary.get('totalIncome') or '0.00').replace('$', '')
+                        period = str(summary.get('period') or '')
 
                         # Crear tabla de resumen para movimientos de caja
                         summary_data = [
                             [Paragraph(f"<b>Total de Movimientos:</b> {total_movements}", styles['Normal']), 
                              Paragraph(f"<b>Ingresos Totales:</b> ${total_income}", styles['Normal'])],
-                            [Paragraph(f"<b>Gastos Totales:</b> ${total_expenses}", styles['Normal']),
-                             Paragraph(f"<b>Período:</b> {period}", styles['Normal'])]
+                            [Paragraph(f"<b>Período:</b> {period}", styles['Normal']), '']
                         ]
                         summary_table = Table(summary_data)
                         summary_table.setStyle(TableStyle([
@@ -1969,14 +1988,9 @@ class ExportDataView(APIView):
                     # Agregar resumen para compras
                     summary = data.get('summary') or {}
                     if summary:
-                        try:
-                            total_purchases = int(summary.get('totalPurchases') or 0)
-                            total_amount = float(summary.get('totalAmount') or 0)
-                            period = str(summary.get('period') or '')
-                        except Exception:
-                            total_purchases = 0
-                            total_amount = 0.0
-                            period = ''
+                        total_purchases = parse_count_for_pdf(summary.get('totalPurchases'))
+                        total_amount = parse_amount_for_pdf(summary.get('totalAmount'))
+                        period = str(summary.get('period') or '')
 
                         # Crear tabla de resumen para compras
                         summary_data = [
@@ -2001,22 +2015,16 @@ class ExportDataView(APIView):
                     # Agregar resumen para pedidos
                     summary = data.get('summary') or {}
                     if summary:
-                        try:
-                            total_orders = int(summary.get('totalOrders') or 0)
-                            pending_orders = int(summary.get('pendingOrders') or 0)
-                            sent_orders = int(summary.get('sentOrders') or 0)
-                            period = str(summary.get('period') or '')
-                        except Exception:
-                            total_orders = 0
-                            pending_orders = 0
-                            sent_orders = 0
-                            period = ''
+                        total_orders = parse_count_for_pdf(summary.get('totalOrders'))
+                        pending_orders = parse_count_for_pdf(summary.get('pendingOrders'))
+                        delivered_orders = parse_count_for_pdf(summary.get('deliveredOrders'))
+                        period = str(summary.get('period') or '')
 
                         # Crear tabla de resumen para pedidos
                         summary_data = [
                             [Paragraph(f"<b>Total de Pedidos:</b> {total_orders}", styles['Normal']), 
                              Paragraph(f"<b>Pedidos Pendientes:</b> {pending_orders}", styles['Normal'])],
-                            [Paragraph(f"<b>Pedidos Enviados:</b> {sent_orders}", styles['Normal']),
+                            [Paragraph(f"<b>Pedidos Entregados:</b> {delivered_orders}", styles['Normal']),
                              Paragraph(f"<b>Período:</b> {period}", styles['Normal'])]
                         ]
                         summary_table = Table(summary_data)
@@ -2036,12 +2044,8 @@ class ExportDataView(APIView):
                     # Agregar resumen para proveedores
                     summary = data.get('summary') or {}
                     if summary:
-                        try:
-                            total_suppliers = int(summary.get('totalSuppliers') or 0)
-                            active_suppliers = int(summary.get('activeSuppliers') or 0)
-                        except Exception:
-                            total_suppliers = 0
-                            active_suppliers = 0
+                        total_suppliers = parse_count_for_pdf(summary.get('totalSuppliers'))
+                        active_suppliers = parse_count_for_pdf(summary.get('activeSuppliers'))
 
                         # Crear tabla de resumen para proveedores
                         summary_data = [
@@ -2246,7 +2250,21 @@ class ExportDataView(APIView):
 
     def _generate_purchases_table(self, data):
         from .models import Product
-        
+        from reportlab.platypus import Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+        styles = getSampleStyleSheet()
+        cell_style = ParagraphStyle(
+            'PurchaseCellStyle',
+            parent=styles['Normal'],
+            fontSize=7,
+            alignment=1,  # Centrado
+            wordWrap='CJK',
+            leftIndent=2,
+            rightIndent=2,
+            spaceAfter=2
+        )
+
         # Columns: ID, Fecha, Proveedor, Items (nombres), Total, Tipo (sin columna Estado)
         table_data = [['ID', 'Fecha', 'Proveedor', 'Insumo/Producto', 'Total', 'Tipo']]
         for item in data:
@@ -2320,27 +2338,52 @@ class ExportDataView(APIView):
             formatted_date = format_date_for_pdf(date_str)
             
             table_data.append([
-                item.get('id', ''),
-                formatted_date,
-                item.get('supplier', ''),
-                items_str,
-                f"${total_val}",
-                item.get('type', '')
+                Paragraph(str(item.get('id', '')), cell_style),
+                Paragraph(formatted_date, cell_style),
+                Paragraph(str(item.get('supplier', '')), cell_style),
+                Paragraph(items_str, cell_style),
+                Paragraph(f"${total_val}", cell_style),
+                Paragraph(str(item.get('type', '')), cell_style)
             ])
-        table = Table(table_data)
+
+        # Anchos fijos que suman 515pt, dentro del ancho útil de la hoja A4
+        col_widths = [28, 72, 85, 185, 70, 75]
+
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.beige, colors.lightgrey])
         ]))
         return table
 
     def _generate_orders_table(self, data):
+        from reportlab.platypus import Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+        styles = getSampleStyleSheet()
+        cell_style = ParagraphStyle(
+            'OrderCellStyle',
+            parent=styles['Normal'],
+            fontSize=7,
+            alignment=1,  # Centrado
+            wordWrap='CJK',
+            leftIndent=2,
+            rightIndent=2,
+            spaceAfter=2
+        )
+
         # Cambiado: mostrar columna de Productos y columna de Unidades (cantidades por producto)
         table_data = [['ID', 'Fecha', 'Cliente', 'Método de Pago', 'Estado', 'Productos', 'Unidades']]
         for item in data:
@@ -2377,6 +2420,12 @@ class ExportDataView(APIView):
                     products_str = str(items_field or '')
                     units_str = ''
 
+            # Algunas interfaces solo mandan los nombres y cantidades ya unidos en texto
+            if not products_str:
+                products_str = str(item.get('products') or '')
+            if not units_str:
+                units_str = str(item.get('units') or '')
+
             # Procesar fecha de la misma manera que en movimientos de caja
             date_str = item.get('date', '')
             if date_str and '.' in date_str:
@@ -2386,24 +2435,34 @@ class ExportDataView(APIView):
             formatted_date = format_date_for_pdf(date_str)
 
             table_data.append([
-                item.get('id', ''),
-                formatted_date,
-                cliente,
-                metodo,
-                item.get('status', ''),
-                products_str,
-                units_str
+                Paragraph(str(item.get('id', '')), cell_style),
+                Paragraph(formatted_date, cell_style),
+                Paragraph(str(cliente), cell_style),
+                Paragraph(str(metodo), cell_style),
+                Paragraph(str(item.get('status', '')), cell_style),
+                Paragraph(products_str, cell_style),
+                Paragraph(units_str, cell_style)
             ])
-        table = Table(table_data)
+
+        # Anchos fijos que suman 515pt, dentro del ancho útil de la hoja A4
+        col_widths = [25, 72, 75, 68, 65, 155, 55]
+
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.beige, colors.lightgrey])
         ]))
         return table
 
