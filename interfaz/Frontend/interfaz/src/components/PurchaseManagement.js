@@ -1,140 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import Select from 'react-select';
+import React, { useState, useEffect } from 'react';
+import CreatableSelect from 'react-select/creatable';
 import api from '../services/api';
 import { formatMoney } from '../utils/format';
+import { productsForSuppliers, productLabel, suppliersForProduct } from '../utils/supplierCatalog';
 import PurchaseRequests from './PurchaseRequests';
 import PurchaseHistory from './PurchaseHistory';
 import DialogoCompras from './Dialogo_Compras';
-
-// Componente híbrido que usa datalist en Firefox/Safari y dropdown personalizado en Chrome/Brave
-const SearchableProductInput = ({ value, onChange, inventory, mapBackendUnitToFrontend, isExistingProduct, itemIndex }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [filteredOptions, setFilteredOptions] = useState([]);
-    const inputRef = useRef(null);
-    const dropdownRef = useRef(null);
-
-    // Detectar si está corriendo en Chrome o Brave
-    const isChromiumBrowser = () => {
-        return window.chrome !== undefined || 
-               navigator.userAgent.includes('Chrome') || 
-               navigator.userAgent.includes('Brave') ||
-               navigator.userAgent.includes('Chromium');
-    };
-
-    const isChromium = isChromiumBrowser();
-
-    // Generar opciones filtradas para el dropdown personalizado
-    useEffect(() => {
-        if (isChromium) {
-            if (value && value.length > 0) {
-                const filtered = inventory.filter(product => 
-                    product.name.toLowerCase().includes(value.toLowerCase())
-                ).slice(0, 8);
-                setFilteredOptions(filtered);
-            } else {
-                setFilteredOptions(inventory.slice(0, 8));
-            }
-        }
-    }, [value, inventory, isChromium]);
-
-    // Cerrar dropdown al hacer clic fuera (solo para Chromium)
-    useEffect(() => {
-        if (!isChromium) return;
-        
-        const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target) &&
-                inputRef.current && !inputRef.current.contains(event.target)) {
-                setIsOpen(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isChromium]);
-
-    const handleInputChange = (e) => {
-        onChange(e.target.value);
-        if (isChromium) {
-            setIsOpen(true);
-        }
-    };
-
-    const handleOptionClick = (productName) => {
-        onChange(productName);
-        setIsOpen(false);
-        inputRef.current?.focus();
-    };
-
-    const getBorderColor = () => {
-        if (isExistingProduct(value)) return '#28a745';
-        if (value && !isExistingProduct(value)) return '#ffc107';
-        return '#ced4da';
-    };
-
-    const getStatusMessage = () => {
-        if (!value) return null;
-        if (isExistingProduct(value)) {
-            return <small className="text-green-600 text-xs">✓ Producto existente - unidad detectada automáticamente</small>;
-        }
-        return <small className="text-amber-500 text-xs">⚠ Producto nuevo - debe ingresar manualmente la unidad</small>;
-    };
-
-    // Crear un ID único para el datalist
-    const datalistId = `product-list-${itemIndex}`;
-
-    return (
-        <div className="searchable-product-input-container">
-            <input
-                ref={inputRef}
-                type="text"
-                value={value}
-                onChange={handleInputChange}
-                onFocus={() => isChromium && setIsOpen(true)}
-                placeholder="Escribe para buscar un producto existente o ingresa uno nuevo"
-                required
-                className={`searchable-product-input w-full ${isExistingProduct(value) ? 'border-green-500' : value && !isExistingProduct(value) ? 'border-amber-400' : 'border-slate-300'}`}
-                list={!isChromium ? datalistId : undefined}
-            />
-            
-            {/* Datalist para Firefox/Safari */}
-            {!isChromium && (
-                <datalist id={datalistId}>
-                    {inventory.map((product, index) => (
-                        <option 
-                            key={`${product.id}-${index}`} 
-                            value={product.name}
-                        >
-                            {product.name} ({mapBackendUnitToFrontend(product.unit)}) - {product.quantity}
-                        </option>
-                    ))}
-                </datalist>
-            )}
-
-            {/* Dropdown personalizado para Chrome/Brave */}
-            {isChromium && isOpen && filteredOptions.length > 0 && (
-                <div 
-                    ref={dropdownRef} 
-                    className="searchable-product-dropdown chromium-browser"
-                >
-                    {filteredOptions.map((product, index) => (
-                        <div
-                            key={`${product.id}-${index}`}
-                            className="searchable-product-option"
-                            onClick={() => handleOptionClick(product.name)}
-                        >
-                            <span className="product-name">
-                                {product.name}
-                            </span>
-                            <span className="product-unit">({mapBackendUnitToFrontend(product.unit)})</span>
-                            <span className="product-stock">{product.quantity}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
-            {getStatusMessage()}
-        </div>
-    );
-};
+import SearchableSelect, { portalSelectProps, portalMenuStyle } from './SearchableSelect';
 
 const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products = [], purchases = [], reloadPurchases, reloadProducts }) => {
     const [pendingPurchases, setPendingPurchases] = useState([]);
@@ -152,19 +24,7 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
         selectedSupplierIds: [], // Nuevo: array de IDs de proveedores seleccionados
         items: [] // Array de items con id único para sistema de tarjetas
     });
-    const [itemsToAdd, setItemsToAdd] = useState(1); // Cantidad de tarjetas a agregar
-
-    // Helper para toggle de proveedores en pantallas pequeñas
-    const toggleSupplier = (supplierId) => {
-        setNewPurchase(prev => {
-            const isSelected = prev.selectedSupplierIds.includes(supplierId);
-            if (isSelected) {
-                return { ...prev, selectedSupplierIds: prev.selectedSupplierIds.filter(id => id !== supplierId) };
-            } else {
-                return { ...prev, selectedSupplierIds: [...prev.selectedSupplierIds, supplierId] };
-            }
-        });
-    };
+    const [itemsToAdd, setItemsToAdd] = useState(1);
     
     // Estados para el diálogo en pantallas grandes
     const [screenWidth, setScreenWidth] = useState(window.innerWidth);
@@ -196,9 +56,12 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
     };
 
     // Opciones para react-select con unidad incluida
-    const productOptions = inventory.map(product => ({
-        value: product.name,
-        label: `${product.name} (${mapBackendUnitToFrontend(product.unit)})`,
+    const catalogProducts = newPurchase.selectedSupplierIds.length
+        ? productsForSuppliers(inventory, suppliers, newPurchase.selectedSupplierIds)
+        : (inventory || []);
+    const productOptions = catalogProducts.map(product => ({
+        value: product.id,
+        label: productLabel(product),
         unit: mapBackendUnitToFrontend(product.unit),
         price: product.price
     }));
@@ -227,30 +90,14 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
         }
     };
 
-    // Función para obtener el ID del producto por nombre
-    const getProductIdByName = (inventory, name) => {
-        const product = inventory.find(p => p.name === name);
-        return product ? product.id : null;
-    };
-
-    // Función para verificar si un producto existe en el inventario
-    const isExistingProduct = (productName) => {
-        return inventory.some(p => p.name === productName);
-    };
-
-    // Función para calcular el total de un item
-    const calculateItemTotal = (quantity, unitPrice) => {
-        const safeQuantity = isNaN(quantity) ? 0 : (quantity || 0);
-        const safeUnitPrice = isNaN(unitPrice) ? 0 : (unitPrice || 0);
-        return safeQuantity * safeUnitPrice;
-    };
-
     // Función para agregar nuevos items (tarjetas) a la compra
     const addItems = (count = 1) => {
         const validCount = Math.max(1, Math.min(100, parseInt(count) || 1));
         const newItems = Array(validCount).fill(null).map(() => ({
             id: Date.now() + Math.random(),
+            productId: '',
             productName: '',
+            supplierId: '',
             quantity: 1,
             unit: 'u',
             unitPrice: 0,
@@ -271,11 +118,6 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
         }));
     };
 
-    // Obtener producto del inventario por nombre
-    const getProductFromInventory = (productName) => {
-        return inventory.find(p => p.name.toLowerCase() === productName.toLowerCase());
-    };
-
     // Función para actualizar un item por id
     const updateItem = (itemId, field, value) => {
         setNewPurchase(prev => {
@@ -284,25 +126,42 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
 
                 let updates = { [field]: value };
 
-                if (field === 'productName') {
-                    const product = getProductFromInventory(value);
+                if (field === 'productId' || field === 'productName') {
+                    const product = field === 'productId'
+                        ? inventory.find(p => Number(p.id) === Number(value))
+                        : inventory.find(p => String(p.name || '').toLowerCase() === String(value || '').trim().toLowerCase());
                     if (product) {
+                        const linked = suppliersForProduct(suppliers, product.id);
+                        const selectedIds = prev.selectedSupplierIds.map(Number);
+                        const sellers = selectedIds.length
+                            ? linked.filter(supplier => selectedIds.includes(Number(supplier.id)))
+                            : linked;
+                        updates.productName = product.name;
+                        updates.productId = product.id;
                         updates.unit = mapBackendUnitToFrontend(product.unit);
                         updates.unitPrice = product.price || 0;
                         updates.isExisting = true;
-                    } else {
+                        updates.supplierId = sellers.length === 1
+                            ? sellers[0].id
+                            : (sellers.some(supplier => Number(supplier.id) === Number(item.supplierId)) ? item.supplierId : '');
+                    } else if (String(value || '').trim()) {
+                        updates.productId = '';
+                        updates.productName = String(value).trim();
                         updates.isExisting = false;
-                        if (!value) {
-                            updates.unit = 'u';
-                            updates.unitPrice = 0;
-                        }
+                    } else {
+                        updates.productName = '';
+                        updates.productId = '';
+                        updates.isExisting = false;
+                        updates.supplierId = '';
+                        updates.unit = 'u';
+                        updates.unitPrice = 0;
                     }
                 }
 
                 const newItem = { ...item, ...updates };
                 
                 // Recalcular total
-                if (field === 'quantity' || field === 'unitPrice' || field === 'productName') {
+                if (field === 'quantity' || field === 'unitPrice' || field === 'productId' || field === 'productName') {
                     const qty = parseFloat(newItem.quantity) || 0;
                     const price = parseFloat(newItem.unitPrice) || 0;
                     newItem.total = qty * price;
@@ -311,7 +170,13 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                 return newItem;
             });
 
-            return { ...prev, items: updatedItems };
+            return {
+                ...prev,
+                selectedSupplierIds: field === 'supplierId' && value
+                    ? Array.from(new Set([...prev.selectedSupplierIds.map(Number), Number(value)]))
+                    : prev.selectedSupplierIds,
+                items: updatedItems,
+            };
         });
     };
 
@@ -329,20 +194,18 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
             return;
         }
 
-        // Soportar tanto supplierId (legacy) como selectedSupplierIds (nuevo)
-        const hasSupplier = newPurchase.supplierId || (newPurchase.selectedSupplierIds && newPurchase.selectedSupplierIds.length > 0);
-        if (!hasSupplier) {
-            setMessage('Por favor, seleccione al menos un proveedor.');
+        if (newPurchase.items.length === 0) {
+            setMessage('Agregá al menos un producto o insumo a la orden.');
             return;
         }
 
-        // Validar que todos los items tengan producto y cantidad
-        const hasInvalidItems = newPurchase.items.some(item => 
-            !item.productName || item.quantity <= 0
+        // Cada ítem lleva el proveedor que lo vende: con eso se arma una compra por proveedor
+        const hasInvalidItems = newPurchase.items.some(item =>
+            !String(item.productName || '').trim() || !item.supplierId || item.quantity <= 0
         );
 
         if (hasInvalidItems) {
-            setMessage('Por favor, complete todos los productos y cantidades.');
+            setMessage('Elegí el producto o escribí uno nuevo, el proveedor y una cantidad mayor a cero.');
             return;
         }
 
@@ -355,24 +218,27 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
         setShowConfirmPurchase(false);
         try {
             // Obtener los IDs de proveedores (soportar tanto legacy como nuevo formato)
-            const supplierIds = newPurchase.selectedSupplierIds.length > 0 
-                ? newPurchase.selectedSupplierIds 
-                : (newPurchase.supplierId ? [parseInt(newPurchase.supplierId)] : []);
+            const groups = new Map();
+            newPurchase.items.forEach(item => {
+                const key = String(item.supplierId);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(item);
+            });
 
-            // Crear una compra por cada proveedor seleccionado
-            for (const supplierId of supplierIds) {
+            for (const [supplierId, items] of groups) {
+                const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
                 const purchaseData = {
                     date: newPurchase.date,
-                    supplier_id: parseInt(supplierId),
-                    items: newPurchase.items.map(item => ({
-                        product_id: getProductIdByName(inventory, item.productName),
+                    supplier_id: parseInt(supplierId, 10),
+                    items: items.map(item => ({
+                        product_id: item.productId || null,
                         productName: item.productName,
                         quantity: parseFloat(item.quantity),
                         unit: item.unit,
                         unitPrice: parseFloat(item.unitPrice),
                         total: parseFloat(item.total)
                     })),
-                    total_amount: calculatePurchaseTotal(),
+                    total_amount: totalAmount,
                 };
 
                 console.log('Enviando datos de compra:', purchaseData);
@@ -380,9 +246,11 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                 console.log('Respuesta del servidor:', response.data);
             }
 
+            const supplierCount = groups.size;
+
             setMessage(userRole === 'Gerente' ? 
-                (supplierIds.length > 1 ? 'Compras registradas y completadas con éxito.' : 'Compra registrada y completada con éxito.') : 
-                (supplierIds.length > 1 ? 'Solicitudes de compra enviadas. Esperando aprobación del gerente.' : 'Solicitud de compra enviada. Esperando aprobación del gerente.')
+                (supplierCount > 1 ? 'Compras registradas y completadas con éxito.' : 'Compra registrada y completada con éxito.') : 
+                (supplierCount > 1 ? 'Solicitudes de compra enviadas. Esperando aprobación del gerente.' : 'Solicitud de compra enviada. Esperando aprobación del gerente.')
             );
 
             // Limpiar el formulario
@@ -510,19 +378,27 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
     const handleDialogSubmit = async (purchaseData) => {
         try {
             // Por cada proveedor seleccionado, crear una compra
-            for (const supplierId of purchaseData.supplierIds) {
+            const groups = new Map();
+            purchaseData.items.forEach(item => {
+                const key = String(item.supplierId);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(item);
+            });
+
+            for (const [supplierId, items] of groups) {
+                const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
                 const data = {
                     date: purchaseData.date,
-                    supplier_id: parseInt(supplierId),
-                    items: purchaseData.items.map(item => ({
-                        product_id: getProductIdByName(inventory, item.productName),
+                    supplier_id: parseInt(supplierId, 10),
+                    items: items.map(item => ({
+                        product_id: item.productId || null,
                         productName: item.productName,
                         quantity: parseFloat(item.quantity),
                         unit: item.unit,
                         unitPrice: parseFloat(item.unitPrice),
                         total: parseFloat(item.total)
                     })),
-                    total_amount: purchaseData.totalAmount,
+                    total_amount: totalAmount,
                 };
 
                 console.log('Enviando datos de compra desde diálogo:', data);
@@ -700,37 +576,15 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                                         />
                                     </div>
 
-                                    <div className="form-group mb-0 flex-1">
-                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Proveedores *</label>
-                                        <div className="flex flex-wrap gap-2">
-                                            {suppliers.map(supplier => {
-                                                const isSelected = newPurchase.selectedSupplierIds.includes(supplier.id);
-                                                // Clases de ancho específicas por proveedor para xs hasta lg (515px-1099px)
-                                                const widthClass = supplier.name === 'Casa Central' 
-                                                    ? 'xs:w-[131px] lg:w-auto' 
-                                                    : supplier.name === 'L&L' 
-                                                        ? 'xs:w-[73px] lg:w-auto' 
-                                                        : '';
-                                                return (
-                                                    <label
-                                                        key={supplier.id}
-                                                        className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg cursor-pointer transition-all ${widthClass} ${
-                                                            isSelected
-                                                                ? 'bg-blue-100 border border-blue-500'
-                                                                : 'bg-slate-50 border border-slate-200 hover:bg-slate-100'
-                                                        }`}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isSelected}
-                                                            onChange={() => toggleSupplier(supplier.id)}
-                                                            className="w-4 h-4 accent-blue-500"
-                                                        />
-                                                        <span className="text-sm text-slate-700">{supplier.name}</span>
-                                                    </label>
-                                                );
-                                            })}
-                                        </div>
+                                    <div className="form-group mb-0 flex-1 min-w-0">
+                                        <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Proveedores</label>
+                                        <SearchableSelect
+                                            isMulti
+                                            options={suppliers.map(supplier => ({ value: supplier.id, label: supplier.name }))}
+                                            value={newPurchase.selectedSupplierIds}
+                                            onChange={ids => setNewPurchase(prev => ({ ...prev, selectedSupplierIds: ids }))}
+                                            placeholder="Buscar proveedor..."
+                                        />
                                     </div>
                                 </div>
 
@@ -799,41 +653,63 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                                                     <label className="block text-[11px] font-semibold text-slate-500 uppercase mb-1">
                                                         Producto/Insumo
                                                     </label>
-                                                    <Select
+                                                    <CreatableSelect
+                                                        {...portalSelectProps}
                                                         options={productOptions}
-                                                        value={item.productName ? { value: item.productName, label: item.productName } : null}
+                                                        value={item.productName ? { value: item.isExisting ? item.productId : item.productName, label: item.productName } : null}
                                                         onChange={(selected) => {
-                                                            if (selected) {
-                                                                updateItem(item.id, 'productName', selected.value);
-                                                            } else {
-                                                                updateItem(item.id, 'productName', '');
-                                                            }
+                                                            if (!selected) updateItem(item.id, 'productName', '');
+                                                            else if (selected.__isNew__) updateItem(item.id, 'productName', selected.value);
+                                                            else updateItem(item.id, 'productId', selected.value);
                                                         }}
-                                                        placeholder="Buscar o escribir..."
+                                                        placeholder={newPurchase.selectedSupplierIds.length ? 'Buscar en lo que vende el proveedor...' : 'Buscar producto o insumo...'}
+                                                        formatCreateLabel={(input) => `Usar "${input}" (no está en el sistema)`}
                                                         isClearable
                                                         styles={{
                                                             control: (base, state) => ({
                                                                 ...base,
                                                                 minHeight: '36px',
                                                                 fontSize: '13px',
-                                                                borderColor: state.isFocused ? '#3b82f6' : item.isExisting ? '#22c55e' : item.productName ? '#f59e0b' : '#e2e8f0',
+                                                                borderColor: state.isFocused ? '#3b82f6' : '#e2e8f0',
                                                                 boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.1)' : 'none'
                                                             }),
                                                             menu: (base) => ({ ...base, zIndex: 50, fontSize: '13px' }),
+                                                            menuPortal: portalMenuStyle,
                                                             option: (base) => ({ ...base, padding: '8px 10px' })
                                                         }}
-                                                        noOptionsMessage={() => 'Escribe para agregar nuevo'}
+                                                        noOptionsMessage={() => newPurchase.selectedSupplierIds.length ? 'Ese proveedor no tiene ese ítem. Podés escribir uno nuevo.' : 'Escribí el nombre si no está en el sistema'}
                                                     />
-                                                    {item.isExisting && (
-                                                        <span className="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">
-                                                            ✓ Existente - Datos detectados
-                                                        </span>
-                                                    )}
-                                                    {!item.isExisting && item.productName && (
-                                                        <span className="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
-                                                            ⚠ Nuevo - Ingrese datos manualmente
-                                                        </span>
-                                                    )}
+                                                    {(() => {
+                                                        if (!item.isExisting && item.productName) {
+                                                            const options = suppliers.map(supplier => ({ value: supplier.id, label: supplier.name }));
+                                                            return (
+                                                                <div className="mt-1.5">
+                                                                    <SearchableSelect
+                                                                        options={options}
+                                                                        value={item.supplierId}
+                                                                        onChange={(supplierId) => updateItem(item.id, 'supplierId', supplierId)}
+                                                                        placeholder="Buscar proveedor..."
+                                                                    />
+                                                                </div>
+                                                            );
+                                                        }
+                                                        const sellers = suppliersForProduct(suppliers, item.productId);
+                                                        if (!item.productId || sellers.length === 0) return null;
+                                                        if (sellers.length === 1) {
+                                                            return <span className="inline-block mt-1.5 text-[11px] text-slate-500">Proveedor: {sellers[0].name}</span>;
+                                                        }
+                                                        const options = sellers.map(supplier => ({ value: supplier.id, label: supplier.name }));
+                                                        return (
+                                                            <div className="mt-1.5">
+                                                                <SearchableSelect
+                                                                    options={options}
+                                                                    value={item.supplierId}
+                                                                    onChange={(supplierId) => updateItem(item.id, 'supplierId', supplierId)}
+                                                                    placeholder="Buscar proveedor..."
+                                                                />
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
 
                                                 {/* Cantidad y Unidad */}
@@ -927,6 +803,7 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                     onCancelDelete={handleCancelDeleteModal}
                     userRole={userRole}
                     inventory={inventory}
+                    suppliers={suppliers}
                 />
             )}
         </div>

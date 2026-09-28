@@ -316,6 +316,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                         <div class="font-medium text-gray-800 text-sm">
                                             <p class="line-clamp-2 mb-2">\${m.description}</p>
                                             \${m.payment_method ? \`<span class="block text-xs text-gray-600 mb-2 capitalize"> \${m.payment_method}</span>\` : ''}
+                                            \${m.session_opened_by ? \`<span class="block text-xs text-gray-500">Caja abierta por \${m.session_opened_by}</span>\` : ''}
                                         </div>
                                     </div>
                                 \`).join('');
@@ -848,6 +849,11 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                                         ({movement.payment_method})
                                                     </span>
                                                 )}
+                                                {movement.session_opened_by && (
+                                                    <span className="block text-xs text-gray-500 mt-1">
+                                                        Caja abierta por {movement.session_opened_by}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -1074,6 +1080,11 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                                         {movement.payment_method && (
                                                             <span className="block text-xs text-gray-600 mt-1 capitalize">
                                                                  {movement.payment_method}
+                                                            </span>
+                                                        )}
+                                                        {movement.session_opened_by && (
+                                                            <span className="block text-xs text-gray-500 mt-1">
+                                                                Caja abierta por {movement.session_opened_by}
                                                             </span>
                                                         )}
                                                     </div>

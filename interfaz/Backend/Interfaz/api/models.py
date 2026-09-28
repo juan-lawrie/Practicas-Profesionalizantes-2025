@@ -1,4 +1,5 @@
 # backend/api/models.py
+from decimal import Decimal
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 import uuid
@@ -31,7 +32,9 @@ class Supplier(models.Model):
     cuit = models.CharField(max_length=20, blank=True, null=True)
     address = models.CharField(max_length=255, blank=True, null=True)
     phone = models.CharField(max_length=30, blank=True, null=True)
+    # Texto libre anterior: se conserva en la base, la pantalla usa supplied_products
     products = models.CharField(max_length=255, blank=True, null=True)
+    supplied_products = models.ManyToManyField('Product', related_name='suppliers', blank=True)
     is_active = models.BooleanField(default=True)  # Para eliminación lógica
     deleted_at = models.DateTimeField(null=True, blank=True)  # Fecha de eliminación
 
@@ -100,6 +103,34 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
+# Modelo para la apertura y cierre de caja: cada registro es un turno de caja
+class CashRegisterSession(models.Model):
+    ALLOWED_ROLES = ('Gerente', 'Encargado', 'Cajero')
+    MAX_OPENINGS_PER_DAY = 2
+
+    opened_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='opened_cash_sessions')
+    opened_at = models.DateTimeField(auto_now_add=True)
+    opening_balance = models.DecimalField(max_digits=12, decimal_places=2)
+    closed_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='closed_cash_sessions')
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closing_balance = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    is_open = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-opened_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['is_open'],
+                condition=models.Q(is_open=True),
+                name='unique_open_cash_register_session',
+            ),
+        ]
+
+    def __str__(self):
+        estado = 'abierta' if self.is_open else 'cerrada'
+        return f"Caja {self.id} ({estado}) - abierta por {self.opened_by.username if self.opened_by else 'Desconocido'}"
+
+
 # Modelo para movimientos de caja
 class CashMovement(models.Model):
     MOVEMENT_CHOICES = (
@@ -113,6 +144,20 @@ class CashMovement(models.Model):
     user = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
     payment_method = models.CharField(max_length=50, blank=True, null=True)
     hidden_from_history = models.BooleanField(default=False)
+    session = models.ForeignKey(CashRegisterSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='movements')
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.session_id is None:
+            self.session = CashRegisterSession.objects.filter(is_open=True).first()
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def current_balance(cls):
+        totals = cls.objects.aggregate(
+            entradas=models.Sum('amount', filter=models.Q(type='Entrada')),
+            salidas=models.Sum('amount', filter=models.Q(type='Salida')),
+        )
+        return (totals['entradas'] or Decimal('0')) - (totals['salidas'] or Decimal('0'))
 
 # Modelo para cambios de inventario (no por ventas)
 class InventoryChange(models.Model):

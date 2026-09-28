@@ -5,7 +5,7 @@ import math
 from .models import (
     Product, CashMovement, InventoryChange, Sale, SaleItem, Role, 
     UserQuery, Supplier, UserStorage, LowStockReport, RecipeIngredient, LossRecord,
-    Production, ProductionItem
+    Production, ProductionItem, CashRegisterSession
 )
 from .models import ResetToken
 from .models import Purchase
@@ -13,8 +13,21 @@ from .models import Order, OrderItem
 
 User = get_user_model()  # Usa el modelo de usuario personalizado
 
+CASH_REGISTER_CLOSED_MESSAGE = 'La caja está cerrada. Un Gerente, Encargado o Cajero debe abrirla para registrar ventas y movimientos de caja.'
+
+
+def require_open_cash_register():
+    session = CashRegisterSession.objects.filter(is_open=True).first()
+    if session is None:
+        raise serializers.ValidationError({'detail': CASH_REGISTER_CLOSED_MESSAGE})
+    return session
+
 # Serializer para el modelo de proveedor
 class SupplierSerializer(serializers.ModelSerializer):
+    supplied_products = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Product.objects.all(), required=False
+    )
+
     class Meta:
         model = Supplier
         fields = '__all__'
@@ -277,11 +290,36 @@ class ProductSerializer(serializers.ModelSerializer):
 class CashMovementSerializer(serializers.ModelSerializer):
    
     user = serializers.ReadOnlyField(source='user.username')
+    session_opened_by = serializers.SerializerMethodField()
     
     class Meta:
         model = CashMovement
-        fields = ('id', 'type', 'amount', 'description', 'timestamp', 'user', 'payment_method')
-        read_only_fields = ('user',)
+        fields = ('id', 'type', 'amount', 'description', 'timestamp', 'user', 'payment_method', 'session', 'session_opened_by')
+        read_only_fields = ('user', 'session')
+
+    def get_session_opened_by(self, obj):
+        if obj.session and obj.session.opened_by:
+            return obj.session.opened_by.username
+        return None
+
+
+# Serializer para los turnos de caja (apertura y cierre).
+# Los totales se calculan con anotaciones en la consulta del ViewSet.
+class CashRegisterSessionSerializer(serializers.ModelSerializer):
+    opened_by = serializers.ReadOnlyField(source='opened_by.username')
+    closed_by = serializers.ReadOnlyField(source='closed_by.username')
+    total_entradas = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    total_salidas = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    movements_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = CashRegisterSession
+        fields = (
+            'id', 'opened_by', 'opened_at', 'opening_balance',
+            'closed_by', 'closed_at', 'closing_balance', 'is_open',
+            'total_entradas', 'total_salidas', 'movements_count',
+        )
+        read_only_fields = fields
 
 # Serializer para el modelo de cambio de inventario
 class InventoryChangeSerializer(serializers.ModelSerializer):
@@ -337,6 +375,7 @@ class SaleSerializer(serializers.ModelSerializer):
         read_only_fields = ('user',)
 
     def create(self, validated_data):
+        require_open_cash_register()
         items_data = validated_data.pop('items', [])
         sale = Sale.objects.create(**validated_data)
         
@@ -484,6 +523,9 @@ class OrderSerializer(serializers.ModelSerializer):
         items_data = validated_data.pop('items', None)
         new_status = validated_data.get('status', instance.status)
         old_status = instance.status
+
+        if new_status == 'Entregado' and not instance.cash_impacted:
+            require_open_cash_register()
 
         validated_data.pop('paid_total_at_change', None)
         validated_data.pop('payment_difference', None)

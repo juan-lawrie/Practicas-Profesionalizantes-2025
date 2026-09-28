@@ -7,19 +7,22 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport, RecipeIngredient, LossRecord, Production, ProductionItem
+from .models import Product, CashMovement, InventoryChange, Sale, UserQuery, Supplier, Role, LowStockReport, RecipeIngredient, LossRecord, Production, ProductionItem, CashRegisterSession
 from .models import ResetToken
 from django.conf import settings
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from .serializers import (
     UserSerializer, UserCreateSerializer, ProductSerializer,
     CashMovementSerializer, InventoryChangeSerializer, SaleSerializer,
     UserQuerySerializer, SupplierSerializer, UserStorageSerializer, RoleSerializer, UserUpdateSerializer,
     LowStockReportSerializer, InventoryChangeAuditSerializer, RecipeIngredientSerializer, RecipeIngredientWriteSerializer, LossRecordSerializer,
-    ProductionSerializer
+    ProductionSerializer, CashRegisterSessionSerializer, require_open_cash_register
 )
 from .models import UserStorage
-from django.db import transaction
+from django.db import transaction, IntegrityError
+from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from decimal import Decimal
 from rest_framework.exceptions import ValidationError
 import traceback
@@ -222,7 +225,7 @@ class UserStorageViewSet(viewsets.ModelViewSet):
 
 # ViewSet para la gestión de proveedores (CRUD)
 class SupplierViewSet(viewsets.ModelViewSet):
-    queryset = Supplier.objects.filter(is_active=True)  # Solo proveedores activos
+    queryset = Supplier.objects.filter(is_active=True).prefetch_related('supplied_products')  # Solo proveedores activos
     serializer_class = SupplierSerializer
     
     def get_permissions(self):
@@ -1401,17 +1404,15 @@ class CashMovementViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return CashMovement.objects.filter(hidden_from_history=False).order_by('-timestamp')
+        return (
+            CashMovement.objects.filter(hidden_from_history=False)
+            .select_related('user', 'session__opened_by')
+            .order_by('-timestamp')
+        )
 
     @action(detail=False, methods=['get'])
     def balance(self, request):
-        balance = Decimal('0')
-        for movement in CashMovement.objects.all():
-            if movement.type == 'Entrada':
-                balance += movement.amount
-            else:
-                balance -= movement.amount
-        return Response({'balance': float(balance)})
+        return Response({'balance': float(CashMovement.current_balance())})
 
     def perform_create(self, serializer):
         try:
@@ -1420,7 +1421,8 @@ class CashMovementViewSet(viewsets.ModelViewSet):
             print(f"[CashMovementViewSet.perform_create] Creating movement user={self.request.user if self.request.user.is_authenticated else 'Anonymous'} type={data.get('type')} amount={data.get('amount')}")
         except Exception as e:
             print(f"[CashMovementViewSet.perform_create] Error reading validated_data: {e}")
-        serializer.save(user=self.request.user)
+        session = require_open_cash_register()
+        serializer.save(user=self.request.user, session=session)
 
     # Override list to add debug logging for incoming requests
     def list(self, request, *args, **kwargs):
@@ -1430,6 +1432,111 @@ class CashMovementViewSet(viewsets.ModelViewSet):
         except Exception as e:
             print(f"[CashMovementViewSet.list] Error checking cookies: {e}")
         return super().list(request, *args, **kwargs)
+
+
+def user_can_manage_cash_register(user):
+    role = getattr(user, 'role', None)
+    return bool(user and user.is_authenticated and role and role.name in CashRegisterSession.ALLOWED_ROLES)
+
+
+# Permiso para abrir y cerrar la caja: todos los roles menos Panadero
+class CanManageCashRegister(BasePermission):
+    message = 'Solo Gerente, Encargado o Cajero pueden abrir o cerrar la caja.'
+
+    def has_permission(self, request, view):
+        return user_can_manage_cash_register(request.user)
+
+
+def cash_register_sessions_with_totals():
+    money = DecimalField(max_digits=12, decimal_places=2)
+    return CashRegisterSession.objects.select_related('opened_by', 'closed_by').annotate(
+        total_entradas=Coalesce(Sum('movements__amount', filter=Q(movements__type='Entrada')), Value(Decimal('0')), output_field=money),
+        total_salidas=Coalesce(Sum('movements__amount', filter=Q(movements__type='Salida')), Value(Decimal('0')), output_field=money),
+        movements_count=Count('movements'),
+    )
+
+
+# ViewSet para la apertura y cierre de caja (turnos)
+class CashRegisterSessionViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = CashRegisterSessionSerializer
+
+    def get_permissions(self):
+        if self.action in ['open_register', 'close_register']:
+            return [IsAuthenticated(), CanManageCashRegister()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        qs = cash_register_sessions_with_totals()
+        date_param = self.request.query_params.get('date')
+        if date_param:
+            day = parse_date(date_param)
+            if day is None:
+                raise ValidationError({'detail': 'Fecha inválida. Usá el formato AAAA-MM-DD.'})
+            qs = qs.filter(Q(opened_at__date=day) | Q(closed_at__date=day)).order_by('opened_at')
+        return qs
+
+    def _serialize_session(self, session):
+        return self.get_serializer(cash_register_sessions_with_totals().get(pk=session.pk)).data
+
+    @action(detail=False, methods=['get'])
+    def current(self, request):
+        today = timezone.localdate()
+        sessions = cash_register_sessions_with_totals()
+        open_session = sessions.filter(is_open=True).first()
+        openings_today = CashRegisterSession.objects.filter(opened_at__date=today).count()
+        closings_today = CashRegisterSession.objects.filter(closed_at__date=today).count()
+        today_sessions = sessions.filter(
+            Q(opened_at__date=today) | Q(closed_at__date=today) | Q(is_open=True)
+        ).order_by('opened_at')
+        can_manage = user_can_manage_cash_register(request.user)
+
+        return Response({
+            'is_open': open_session is not None,
+            'session': self.get_serializer(open_session).data if open_session else None,
+            'current_balance': float(CashMovement.current_balance()),
+            'today': today.isoformat(),
+            'openings_today': openings_today,
+            'closings_today': closings_today,
+            'max_per_day': CashRegisterSession.MAX_OPENINGS_PER_DAY,
+            'can_manage': can_manage,
+            'can_open': can_manage and open_session is None and openings_today < CashRegisterSession.MAX_OPENINGS_PER_DAY,
+            'can_close': can_manage and open_session is not None,
+            'today_sessions': self.get_serializer(today_sessions, many=True).data,
+        })
+
+    @action(detail=False, methods=['post'], url_path='open')
+    def open_register(self, request):
+        today = timezone.localdate()
+        max_per_day = CashRegisterSession.MAX_OPENINGS_PER_DAY
+        try:
+            with transaction.atomic():
+                if CashRegisterSession.objects.filter(is_open=True).exists():
+                    return Response({'detail': 'La caja ya está abierta.'}, status=status.HTTP_400_BAD_REQUEST)
+                if CashRegisterSession.objects.filter(opened_at__date=today).count() >= max_per_day:
+                    return Response(
+                        {'detail': f'La caja ya se abrió {max_per_day} veces hoy. No se puede volver a abrir hasta mañana.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                session = CashRegisterSession.objects.create(
+                    opened_by=request.user,
+                    opening_balance=CashMovement.current_balance(),
+                )
+        except IntegrityError:
+            return Response({'detail': 'La caja ya fue abierta por otro usuario.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._serialize_session(session), status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='close')
+    def close_register(self, request):
+        with transaction.atomic():
+            session = CashRegisterSession.objects.select_for_update().filter(is_open=True).first()
+            if session is None:
+                return Response({'detail': 'La caja no está abierta.'}, status=status.HTTP_400_BAD_REQUEST)
+            session.closed_by = request.user
+            session.closed_at = timezone.now()
+            session.closing_balance = CashMovement.current_balance()
+            session.is_open = False
+            session.save(update_fields=['closed_by', 'closed_at', 'closing_balance', 'is_open'])
+        return Response(self._serialize_session(session))
 
 # ViewSet para la gestión de cambios de inventario (CRUD)
 class InventoryChangeViewSet(viewsets.ModelViewSet):

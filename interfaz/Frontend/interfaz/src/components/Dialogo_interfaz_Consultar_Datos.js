@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { formatMovementDate } from '../utils/date';
+import SearchableSelect from './SearchableSelect';
+import { nameOptions, productIdOptions, productNameOptions, sameName } from '../utils/filterOptions';
 import {
     safeToFixed as defaultSafeToFixed,
     formatStockWithUnit,
@@ -69,7 +71,6 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
     const [cashDescriptionFilter, setCashDescriptionFilter] = useState('');
     const [cashDescriptionFilterOp, setCashDescriptionFilterOp] = useState('contains');
     const [cashUserFilter, setCashUserFilter] = useState('');
-    const [cashUserFilterOp, setCashUserFilterOp] = useState('contains');
     const [cashTypeFilter, setCashTypeFilter] = useState('');
     const [cashPaymentMethodFilter, setCashPaymentMethodFilter] = useState([]);
     const [cashSortOrder, setCashSortOrder] = useState('desc');
@@ -89,7 +90,6 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
     const [purchasesIdFilter, setPurchasesIdFilter] = useState('');
     const [purchasesIdFilterOp, setPurchasesIdFilterOp] = useState('equals');
     const [purchasesSupplierFilter, setPurchasesSupplierFilter] = useState('');
-    const [purchasesSupplierFilterOp, setPurchasesSupplierFilterOp] = useState('contains');
     const [purchasesTotalFilter, setPurchasesTotalFilter] = useState('');
     const [purchasesTotalFilterOp, setPurchasesTotalFilterOp] = useState('equals');
     const [purchasesTypeFilter, setPurchasesTypeFilter] = useState([]);
@@ -110,7 +110,26 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
     const [suppliersAddressFilter, setSuppliersAddressFilter] = useState('');
     const [suppliersAddressFilterOp, setSuppliersAddressFilterOp] = useState('contains');
     const [suppliersProductFilter, setSuppliersProductFilter] = useState('');
-    const [suppliersProductFilterOp, setSuppliersProductFilterOp] = useState('contains');
+
+    const saleProductNames = (sales || []).flatMap(sale => (sale.sale_items || sale.items || [])
+        .map(item => item.product_name || item.productName || item.product || item.name));
+    const saleUserNames = (sales || []).map(sale => sale.user || sale.user_username || sale.user_name || 'Sistema');
+    const stockNameOptions = productNameOptions(inventory);
+    const salesProductOptions = productNameOptions(inventory, { type: 'Producto', extraNames: saleProductNames });
+    const salesUserOptions = nameOptions(saleUserNames);
+    const ordersProductOptions = productNameOptions(inventory, {
+        type: 'Producto',
+        extraNames: (orders || []).flatMap(order => (order.items || []).map(item => item.productName || item.product_name)),
+    });
+    const purchasesSupplierOptions = nameOptions([
+        ...(suppliers || []).map(supplier => supplier.name),
+        ...(purchases || []).map(purchase => purchase.supplierName || purchase.supplier_name || purchase.supplier),
+    ]);
+    const purchasesProductOptions = productNameOptions(inventory, {
+        extraNames: (purchases || []).flatMap(purchase => (purchase.items || []).map(item => item.productName || item.product_name)),
+    });
+    const suppliersProductOptions = productIdOptions(inventory);
+    const cashUserOptions = nameOptions((cashMovements || []).map(movement => movement.user || 'Sistema'));
 
     // Función auxiliar para parsear fechas (corregida para zonas horarias)
     const parseAnyDate = (dateStr) => {
@@ -203,10 +222,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
         // Filtro de nombre
         if (stockNameFilter.trim()) {
-            const filterName = stockNameFilter.toLowerCase();
-            filteredProducts = filteredProducts.filter(p => 
-                (p.name || '').toLowerCase().includes(filterName)
-            );
+            filteredProducts = filteredProducts.filter(p => sameName(p.name, stockNameFilter));
         }
 
         // Filtro de cantidad
@@ -267,6 +283,21 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
                 return stockStatusFilter.includes(status);
             });
         }
+
+        const isLowOrNullStock = (item) => {
+            const rawStock = item.stock;
+            if (rawStock === null || rawStock === undefined || rawStock === '') return true;
+            const stockNum = parseFloat(rawStock);
+            if (Number.isNaN(stockNum) || stockNum <= 0) return true;
+            const threshold = item.low_stock_threshold || item.lowStockThreshold || 10;
+            return stockNum < threshold;
+        };
+
+        filteredProducts.sort((a, b) => {
+            const aPriority = isLowOrNullStock(a) ? 0 : 1;
+            const bPriority = isLowOrNullStock(b) ? 0 : 1;
+            return aPriority - bPriority;
+        });
 
         const productos = filteredProducts.filter(item => (item.type || item.category || '').toLowerCase() === 'producto');
         const insumos = filteredProducts.filter(item => (item.type || item.category || '').toLowerCase() === 'insumo');
@@ -350,22 +381,15 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
         // Filtro de producto
         if (suppliersProductFilter.trim()) {
-            const filterVal = suppliersProductFilter.toLowerCase();
-            filteredSuppliers = filteredSuppliers.filter(s => {
-                if (Array.isArray(s.products)) {
-                    return s.products.some(p => {
-                        const productName = String(p.name || p.productName || p || '').toLowerCase();
-                        return suppliersProductFilterOp === 'equals' ? productName === filterVal : productName.includes(filterVal);
-                    });
-                } else {
-                    const productsStr = String(s.products || '').toLowerCase();
-                    const productList = productsStr.split(',').map(p => p.trim());
-                    return suppliersProductFilterOp === 'equals' 
-                        ? productList.some(p => p === filterVal) 
-                        : productList.some(p => p.includes(filterVal));
-                }
-            });
+            filteredSuppliers = filteredSuppliers.filter(s =>
+                (s.supplied_products || []).map(String).includes(String(suppliersProductFilter))
+            );
         }
+
+        const suppliedNames = (supplier) => (supplier.supplied_products || [])
+            .map(id => (inventory || []).find(product => String(product.id) === String(id))?.name)
+            .filter(Boolean)
+            .join(', ');
 
         const results = {
             title: 'Información de Proveedores',
@@ -379,9 +403,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
                 cuit: s.cuit || '',
                 phone: s.phone || '',
                 address: s.address || '',
-                products: Array.isArray(s.products) 
-                    ? s.products.map(p => p.name || p.productName || p || '').filter(Boolean).join(', ')
-                    : (s.products || '')
+                products: suppliedNames(s)
             }))
         };
         
@@ -473,20 +495,12 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
         // Filtro de producto
         if (salesProductFilter.trim()) {
-            const filterVal = salesProductFilter.toLowerCase();
-            filtered = filtered.filter(s => {
-                const product = (s.product || '').toLowerCase();
-                return product.includes(filterVal);
-            });
+            filtered = filtered.filter(s => sameName(s.product, salesProductFilter));
         }
 
         // Filtro de usuario
         if (salesUserFilter.trim()) {
-            const filterVal = salesUserFilter.toLowerCase();
-            filtered = filtered.filter(s => {
-                const user = (s.user || '').toLowerCase();
-                return user.includes(filterVal);
-            });
+            filtered = filtered.filter(s => sameName(s.user, salesUserFilter));
         }
 
         // Filtro de total
@@ -627,13 +641,9 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
         // Filtro por producto
         if (ordersProductFilter.trim()) {
-            const filterVal = ordersProductFilter.toLowerCase();
             filteredOrders = filteredOrders.filter(order => {
                 const items = Array.isArray(order.items) ? order.items : [];
-                return items.some(item => {
-                    const productName = (item.productName || item.product_name || '').toLowerCase();
-                    return productName.includes(filterVal);
-                });
+                return items.some(item => sameName(item.productName || item.product_name, ordersProductFilter));
             });
         }
 
@@ -768,11 +778,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
         // Filtro de proveedor
         if (purchasesSupplierFilter.trim()) {
-            const filterVal = purchasesSupplierFilter.toLowerCase();
-            filtered = filtered.filter(p => {
-                const supplier = (p.supplier || '').toLowerCase();
-                return purchasesSupplierFilterOp === 'equals' ? supplier === filterVal : supplier.includes(filterVal);
-            });
+            filtered = filtered.filter(p => sameName(p.supplier, purchasesSupplierFilter));
         }
 
         // Filtro de total
@@ -799,9 +805,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
         // Filtro por nombre de producto
         if (purchasesProductFilter.trim()) {
             filtered = filtered.filter(p => 
-                p.items.some(item => 
-                    String(item.productName || '').toLowerCase().includes(purchasesProductFilter.toLowerCase())
-                )
+                p.items.some(item => sameName(item.productName, purchasesProductFilter))
             );
         }
 
@@ -919,6 +923,11 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
                 const pm = (m.payment_method || '').toLowerCase();
                 return cashPaymentMethodFilter.some(method => pm.includes(method.toLowerCase()));
             });
+        }
+
+        // Filtro de usuario
+        if (cashUserFilter.trim()) {
+            filtered = filtered.filter(m => sameName(m.user, cashUserFilter));
         }
 
         // Ordenar
@@ -1195,7 +1204,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Nombre</label>
-                                <input type="text" value={stockNameFilter} onChange={e => setStockNameFilter(e.target.value)} placeholder="Buscar por nombre..." className={inputClass} />
+                                <SearchableSelect options={stockNameOptions} value={stockNameFilter} onChange={setStockNameFilter} placeholder="Elegir producto o insumo..." />
                             </div>
 
                             <div className={filterRowClass}>
@@ -1329,13 +1338,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Productos/Insumos</label>
-                                <div className="flex gap-2">
-                                    <select value={suppliersProductFilterOp} onChange={e => setSuppliersProductFilterOp(e.target.value)} className="w-28 px-2 py-2 border border-gray-300 rounded-md text-sm">
-                                        <option value="contains">Contiene</option>
-                                        <option value="equals">Es igual</option>
-                                    </select>
-                                    <input type="text" value={suppliersProductFilter} onChange={e => setSuppliersProductFilter(e.target.value)} placeholder="Nombre del producto" className={`flex-1 ${inputClass}`} />
-                                </div>
+                                <SearchableSelect options={suppliersProductOptions} value={suppliersProductFilter} onChange={setSuppliersProductFilter} placeholder="Elegir producto o insumo..." />
                             </div>
                         </div>
                     )}
@@ -1363,12 +1366,12 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Producto</label>
-                                <input type="text" value={salesProductFilter} onChange={e => setSalesProductFilter(e.target.value)} placeholder="Nombre del producto" className={inputClass} />
+                                <SearchableSelect options={salesProductOptions} value={salesProductFilter} onChange={setSalesProductFilter} placeholder="Elegir producto..." />
                             </div>
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Usuario</label>
-                                <input type="text" value={salesUserFilter} onChange={e => setSalesUserFilter(e.target.value)} placeholder="Usuario" className={inputClass} />
+                                <SearchableSelect options={salesUserOptions} value={salesUserFilter} onChange={setSalesUserFilter} placeholder="Elegir usuario..." />
                             </div>
 
                             <div className={filterRowClass}>
@@ -1435,7 +1438,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Producto</label>
-                                <input type="text" value={ordersProductFilter} onChange={e => setOrdersProductFilter(e.target.value)} placeholder="Nombre del producto" className={inputClass} />
+                                <SearchableSelect options={ordersProductOptions} value={ordersProductFilter} onChange={setOrdersProductFilter} placeholder="Elegir producto..." />
                             </div>
 
                             <div className={filterRowClass}>
@@ -1521,13 +1524,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Proveedor</label>
-                                <div className="flex gap-2">
-                                    <select value={purchasesSupplierFilterOp} onChange={e => setPurchasesSupplierFilterOp(e.target.value)} className="w-28 px-2 py-2 border border-gray-300 rounded-md text-sm">
-                                        <option value="contains">Contiene</option>
-                                        <option value="equals">Es igual</option>
-                                    </select>
-                                    <input type="text" value={purchasesSupplierFilter} onChange={e => setPurchasesSupplierFilter(e.target.value)} placeholder="Nombre del proveedor" className={`flex-1 ${inputClass}`} />
-                                </div>
+                                <SearchableSelect options={purchasesSupplierOptions} value={purchasesSupplierFilter} onChange={setPurchasesSupplierFilter} placeholder="Elegir proveedor..." />
                             </div>
 
                             <div className={filterRowClass}>
@@ -1568,7 +1565,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Buscar Producto/Insumo</label>
-                                <input type="text" value={purchasesProductFilter} onChange={e => setPurchasesProductFilter(e.target.value)} placeholder="Nombre del producto o insumo" className={inputClass} />
+                                <SearchableSelect options={purchasesProductOptions} value={purchasesProductFilter} onChange={setPurchasesProductFilter} placeholder="Elegir producto o insumo..." />
                             </div>
                         </div>
                     )}
@@ -1624,7 +1621,7 @@ export default function Dialogo_interfaz_Consultar_Datos(props) {
 
                             <div className={filterRowClass}>
                                 <label className={labelClass}>Usuario</label>
-                                <input type="text" value={cashUserFilter} onChange={e => setCashUserFilter(e.target.value)} placeholder="Usuario" className={inputClass} />
+                                <SearchableSelect options={cashUserOptions} value={cashUserFilter} onChange={setCashUserFilter} placeholder="Elegir usuario..." />
                             </div>
 
                             <div className={filterRowClass}>

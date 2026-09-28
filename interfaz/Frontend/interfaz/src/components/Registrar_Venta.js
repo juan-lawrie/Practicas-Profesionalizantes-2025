@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api';
+import api, { getApiErrorMessage } from '../services/api';
 
-const Registrar_Venta = ({ products, loadProducts, loadCashMovements }) => {
+const Registrar_Venta = ({ products, loadProducts, loadCashMovements, isCashRegisterClosed = false }) => {
     const [cartItems, setCartItems] = useState([]);
     const [total, setTotal] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
@@ -145,7 +145,7 @@ const Registrar_Venta = ({ products, loadProducts, loadCashMovements }) => {
     const cashPaid = paymentMethods.reduce((sum, pm) => pm.method === 'efectivo' ? sum + (parseFloat(pm.amount) || 0) : sum, 0);
     const remaining = round2(total - totalPaid);
     const change = round2(Math.max(0, totalPaid - total));
-    const canConfirmSale = cartItems.length > 0 && remaining <= 0 && (change <= 0.01 || cashPaid >= change - 0.01);
+    const canConfirmSale = !isCashRegisterClosed && cartItems.length > 0 && remaining <= 0 && (change <= 0.01 || cashPaid >= change - 0.01);
 
     const clearCart = () => {
         setCartItems([]);
@@ -235,13 +235,18 @@ const Registrar_Venta = ({ products, loadProducts, loadCashMovements }) => {
             }, 2000);
         } catch (err) {
             console.error('Error registrando venta:', err);
-            setMessage('❌ No se pudo registrar la venta en el servidor.');
-            setTimeout(() => setMessage(''), 3000);
+            setMessage(`❌ ${getApiErrorMessage(err, 'No se pudo registrar la venta en el servidor.')}`);
+            setTimeout(() => setMessage(''), 5000);
         }
     };
 
     return (
         <div className="min-h-screen bg-gray-50 p-1 md:p-2">
+            {isCashRegisterClosed && (
+                <div className="mb-3 p-3 rounded-lg bg-amber-100 text-amber-800 border border-amber-300">
+                    La caja está cerrada: no se pueden registrar ventas hasta que un Gerente, Encargado o Cajero la abra.
+                </div>
+            )}
             {message && (
                 <div className={`mb-3 p-3 rounded-lg ${message.includes('✅') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                     {message}

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Select from 'react-select';
+import CreatableSelect from 'react-select/creatable';
 import { formatMoney } from '../utils/format';
+import { productLabel, productsForSuppliers, suppliersForProduct } from '../utils/supplierCatalog';
+import SearchableSelect, { portalSelectProps, portalMenuStyle } from './SearchableSelect';
 
 const DialogoCompras = ({ 
     isOpen, 
@@ -29,6 +31,8 @@ const DialogoCompras = ({
     const [wasFullscreenBeforeMinimize, setWasFullscreenBeforeMinimize] = useState(false);
     const dialogRef = useRef(null);
     const externalWindowRef = useRef(null);
+    // La ventana externa avisa por postMessage; el listener se registra una vez y lee siempre el estado actual
+    const latestHandlers = useRef({});
     
     const NAV_HEIGHT = -160;
     const NAV_HEIGHT_MINIMIZED = 64;
@@ -77,6 +81,7 @@ const DialogoCompras = ({
 
     useEffect(() => {
         const handleMessage = (event) => {
+            if (event.source !== externalWindowRef.current) return;
             if (event.data && event.data.type) {
                 switch (event.data.type) {
                     case 'UPDATE_DATE':
@@ -116,7 +121,9 @@ const DialogoCompras = ({
                             ...prev,
                             items: [...prev.items, ...Array(count).fill(null).map(() => ({
                                 id: Date.now() + Math.random(),
+                                productId: '',
                                 productName: '',
+                                supplierId: '',
                                 quantity: 1,
                                 unit: 'u',
                                 unitPrice: 0,
@@ -133,13 +140,13 @@ const DialogoCompras = ({
                         break;
                     case 'UPDATE_ITEM':
                         // Reutilizamos nuestra función interna para aplicar validaciones
-                        updateItem(event.data.itemId, event.data.field, event.data.value);
+                        latestHandlers.current.updateItem(event.data.itemId, event.data.field, event.data.value);
                         break;
                     case 'SUBMIT_PURCHASE':
-                        handleSubmit();
+                        latestHandlers.current.handleSubmit();
                         break;
                     case 'CLOSE_DIALOG':
-                        onClose();
+                        latestHandlers.current.onClose();
                         break;
                     default:
                         break;
@@ -149,7 +156,7 @@ const DialogoCompras = ({
 
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [onClose, suppliers]); // Agregado suppliers a las dependencias
+    }, [suppliers]);
 
     useEffect(() => {
         if (externalWindow && !externalWindow.closed) {
@@ -159,7 +166,7 @@ const DialogoCompras = ({
                 renderInExternalWindow(externalWindow);
             }
         }
-    }, [externalWindow, purchaseData, inventory, suppliers]);
+    }, [externalWindow, purchaseData, inventory, suppliers, message]);
 
     const handleMouseDown = (e) => {
         if (e.target.closest('.dialog-header-draggable') && !e.target.closest('button') && !e.target.closest('input')) {
@@ -189,7 +196,9 @@ const DialogoCompras = ({
         const validCount = Math.max(1, Math.min(100, parseInt(count) || 1));
         const newItems = Array(validCount).fill(null).map(() => ({
             id: Date.now() + Math.random(),
+            productId: '',
             productName: '',
+            supplierId: '',
             quantity: 1,
             unit: 'u',
             unitPrice: 0,
@@ -217,25 +226,37 @@ const DialogoCompras = ({
 
                 let updates = { [field]: value };
 
-                if (field === 'productName') {
-                    const product = getProductFromInventory(value);
+                if (field === 'productId' || field === 'productName') {
+                    const product = field === 'productId'
+                        ? inventory.find(p => Number(p.id) === Number(value))
+                        : getProductFromInventory(String(value || ''));
                     if (product) {
+                        const linked = suppliersForProduct(suppliers, product.id);
+                        const selectedIds = prev.selectedSuppliers.map(selected => Number(selected.value));
+                        const sellers = selectedIds.length
+                            ? linked.filter(supplier => selectedIds.includes(Number(supplier.id)))
+                            : linked;
                         const newUnit = mapBackendUnitToFrontend(product.unit);
+                        updates.productId = product.id;
+                        updates.productName = product.name;
                         updates.unit = newUnit;
                         updates.unitPrice = product.price || 0;
                         updates.isExisting = true;
-                        
-                        // Si la nueva unidad es 'u', forzar cantidad a entero
-                        if (newUnit === 'u') {
-                            updates.quantity = Math.floor(item.quantity);
-                        }
-                    } else {
+                        updates.supplierId = sellers.length === 1
+                            ? sellers[0].id
+                            : (sellers.some(supplier => Number(supplier.id) === Number(item.supplierId)) ? item.supplierId : '');
+                        if (newUnit === 'u') updates.quantity = Math.floor(item.quantity);
+                    } else if (String(value || '').trim()) {
+                        updates.productId = '';
+                        updates.productName = String(value).trim();
                         updates.isExisting = false;
-                        if (!value) {
-                            updates.unit = 'u';
-                            updates.unitPrice = 0;
-                            updates.quantity = Math.floor(item.quantity);
-                        }
+                    } else {
+                        updates.productId = '';
+                        updates.productName = '';
+                        updates.supplierId = '';
+                        updates.isExisting = false;
+                        updates.unit = 'u';
+                        updates.unitPrice = 0;
                     }
                 }
 
@@ -264,7 +285,18 @@ const DialogoCompras = ({
                 return newItem;
             });
 
-            return { ...prev, items: updatedItems };
+            const supplierIds = updatedItems
+                .map(item => item.supplierId)
+                .filter(Boolean)
+                .map(Number);
+            const selectedSuppliers = [...prev.selectedSuppliers];
+            supplierIds.forEach(supplierId => {
+                if (!selectedSuppliers.some(selected => Number(selected.value) === supplierId)) {
+                    const supplier = suppliers.find(item => Number(item.id) === supplierId);
+                    if (supplier) selectedSuppliers.push({ value: supplier.id, label: supplier.name });
+                }
+            });
+            return { ...prev, selectedSuppliers, items: updatedItems };
         });
     };
 
@@ -277,36 +309,32 @@ const DialogoCompras = ({
             setMessage('Por favor, ingrese una fecha.');
             return;
         }
-        if (purchaseData.selectedSuppliers.length === 0) {
-            setMessage('Por favor, seleccione al menos un proveedor.');
-            return;
-        }
         if (purchaseData.items.length === 0) {
-            setMessage('Por favor, agregue al menos un producto.');
+            setMessage('Agregá al menos un producto o insumo a la orden.');
             return;
         }
 
-        const hasInvalidItems = purchaseData.items.some(item => 
-            !item.productName || item.quantity <= 0
+        const hasInvalidItems = purchaseData.items.some(item =>
+            !String(item.productName || '').trim() || !item.supplierId || item.quantity <= 0
         );
 
         if (hasInvalidItems) {
-            setMessage('Por favor, complete todos los productos y cantidades mayor a 0.');
+            setMessage('Elegí el producto o escribí uno nuevo, el proveedor y una cantidad mayor a cero.');
             return;
         }
 
         onSubmit({
             date: purchaseData.date,
-            supplierIds: purchaseData.selectedSuppliers.map(s => s.value),
             items: purchaseData.items.map(item => ({
+                productId: item.productId,
                 productName: item.productName,
+                supplierId: item.supplierId,
                 quantity: parseFloat(item.quantity),
                 unit: item.unit,
                 unitPrice: parseFloat(item.unitPrice),
                 total: item.total,
                 isExisting: item.isExisting
             })),
-            totalAmount: calculatePurchaseTotal()
         });
 
         setPurchaseData({
@@ -356,9 +384,21 @@ const DialogoCompras = ({
         }
     };
 
+    const externalCatalog = () => ({
+        inventory: (inventory || []).map(product => ({
+            id: product.id,
+            name: product.name,
+            unit: mapBackendUnitToFrontend(product.unit),
+            price: product.price || 0,
+            sellerIds: suppliersForProduct(suppliers, product.id).map(supplier => Number(supplier.id)),
+        })),
+        suppliers: suppliers.map(supplier => ({ id: Number(supplier.id), name: supplier.name })),
+    });
+
     const renderInExternalWindow = (win) => {
         if (!win || win.closed) return;
 
+        const catalog = externalCatalog();
         const htmlContent = `
             <!DOCTYPE html>
             <html lang="es" style="height: 100%;">
@@ -375,7 +415,6 @@ const DialogoCompras = ({
                     
                     @media (min-width: 1300px) {
                         .date-input-container { width: 250px !important; }
-                        .supplier-label { min-width: 200px; }
                         .add-button-container button { min-width: 200px; }
                     }
                     
@@ -383,34 +422,42 @@ const DialogoCompras = ({
                     th { position: sticky; top: 0; background: #f8fafc; z-index: 10; border-bottom: 1px solid #e2e8f0; }
                 </style>
                 <script>
-                    window.inventoryData = ${JSON.stringify(inventory.map(p => ({
-                        name: p.name,
-                        unit: mapBackendUnitToFrontend(p.unit),
-                        price: p.price || 0
-                    })))};
+                    window.inventoryData = ${JSON.stringify(catalog.inventory)};
+                    window.suppliersData = ${JSON.stringify(catalog.suppliers)};
+                    window.selectedSupplierIds = ${JSON.stringify(purchaseData.selectedSuppliers.map(s => Number(s.value)))};
+
+                    window.escapeHtml = function(text) {
+                        return String(text == null ? '' : text).replace(/[&<>"']/g, function(c) {
+                            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                        });
+                    };
+
+                    // Sin proveedor elegido se busca en todo el inventario. Con proveedor, solo en lo que vende.
+                    window.availableProducts = function() {
+                        if (!window.selectedSupplierIds.length) return window.inventoryData;
+                        return window.inventoryData.filter(function(p) {
+                            return p.sellerIds.some(function(id) { return window.selectedSupplierIds.includes(id); });
+                        });
+                    };
                     
-                    window.suppliersData = ${JSON.stringify(suppliers.map(s => ({
-                        id: s.id,
-                        name: s.name
-                    })))};
-                    
-                    window.handleSupplierChange = function(supplierId, isChecked) {
-                        const checkbox = document.getElementById('supplier-' + supplierId);
-                        if (checkbox) {
-                            const label = checkbox.closest('label');
-                            if (label) {
-                                if (isChecked) {
-                                    label.className = 'supplier-label flex items-center gap-1.5 px-3 py-2 rounded-lg cursor-pointer transition-all bg-blue-100 border border-blue-500';
-                                } else {
-                                    label.className = 'supplier-label flex items-center gap-1.5 px-3 py-2 rounded-lg cursor-pointer transition-all bg-slate-50 border border-slate-200 hover:bg-slate-100';
-                                }
-                            }
-                        }
-                        window.opener.postMessage({
-                            type: 'TOGGLE_SUPPLIER',
-                            supplierId: supplierId,
-                            isChecked: isChecked
-                        }, '*');
+                    window.addSupplierByName = function(name) {
+                        const supplier = window.suppliersData.find(function(item) { return item.name === name; });
+                        if (!supplier || window.selectedSupplierIds.includes(supplier.id)) return;
+                        const ids = window.selectedSupplierIds.concat([supplier.id]);
+                        const selected = ids.map(function(id) {
+                            const found = window.suppliersData.find(function(item) { return item.id === id; });
+                            return { value: id, label: found ? found.name : String(id) };
+                        });
+                        window.opener.postMessage({ type: 'UPDATE_SUPPLIERS', value: selected }, '*');
+                    };
+
+                    window.removeSupplier = function(id) {
+                        const ids = window.selectedSupplierIds.filter(function(current) { return current !== id; });
+                        const selected = ids.map(function(currentId) {
+                            const found = window.suppliersData.find(function(item) { return item.id === currentId; });
+                            return { value: currentId, label: found ? found.name : String(currentId) };
+                        });
+                        window.opener.postMessage({ type: 'UPDATE_SUPPLIERS', value: selected }, '*');
                     };
                     
                     window.handleProductChange = function(itemId, value) {
@@ -423,7 +470,7 @@ const DialogoCompras = ({
                     };
                     
                     window.handleProductInput = function(itemId, value, inputElement) {
-                        const product = window.inventoryData.find(p => p.name === value);
+                        const product = window.availableProducts().find(p => p.name === value);
                         if (product) {
                             window.handleProductChange(itemId, value);
                             inputElement.blur();
@@ -448,6 +495,26 @@ const DialogoCompras = ({
                             : item.productName 
                                 ? '<span class="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">⚠ Nuevo</span>' 
                                 : '';
+
+                        const product = window.inventoryData.find(p => p.id === Number(item.productId));
+                        const sellers = product ? window.suppliersData.filter(s => product.sellerIds.includes(s.id)) : [];
+                        const supplierChoices = (!item.isExisting && item.productName) ? window.suppliersData : sellers;
+                        let supplierInfo = '';
+                        if (item.isExisting && sellers.length === 1) {
+                            supplierInfo = '<span class="block mt-1 text-[11px] text-slate-500">Proveedor: ' + window.escapeHtml(sellers[0].name) + '</span>';
+                        } else if (supplierChoices.length > 0 && (supplierChoices.length > 1 || !item.isExisting)) {
+                            const listId = 'supplier-search-' + item.id;
+                            supplierInfo = '<input class="w-full mt-1 px-2 py-1 border border-slate-200 rounded-md text-xs" list="' + listId + '" placeholder="Buscar proveedor..."'
+                                + ' value="' + window.escapeHtml((supplierChoices.find(s => s.id === Number(item.supplierId)) || {}).name || '') + '"'
+                                + ' onchange="var name = this.value; var found = window.suppliersData.find(function(s) { return s.name === name; });'
+                                + ' window.opener.postMessage({type:\\'UPDATE_ITEM\\', itemId: ' + item.id + ', field: \\'supplierId\\', value: found ? found.id : \\'\\'}, \\'*\\');" />'
+                                + '<datalist id="' + listId + '">'
+                                + supplierChoices.map(s => '<option value="' + window.escapeHtml(s.name) + '"></option>').join('')
+                                + '</datalist>';
+                        }
+                        const productOptionsHtml = window.availableProducts()
+                            .map(p => '<option value="' + window.escapeHtml(p.name) + '">' + window.escapeHtml(p.name) + ' (' + p.unit + ')</option>')
+                            .join('');
                         
                         return \`
                             <tr id="item-row-\${item.id}" class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
@@ -456,15 +523,16 @@ const DialogoCompras = ({
                                         type="text" 
                                         class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-blue-500"
                                         value="\${item.productName}"
-                                        placeholder="Buscar o escribir..."
+                                        placeholder="\${window.selectedSupplierIds.length ? 'Buscar en lo que vende el proveedor...' : 'Buscar producto o insumo...'}"
                                         oninput="window.handleProductInput(\${item.id}, this.value, this);"
                                         onblur="window.handleProductChange(\${item.id}, this.value);"
                                         list="products-\${item.id}"
                                     />
                                     <datalist id="products-\${item.id}">
-                                        \${window.inventoryData.map(p => '<option value="' + p.name + '">' + p.name + ' (' + p.unit + ')</option>').join('')}
+                                        \${productOptionsHtml}
                                     </datalist>
                                     <div>\${statusBadge}</div>
+                                    \${supplierInfo}
                                 </td>
                                 <td class="py-3 px-4 w-32">
                                     <input 
@@ -557,19 +625,16 @@ const DialogoCompras = ({
                     };
                     
                     window.updateSuppliers = function(selectedIds) {
-                        document.querySelectorAll('.supplier-label').forEach(label => {
-                            const checkbox = label.querySelector('input[type="checkbox"]');
-                            if (checkbox) {
-                                const supplierId = parseInt(checkbox.id.replace('supplier-', ''));
-                                const isSelected = selectedIds.includes(supplierId);
-                                checkbox.checked = isSelected;
-                                if (isSelected) {
-                                    label.className = 'supplier-label flex items-center gap-1.5 px-3 py-2 rounded-lg cursor-pointer transition-all bg-blue-100 border border-blue-500';
-                                } else {
-                                    label.className = 'supplier-label flex items-center gap-1.5 px-3 py-2 rounded-lg cursor-pointer transition-all bg-slate-50 border border-slate-200 hover:bg-slate-100';
-                                }
-                            }
-                        });
+                        window.selectedSupplierIds = selectedIds;
+                        const box = document.getElementById('selected-suppliers');
+                        if (!box) return;
+                        box.innerHTML = selectedIds.map(function(id) {
+                            const supplier = window.suppliersData.find(function(item) { return item.id === id; });
+                            const name = supplier ? window.escapeHtml(supplier.name) : id;
+                            return '<span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-100 text-blue-800 text-xs">'
+                                + name
+                                + '<button type="button" class="text-blue-800 font-bold leading-none" onclick="window.removeSupplier(' + id + ')">×</button></span>';
+                        }).join('');
                     };
                 </script>
             </head>
@@ -602,22 +667,19 @@ const DialogoCompras = ({
                                     onchange="window.opener.postMessage({type:'UPDATE_DATE', value: this.value}, '*')"
                                 />
                             </div>
-                            <div class="flex-1 min-w-[200px]">
-                                <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Proveedores *</label>
-                                <div id="suppliers-container" class="flex flex-wrap gap-2">
-                                    ${suppliers.map(s => `
-                                        <label class="supplier-label flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all ${purchaseData.selectedSuppliers.some(sel => sel.value === s.id) ? 'bg-blue-100 border border-blue-500' : 'bg-slate-50 border border-slate-200 hover:bg-slate-100'}">
-                                            <input 
-                                                type="checkbox" 
-                                                id="supplier-${s.id}"
-                                                class="w-3.5 h-3.5 accent-blue-500"
-                                                ${purchaseData.selectedSuppliers.some(sel => sel.value === s.id) ? 'checked' : ''}
-                                                onchange="window.handleSupplierChange(${s.id}, this.checked)"
-                                            />
-                                            <span class="text-sm text-slate-700">${s.name}</span>
-                                        </label>
-                                    `).join('')}
-                                </div>
+                            <div class="flex-1 min-w-[240px]">
+                                <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Proveedores</label>
+                                <input
+                                    id="supplier-search"
+                                    list="supplier-search-list"
+                                    placeholder="Buscar proveedor..."
+                                    class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                                    onchange="window.addSupplierByName(this.value); this.value='';"
+                                />
+                                <datalist id="supplier-search-list">
+                                    ${suppliers.map(supplier => `<option value="${String(supplier.name).replace(/"/g, '&quot;')}"></option>`).join('')}
+                                </datalist>
+                                <div id="selected-suppliers" class="flex flex-wrap gap-2 mt-2"></div>
                             </div>
                             <div class="add-button-container flex gap-2 items-center">
                                 <input 
@@ -681,7 +743,11 @@ const DialogoCompras = ({
                 dateInput.value = purchaseData.date;
             }
             
-            const selectedIds = purchaseData.selectedSuppliers.map(s => s.value);
+            const catalog = externalCatalog();
+            win.inventoryData = catalog.inventory;
+            win.suppliersData = catalog.suppliers;
+
+            const selectedIds = purchaseData.selectedSuppliers.map(s => Number(s.value));
             if (win.updateSuppliers) {
                 win.updateSuppliers(selectedIds);
             }
@@ -706,12 +772,15 @@ const DialogoCompras = ({
         }
     };
 
-    const productOptions = inventory.map(p => ({ 
-        value: p.name, 
-        label: `${p.name} (${mapBackendUnitToFrontend(p.unit)})`,
-        unit: mapBackendUnitToFrontend(p.unit),
-        price: p.price
+    const selectedSupplierIds = purchaseData.selectedSuppliers.map(supplier => Number(supplier.value));
+    const catalog = selectedSupplierIds.length
+        ? productsForSuppliers(inventory, suppliers, selectedSupplierIds)
+        : (inventory || []);
+    const productOptions = catalog.map(product => ({
+        value: product.id,
+        label: productLabel(product),
     }));
+    const supplierOptions = (suppliers || []).map(supplier => ({ value: supplier.id, label: supplier.name }));
 
     const selectStyles = {
         control: (base, state) => ({
@@ -727,11 +796,14 @@ const DialogoCompras = ({
             zIndex: 50,
             fontSize: '13px'
         }),
+        menuPortal: portalMenuStyle,
         option: (base) => ({
             ...base,
             padding: '8px 10px'
         })
     };
+
+    latestHandlers.current = { updateItem, handleSubmit, onClose };
 
     if (!isOpen || screenWidth < 1100) return null;
 
@@ -845,42 +917,23 @@ const DialogoCompras = ({
                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                                 />
                             </div>
-                            <div className="flex-1 min-w-[200px]">
+                            <div className="flex-1 min-w-[240px]">
                                 <label className="block text-[11px] font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
-                                    Proveedores Globales *
+                                    Proveedores
                                 </label>
-                                <div className="flex flex-wrap gap-2">
-                                    {suppliers.map(supplier => (
-                                        <label
-                                            key={supplier.id}
-                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                                                purchaseData.selectedSuppliers.some(s => s.value === supplier.id)
-                                                    ? 'bg-blue-100 border border-blue-500'
-                                                    : 'bg-slate-50 border border-slate-200 hover:bg-slate-100'
-                                            }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={purchaseData.selectedSuppliers.some(s => s.value === supplier.id)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                        setPurchaseData(prev => ({
-                                                            ...prev,
-                                                            selectedSuppliers: [...prev.selectedSuppliers, { value: supplier.id, label: supplier.name }]
-                                                        }));
-                                                    } else {
-                                                        setPurchaseData(prev => ({
-                                                            ...prev,
-                                                            selectedSuppliers: prev.selectedSuppliers.filter(s => s.value !== supplier.id)
-                                                        }));
-                                                    }
-                                                }}
-                                                className="w-3.5 h-3.5 accent-blue-500"
-                                            />
-                                            <span className="text-sm text-slate-700">{supplier.name}</span>
-                                        </label>
-                                    ))}
-                                </div>
+                                <SearchableSelect
+                                    isMulti
+                                    options={suppliers.map(supplier => ({ value: supplier.id, label: supplier.name }))}
+                                    value={purchaseData.selectedSuppliers.map(supplier => supplier.value)}
+                                    onChange={ids => setPurchaseData(prev => ({
+                                        ...prev,
+                                        selectedSuppliers: ids.map(id => {
+                                            const supplier = suppliers.find(item => Number(item.id) === Number(id));
+                                            return { value: Number(id), label: supplier ? supplier.name : String(id) };
+                                        })
+                                    }))}
+                                    placeholder="Buscar proveedor..."
+                                />
                             </div>
                             
                             <div className="flex gap-2 items-center">
@@ -934,26 +987,51 @@ const DialogoCompras = ({
                                                 return (
                                                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                                                         <td className="py-2.5 px-4">
-                                                            <Select
+                                                            <CreatableSelect
+                                                                {...portalSelectProps}
                                                                 options={productOptions}
-                                                                value={item.productName ? { value: item.productName, label: item.productName } : null}
+                                                                value={item.productName ? { value: item.isExisting ? item.productId : item.productName, label: item.productName } : null}
                                                                 onChange={(selected) => {
-                                                                    updateItem(item.id, 'productName', selected ? selected.value : '');
+                                                                    if (!selected) updateItem(item.id, 'productName', '');
+                                                                    else if (selected.__isNew__) updateItem(item.id, 'productName', selected.value);
+                                                                    else updateItem(item.id, 'productId', selected.value);
                                                                 }}
-                                                                placeholder="Buscar o escribir..."
+                                                                placeholder={purchaseData.selectedSuppliers.length ? 'Buscar en lo que vende el proveedor...' : 'Buscar producto o insumo...'}
+                                                                formatCreateLabel={(input) => `Usar "${input}" (no está en el sistema)`}
                                                                 isClearable
                                                                 styles={selectStyles}
-                                                                noOptionsMessage={() => 'Escribe para nuevo'}
+                                                                noOptionsMessage={() => purchaseData.selectedSuppliers.length ? 'Ese proveedor no tiene ese ítem. Podés escribir uno nuevo.' : 'Escribí el nombre si no está en el sistema'}
                                                                 className="w-full"
                                                             />
-                                                            <div className="mt-1 min-h-[16px]">
-                                                                {item.isExisting && (
-                                                                    <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">✓ Existente</span>
-                                                                )}
-                                                                {!item.isExisting && item.productName && (
-                                                                    <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">⚠ Nuevo</span>
-                                                                )}
-                                                            </div>
+                                                            {(() => {
+                                                                if (!item.isExisting && item.productName) {
+                                                                    return (
+                                                                        <div className="mt-1.5">
+                                                                            <SearchableSelect
+                                                                                options={supplierOptions}
+                                                                                value={item.supplierId}
+                                                                                onChange={(supplierId) => updateItem(item.id, 'supplierId', supplierId)}
+                                                                                placeholder="Buscar proveedor..."
+                                                                            />
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                                const sellers = suppliersForProduct(suppliers, item.productId);
+                                                                if (!item.productId || sellers.length === 0) return null;
+                                                                if (sellers.length === 1) {
+                                                                    return <span className="inline-block mt-1 text-[11px] text-slate-500">Proveedor: {sellers[0].name}</span>;
+                                                                }
+                                                                return (
+                                                                    <div className="mt-1.5">
+                                                                        <SearchableSelect
+                                                                            options={sellers.map(supplier => ({ value: supplier.id, label: supplier.name }))}
+                                                                            value={item.supplierId}
+                                                                            onChange={(supplierId) => updateItem(item.id, 'supplierId', supplierId)}
+                                                                            placeholder="Buscar proveedor..."
+                                                                        />
+                                                                    </div>
+                                                                );
+                                                            })()}
                                                         </td>
                                                         <td className="py-2.5 px-4">
                                                             <input

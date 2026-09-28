@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import SearchableSelect from './SearchableSelect';
+import { nameOptions, productNameOptions, sameName } from '../utils/filterOptions';
 
-const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelDelete, userRole, inventory = [] }) => {
+const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelDelete, userRole, inventory = [], suppliers = [] }) => {
     // Estados para filtros
     const [purchasesIdFilter, setPurchasesIdFilter] = useState('');
     const [purchasesIdFilterOp, setPurchasesIdFilterOp] = useState('equals');
     const [purchasesSupplierFilter, setPurchasesSupplierFilter] = useState('');
-    const [purchasesSupplierFilterOp, setPurchasesSupplierFilterOp] = useState('contains');
     const [purchasesTotalFilter, setPurchasesTotalFilter] = useState('');
     const [purchasesTotalFilterOp, setPurchasesTotalFilterOp] = useState('equals');
     
@@ -115,6 +116,14 @@ const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelD
         };
     });
     
+    const supplierOptions = nameOptions([
+        ...(suppliers || []).map(supplier => supplier.name),
+        ...normalizedPurchases.map(purchase => purchase.supplier),
+    ]);
+    const productOptions = productNameOptions(inventory, {
+        extraNames: normalizedPurchases.flatMap(purchase => purchase.items.map(item => item.productName)),
+    });
+
     let filteredPurchases = normalizedPurchases;
 
     // 1. FILTRO DE FECHAS (Corrección de zona horaria y formato)
@@ -168,17 +177,8 @@ const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelD
     }
     
     // 3. Filtro de proveedor
-    if (purchasesSupplierFilter.trim()) {
-        filteredPurchases = filteredPurchases.filter(purchase => {
-            const supplierName = String(purchase.supplier || '').toLowerCase();
-            const filterValue = purchasesSupplierFilter.toLowerCase();
-            
-            switch (purchasesSupplierFilterOp) {
-                case 'equals': return supplierName === filterValue;
-                case 'contains': return supplierName.includes(filterValue);
-                default: return supplierName.includes(filterValue);
-            }
-        });
+    if (purchasesSupplierFilter) {
+        filteredPurchases = filteredPurchases.filter(purchase => sameName(purchase.supplier, purchasesSupplierFilter));
     }
     
     // 4. Filtro de total
@@ -208,9 +208,7 @@ const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelD
     // 6. Filtro por nombre de producto/insumo
     if (purchasesProductFilter) {
         filteredPurchases = filteredPurchases.filter(purchase => 
-            purchase.items.some(item => 
-                String(item.productName || '').toLowerCase().includes(purchasesProductFilter.toLowerCase())
-            )
+            purchase.items.some(item => sameName(item.productName, purchasesProductFilter))
         );
     }
     
@@ -313,21 +311,14 @@ const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelD
                     {/* Filtro de Proveedor */}
                     <div className="flex items-center gap-1 flex-shrink-0">
                         <label className="text-[10px] sm:text-xs md:text-sm font-medium text-slate-600 whitespace-nowrap">Proveedor:</label>
-                        <select 
-                            value={purchasesSupplierFilterOp} 
-                            onChange={e => setPurchasesSupplierFilterOp(e.target.value)}
-                            className="px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-[10px] sm:text-xs md:text-sm border border-slate-300 rounded bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                            <option value="contains">Contiene</option>
-                            <option value="equals">=</option>
-                        </select>
-                        <input 
-                            type="text" 
-                            value={purchasesSupplierFilter} 
-                            onChange={e => setPurchasesSupplierFilter(e.target.value)} 
-                            placeholder="Proveedor..."
-                            className="w-16 sm:w-32 md:w-40 px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 md:py-1.5 text-[10px] sm:text-xs md:text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        />
+                        <div className="w-40 sm:w-52">
+                            <SearchableSelect
+                                options={supplierOptions}
+                                value={purchasesSupplierFilter}
+                                onChange={setPurchasesSupplierFilter}
+                                placeholder="Elegir proveedor..."
+                            />
+                        </div>
                     </div>
 
                     {/* Filtro de Total */}
@@ -411,13 +402,14 @@ const PurchaseHistory = ({ purchases, onDeletePurchase, confirmDelete, onCancelD
                     {/* Buscador de Producto/Insumo */}
                     <div className="flex items-center gap-1 flex-1 w-full sm:w-auto sm:min-w-[180px] md:min-w-[250px] lg:min-w-[378px]">
                         <label className="text-[10px] sm:text-xs md:text-sm font-medium text-slate-600 whitespace-nowrap">Buscar Producto/Insumo</label>
-                        <input 
-                            type="text" 
-                            value={purchasesProductFilter} 
-                            onChange={e => setPurchasesProductFilter(e.target.value)} 
-                            placeholder="Buscar producto/insumo..."
-                            className="flex-1 min-w-0 px-1.5 sm:px-2 md:px-3 py-0.5 sm:py-1 md:py-1.5 text-[10px] sm:text-xs md:text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                        />
+                        <div className="flex-1 min-w-[180px]">
+                            <SearchableSelect
+                                options={productOptions}
+                                value={purchasesProductFilter}
+                                onChange={setPurchasesProductFilter}
+                                placeholder="Elegir producto o insumo..."
+                            />
+                        </div>
                     </div>
                 </div>
 

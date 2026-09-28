@@ -22,8 +22,7 @@ import PurchaseHistory from './components/PurchaseHistory';
 import ProductManagement from './components/ProductManagement';
 import LossManagement from './components/LossManagement';
 import UserManagement from './components/UserManagement';
-import Registrar_Venta from './components/Registrar_Venta';
-import Movimientos_De_Caja from './components/Movimientos_De_Caja';
+import SalesView from './components/SalesView';
 import Pedidos from './components/Pedidos';
 import PedDialogo from './components/PedDialogo';
 import Edicion from './components/Edicion';
@@ -1319,7 +1318,8 @@ const App = () => {
                     description: movement.description || '',
                     date: movement.timestamp || movement.created_at || new Date().toISOString(),
                     user: movement.user || 'Sistema',
-                    payment_method: movement.payment_method || ''
+                    payment_method: movement.payment_method || '',
+                    session_opened_by: movement.session_opened_by || null
                 }));
         
                 console.debug('📋 Primeros 3 movimientos formateados:', formattedMovements.slice(0, 3));
@@ -2087,62 +2087,6 @@ const App = () => {
         );
     };
 
-    const SalesView = () => {
-        const [activeTab, setActiveTab] = useState('ventas'); // 'ventas' o 'caja'
-
-        return (
-            <div className="min-h-screen bg-gray-50">
-                {/* Navigation Tabs */}
-                <div className="bg-white shadow-sm border-b border-gray-200">
-                    <div className="max-w-full mx-auto px-2 sm:px-4">
-                        <div className="flex space-x-4">
-                            <button
-                                onClick={() => setActiveTab('ventas')}
-                                className={`py-4 px-6 font-medium text-lg transition-all rounded-t-lg ${
-                                    activeTab === 'ventas'
-                                        ? 'text-white'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}
-                                style={activeTab === 'ventas' ? { backgroundColor: 'rgb(82, 150, 214)' } : {}}
-                            >
-                                Registrar Venta
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('caja')}
-                                className={`py-4 px-6 font-medium text-lg transition-all rounded-t-lg ${
-                                    activeTab === 'caja'
-                                        ? 'text-white'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}
-                                style={activeTab === 'caja' ? { backgroundColor: 'rgb(82, 150, 214)' } : {}}
-                            >
-                                Movimientos de Caja
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Content Area */}
-                <div className="max-w-full mx-auto px-2 sm:px-4 py-4">
-                    <div style={{ display: activeTab === 'ventas' ? 'block' : 'none' }}>
-                        <Registrar_Venta 
-                            products={products}
-                            loadProducts={loadProducts}
-                            loadCashMovements={loadCashMovements}
-                        />
-                    </div>
-                    
-                    <div style={{ display: activeTab === 'caja' ? 'block' : 'none' }}>
-                        <Movimientos_De_Caja 
-                            cashMovements={cashMovements}
-                            cashBalance={cashBalance}
-                        />
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
     // Componente de la interfaz de registro de movimientos de caja.
     const CashMovementView = () => {
         const [showMovementForm, setShowMovementForm] = useState(false);
@@ -2234,7 +2178,7 @@ const App = () => {
 
         // Componente de la interfaz de gestión de proveedores (solo para Gerente).
         const SupplierManagement = () => {
-            return <Proveedores suppliers={suppliers} setSuppliers={setSuppliers} />;
+            return <Proveedores suppliers={suppliers} setSuppliers={setSuppliers} inventory={inventory} />;
         };
     
         // Componente de la interfaz de gestión de compras (para Gerente, Encargado, Cajero, Panadero).
@@ -2915,7 +2859,14 @@ const PurchaseRequests = () => {
             case 'inventario':
                 return <InventoryView />;
             case 'ventas':
-                return <SalesView />;
+                return <SalesView
+                    products={products}
+                    loadProducts={loadProducts}
+                    loadCashMovements={loadCashMovements}
+                    cashMovements={cashMovements}
+                    cashBalance={cashBalance}
+                    userRole={userRole}
+                />;
           
             case 'productos':
                 return userRole === 'Gerente' ? <ProductManagement 

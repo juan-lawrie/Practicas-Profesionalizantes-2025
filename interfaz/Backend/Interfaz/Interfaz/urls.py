@@ -28,7 +28,8 @@ from api.views import (
     LowStockReportCreateView, LowStockReportListView, LowStockReportUpdateView,
     RecipeIngredientViewSet, ProductProductionView, LossRecordViewSet,
     get_ingredients_with_suggested_unit, refresh_from_cookie, logout_view,
-    RoleViewSet, PurchaseViewSet, OrderViewSet, ProductionViewSet
+    RoleViewSet, PurchaseViewSet, OrderViewSet, ProductionViewSet,
+    CashRegisterSessionViewSet
 )
 from django.shortcuts import redirect
 from rest_framework_simplejwt.views import (
@@ -43,6 +44,7 @@ router.register(r'users', UserViewSet, basename='user')
 router.register(r'products', ProductViewSet, basename='product')
 router.register(r'roles', RoleViewSet, basename='role')
 router.register(r'cash-movements', CashMovementViewSet, basename='cash-movement')
+router.register(r'cash-register', CashRegisterSessionViewSet, basename='cash-register')
 router.register(r'inventory-changes', InventoryChangeViewSet, basename='inventory-change')
 router.register(r'sales', SaleViewSet, basename='sale')
 router.register(r'user-queries', UserQueryViewSet, basename='user-query')

@@ -178,6 +178,32 @@ const getCashBalance = () => {
   return api.get('/cash-movements/balance/');
 };
 
+// Funciones para la apertura y cierre de caja
+const getCashRegisterStatus = () => {
+  return api.get('/cash-register/current/');
+};
+
+const getCashRegisterSessions = (date) => {
+  return api.get('/cash-register/', { params: { date } });
+};
+
+const openCashRegister = () => {
+  return api.post('/cash-register/open/');
+};
+
+const closeCashRegister = () => {
+  return api.post('/cash-register/close/');
+};
+
+// Extrae el mensaje de error que devuelve DRF ({ detail }, { non_field_errors } o una lista)
+const getApiErrorMessage = (error, fallback) => {
+  const data = error?.response?.data;
+  if (data?.detail) return data.detail;
+  if (Array.isArray(data?.non_field_errors) && data.non_field_errors.length > 0) return data.non_field_errors[0];
+  if (Array.isArray(data) && typeof data[0] === 'string') return data[0];
+  return fallback;
+};
+
 // Funciones para Gestión de Pérdidas
 const getLossRecords = () => {
   return api.get('/loss-records/');
@@ -211,5 +237,10 @@ export {
   updateOrderStatus,
   updateOrder,
   getCashBalance,
+  getCashRegisterStatus,
+  getCashRegisterSessions,
+  openCashRegister,
+  closeCashRegister,
+  getApiErrorMessage,
   getLossRecords // Nueva exportación
 };

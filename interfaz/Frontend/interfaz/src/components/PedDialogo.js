@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Select from 'react-select';
-import { updateOrderStatus, updateOrder } from '../services/api';
+import { updateOrderStatus, updateOrder, getApiErrorMessage } from '../services/api';
+import SearchableSelect from './SearchableSelect';
+import { productNameOptions, sameName } from '../utils/filterOptions';
 import {
     round2,
     calculateItemsTotal,
@@ -111,6 +113,7 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
             }
         } catch (err) {
             console.error('Error actualizando estado del pedido:', err);
+            alert(getApiErrorMessage(err, 'No se pudo actualizar el estado del pedido.'));
         }
     };
 
@@ -133,6 +136,10 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
     const productOptions = products
         .filter(p => p.category === 'Producto')
         .map(p => ({ value: p.id, label: p.name }));
+    const productFilterOptions = productNameOptions(products, {
+        type: 'Producto',
+        extraNames: orders.flatMap(order => (order.items || []).map(item => item.productName)),
+    });
 
     const openEditOrder = (order) => {
         const paidTotal = Number(order.paidTotalAtChange ?? order.totalAmount) || 0;
@@ -335,9 +342,7 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
 
         if (ordersProductFilter) {
             const hasProduct = Array.isArray(order.items)
-                ? order.items.some(item =>
-                    String(item.productName || '').toLowerCase().includes(ordersProductFilter.toLowerCase())
-                )
+                ? order.items.some(item => sameName(item.productName, ordersProductFilter))
                 : false;
             if (!hasProduct) return false;
         }
@@ -367,22 +372,22 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
             className={`fixed bg-white flex flex-col ${
                 isFullscreen
                     ? 'inset-0 rounded-none'
-                    : `rounded-lg shadow-2xl border-2 border-gray-300 ${isMinimized ? 'h-auto' : 'min-h-[600px]'}`
+                    : `rounded-lg shadow-2xl border-2 border-gray-300 ${isMinimized ? 'h-auto' : 'min-h-0'}`
             }`}
             style={{
                 left: isFullscreen ? 0 : `${position.x}px`,
                 top: isFullscreen ? 0 : `${position.y}px`,
                 width: isFullscreen ? '100vw' : (isMinimized ? 'auto' : '90vw'),
                 maxWidth: isFullscreen ? '100vw' : (isMinimized ? 'fit-content' : '1400px'),
-                height: isFullscreen ? '100vh' : 'auto',
-                maxHeight: isFullscreen ? '100vh' : 'auto',
+                height: isFullscreen ? '100vh' : undefined,
+                maxHeight: isFullscreen || isMinimized ? '100vh' : `calc(100vh - ${Math.max(0, position.y)}px - 16px)`,
                 zIndex: 1000,
                 resize: (isFullscreen || isMinimized) ? 'none' : 'both',
-                overflow: isMinimized ? 'hidden' : 'auto'
+                overflow: 'hidden'
             }}
         >
             <div
-                className={`dialog-header bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 ${isMinimized ? 'py-2 min-h-[56px]' : 'py-3'} ${isFullscreen ? '' : 'rounded-t-lg cursor-move'} flex items-center justify-between`}
+                className={`dialog-header shrink-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 ${isMinimized ? 'py-2 min-h-[56px]' : 'py-3'} ${isFullscreen ? '' : 'rounded-t-lg cursor-move'} flex items-center justify-between`}
                 onMouseDown={isFullscreen ? undefined : handleMouseDown}
                 style={isMinimized ? { overflow: 'hidden' } : {}}
             >
@@ -430,7 +435,7 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
             </div>
 
             {!isMinimized && (
-                <div className="flex-1 overflow-auto p-6 bg-gray-50">
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6 bg-gray-50">
                     <div className="bg-white rounded-lg shadow-md mb-6 border border-gray-200">
                         <button
                             onClick={() => setShowFilters(prev => !prev)}
@@ -558,13 +563,14 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
 
                                 <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
                                     <label className="font-medium text-gray-700 sm:min-w-[120px]">Buscar Producto:</label>
-                                    <input
-                                        type="text"
-                                        value={ordersProductFilter}
-                                        onChange={e => setOrdersProductFilter(e.target.value)}
-                                        placeholder="Nombre del producto..."
-                                        className="w-full sm:flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
+                                    <div className="w-full sm:flex-1">
+                                        <SearchableSelect
+                                            options={productFilterOptions}
+                                            value={ordersProductFilter}
+                                            onChange={setOrdersProductFilter}
+                                            placeholder="Elegir producto..."
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="mb-0 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">

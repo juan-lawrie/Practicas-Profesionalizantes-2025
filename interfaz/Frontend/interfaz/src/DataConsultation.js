@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { api } from './services/api';
 import { formatMovementDate } from './utils/date';
+import SearchableSelect from './components/SearchableSelect';
+import { nameOptions, productIdOptions, productNameOptions, sameName } from './utils/filterOptions';
 import { 
     Search, Calendar, Download, Filter, 
     Package, Users, TrendingUp, ShoppingCart, 
@@ -73,7 +75,6 @@ export default function DataConsultation(props) {
     const [cashDescriptionFilter, setCashDescriptionFilter] = useState('');
     const [cashDescriptionFilterOp, setCashDescriptionFilterOp] = useState('contains');
     const [cashUserFilter, setCashUserFilter] = useState('');
-    const [cashUserFilterOp, setCashUserFilterOp] = useState('contains');
     const [cashTypeFilter, setCashTypeFilter] = useState(''); 
     const [cashPaymentMethodFilter, setCashPaymentMethodFilter] = useState([]); 
     const [cashSortOrder, setCashSortOrder] = useState('desc'); 
@@ -93,7 +94,6 @@ export default function DataConsultation(props) {
     const [purchasesIdFilter, setPurchasesIdFilter] = useState('');
     const [purchasesIdFilterOp, setPurchasesIdFilterOp] = useState('equals');
     const [purchasesSupplierFilter, setPurchasesSupplierFilter] = useState('');
-    const [purchasesSupplierFilterOp, setPurchasesSupplierFilterOp] = useState('contains');
     const [purchasesTotalFilter, setPurchasesTotalFilter] = useState('');
     const [purchasesTotalFilterOp, setPurchasesTotalFilterOp] = useState('equals');
     const [purchasesTypeFilter, setPurchasesTypeFilter] = useState([]); 
@@ -114,7 +114,26 @@ export default function DataConsultation(props) {
     const [suppliersAddressFilter, setSuppliersAddressFilter] = useState('');
     const [suppliersAddressFilterOp, setSuppliersAddressFilterOp] = useState('contains');
     const [suppliersProductFilter, setSuppliersProductFilter] = useState('');
-    const [suppliersProductFilterOp, setSuppliersProductFilterOp] = useState('contains');
+
+    const saleProductNames = (sales || []).flatMap(sale => (sale.sale_items || sale.items || [])
+        .map(item => item.product_name || item.productName || item.product || item.name));
+    const saleUserNames = (sales || []).map(sale => sale.user || sale.user_username || sale.user_name || 'Sistema');
+    const stockNameOptions = productNameOptions(inventory);
+    const salesProductOptions = productNameOptions(inventory, { type: 'Producto', extraNames: saleProductNames });
+    const salesUserOptions = nameOptions(saleUserNames);
+    const ordersProductOptions = productNameOptions(inventory, {
+        type: 'Producto',
+        extraNames: (orders || []).flatMap(order => (order.items || []).map(item => item.productName || item.product_name)),
+    });
+    const purchasesSupplierOptions = nameOptions([
+        ...(suppliers || []).map(supplier => supplier.name),
+        ...(purchases || []).map(purchase => purchase.supplierName || purchase.supplier_name || purchase.supplier),
+    ]);
+    const purchasesProductOptions = productNameOptions(inventory, {
+        extraNames: (purchases || []).flatMap(purchase => (purchase.items || []).map(item => item.productName || item.product_name)),
+    });
+    const suppliersProductOptions = productIdOptions(inventory);
+    const cashUserOptions = nameOptions((cashMovements || []).map(movement => movement.user || 'Sistema'));
     
     const [queryResultsState, _setQueryResultsState] = useState(null);
     const queryResults = queryResultsState;
@@ -240,9 +259,7 @@ export default function DataConsultation(props) {
         }
 
         if (stockNameFilter) {
-            filteredInventory = filteredInventory.filter(item => 
-                String(item.name || '').toLowerCase().includes(stockNameFilter.toLowerCase())
-            );
+            filteredInventory = filteredInventory.filter(item => sameName(item.name, stockNameFilter));
         }
 
         if (stockQuantityFilter) {
@@ -361,6 +378,21 @@ export default function DataConsultation(props) {
 
         const stockTotals = computeTotals(filteredInventory);
 
+        const isLowOrNullStock = (item) => {
+            const rawStock = item.stock;
+            if (rawStock === null || rawStock === undefined || rawStock === '') return true;
+            const stockNum = parseFloat(rawStock);
+            if (Number.isNaN(stockNum) || stockNum <= 0) return true;
+            const threshold = item.low_stock_threshold || item.lowStockThreshold || 10;
+            return stockNum < threshold;
+        };
+
+        filteredInventory.sort((a, b) => {
+            const aPriority = isLowOrNullStock(a) ? 0 : 1;
+            const bPriority = isLowOrNullStock(b) ? 0 : 1;
+            return aPriority - bPriority;
+        });
+
         const productos = filteredInventory.filter(item => (item.type || item.category || '').toLowerCase() === 'producto');
         const insumos = filteredInventory.filter(item => (item.type || item.category || '').toLowerCase() === 'insumo');
 
@@ -467,30 +499,16 @@ export default function DataConsultation(props) {
             });
         }
 
-        if (suppliersProductFilter.trim()) {
-            filteredSuppliers = filteredSuppliers.filter(supplier => {
-                const filterValue = suppliersProductFilter.toLowerCase().trim();
-                
-                if (Array.isArray(supplier.products)) {
-                    return supplier.products.some(product => {
-                        const productName = String(product.name || product.productName || product || '').toLowerCase().trim();
-                        switch (suppliersProductFilterOp) {
-                            case 'equals': return productName === filterValue;
-                            case 'contains': return productName.includes(filterValue);
-                            default: return productName.includes(filterValue);
-                        }
-                    });
-                } else {
-                    const productsStr = String(supplier.products || '');
-                    const productList = productsStr.split(',').map(p => p.toLowerCase().trim());
-                    switch (suppliersProductFilterOp) {
-                        case 'equals': return productList.some(product => product === filterValue);
-                        case 'contains': return productList.some(product => product.includes(filterValue));
-                        default: return productList.some(product => product.includes(filterValue));
-                    }
-                }
-            });
+        if (suppliersProductFilter) {
+            filteredSuppliers = filteredSuppliers.filter(supplier =>
+                (supplier.supplied_products || []).map(String).includes(String(suppliersProductFilter))
+            );
         }
+
+        const suppliedNames = (supplier) => (supplier.supplied_products || [])
+            .map(id => (inventory || []).find(product => String(product.id) === String(id))?.name)
+            .filter(Boolean)
+            .join(', ');
 
         const results = { 
             title: 'Información de Proveedores', 
@@ -505,9 +523,7 @@ export default function DataConsultation(props) {
                 cuit: supplier.cuit,
                 phone: supplier.phone,
                 address: supplier.address,
-                products: Array.isArray(supplier.products) 
-                    ? supplier.products.map(p => p.name || p.productName || p || '').filter(Boolean).join(', ')
-                    : (supplier.products || '')
+                products: suppliedNames(supplier)
             }))
         };
         
@@ -601,15 +617,11 @@ export default function DataConsultation(props) {
         }
         
         if (salesProductFilter) {
-            filteredSales = filteredSales.filter(sale => 
-                String(sale.product || '').toLowerCase().includes(salesProductFilter.toLowerCase())
-            );
+            filteredSales = filteredSales.filter(sale => sameName(sale.product, salesProductFilter));
         }
         
         if (salesUserFilter) {
-            filteredSales = filteredSales.filter(sale => 
-                String(sale.user || '').toLowerCase().includes(salesUserFilter.toLowerCase())
-            );
+            filteredSales = filteredSales.filter(sale => sameName(sale.user, salesUserFilter));
         }
         
         if (salesTotalFilter) {
@@ -739,16 +751,8 @@ export default function DataConsultation(props) {
             });
         }
         
-        if (purchasesSupplierFilter.trim()) {
-            filteredPurchases = filteredPurchases.filter(purchase => {
-                const supplierName = String(purchase.supplier || '').toLowerCase();
-                const filterValue = purchasesSupplierFilter.toLowerCase();
-                switch (purchasesSupplierFilterOp) {
-                    case 'equals': return supplierName === filterValue;
-                    case 'contains': return supplierName.includes(filterValue);
-                    default: return supplierName.includes(filterValue);
-                }
-            });
+        if (purchasesSupplierFilter) {
+            filteredPurchases = filteredPurchases.filter(purchase => sameName(purchase.supplier, purchasesSupplierFilter));
         }
         
         if (purchasesTotalFilter.trim()) {
@@ -774,9 +778,7 @@ export default function DataConsultation(props) {
         
         if (purchasesProductFilter) {
             filteredPurchases = filteredPurchases.filter(purchase => 
-                purchase.items.some(item => 
-                    String(item.productName || '').toLowerCase().includes(purchasesProductFilter.toLowerCase())
-                )
+                purchase.items.some(item => sameName(item.productName, purchasesProductFilter))
             );
         }
         
@@ -920,11 +922,9 @@ export default function DataConsultation(props) {
         if (ordersProductFilter.trim()) {
             filteredOrders = filteredOrders.filter(order => {
                 const itemsArray = Array.isArray(order.items) ? order.items : [];
-                const filterValue = ordersProductFilter.toLowerCase();
-                return itemsArray.some(item => {
-                    const productName = String(item.productName || item.product_name || item.product || '').toLowerCase();
-                    return productName.includes(filterValue);
-                });
+                return itemsArray.some(item =>
+                    sameName(item.productName || item.product_name || item.product, ordersProductFilter)
+                );
             });
         }
         
@@ -967,8 +967,7 @@ export default function DataConsultation(props) {
                     itemsArray = itemsArray.filter(item => {
                         let matches = true;
                         if (ordersProductFilter.trim()) {
-                            const productName = String(item.productName || item.product_name || item.product || '').toLowerCase();
-                            matches = matches && productName.includes(ordersProductFilter.toLowerCase());
+                            matches = matches && sameName(item.productName || item.product_name || item.product, ordersProductFilter);
                         }
                         if (ordersUnitsFilter.trim()) {
                             const filterValue = parseFloat(ordersUnitsFilter);
@@ -1096,15 +1095,7 @@ export default function DataConsultation(props) {
         }
         
         if (cashUserFilter.trim()) {
-            filteredMovements = filteredMovements.filter(movement => {
-                const user = String(movement.user || '').toLowerCase();
-                const filterValue = cashUserFilter.toLowerCase();
-                switch (cashUserFilterOp) {
-                    case 'equals': return user === filterValue;
-                    case 'contains': return user.includes(filterValue);
-                    default: return user.includes(filterValue);
-                }
-            });
+            filteredMovements = filteredMovements.filter(movement => sameName(movement.user, cashUserFilter));
         }
         
         if (cashTypeFilter) {
@@ -1410,7 +1401,9 @@ export default function DataConsultation(props) {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Nombre</label>
-                                                    <input type="text" value={stockNameFilter} onChange={e => setStockNameFilter(e.target.value)} className="w-full text-xs p-1.5 mt-1 border rounded outline-none" placeholder="Buscar nombre..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={stockNameOptions} value={stockNameFilter} onChange={setStockNameFilter} placeholder="Elegir producto o insumo..." />
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -1496,11 +1489,15 @@ export default function DataConsultation(props) {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Producto</label>
-                                                    <input type="text" value={salesProductFilter} onChange={e => setSalesProductFilter(e.target.value)} className="w-full text-xs p-1.5 mt-1 border rounded outline-none" placeholder="Nombre..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={salesProductOptions} value={salesProductFilter} onChange={setSalesProductFilter} placeholder="Elegir producto..." />
+                                                    </div>
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Usuario</label>
-                                                    <input type="text" value={salesUserFilter} onChange={e => setSalesUserFilter(e.target.value)} className="w-full text-xs p-1.5 mt-1 border rounded outline-none" placeholder="Usuario..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={salesUserOptions} value={salesUserFilter} onChange={setSalesUserFilter} placeholder="Elegir usuario..." />
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -1587,12 +1584,8 @@ export default function DataConsultation(props) {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Usuario</label>
-                                                    <div className="flex gap-1 mt-1">
-                                                        <select value={cashUserFilterOp} onChange={e => setCashUserFilterOp(e.target.value)} className="w-[85px] sm:w-[95px] lg:w-[100px] text-xs p-1.5 border rounded bg-slate-50 outline-none">
-                                                            <option value="contains">Contiene</option>
-                                                            <option value="equals">Igual</option>
-                                                        </select>
-                                                        <input type="text" value={cashUserFilter} onChange={e => setCashUserFilter(e.target.value)} className="flex-1 text-xs p-1.5 border rounded outline-none min-w-0" placeholder="Usuario..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={cashUserOptions} value={cashUserFilter} onChange={setCashUserFilter} placeholder="Elegir usuario..." />
                                                     </div>
                                                 </div>
                                                 <div>
@@ -1667,7 +1660,9 @@ export default function DataConsultation(props) {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Producto</label>
-                                                    <input type="text" value={ordersProductFilter} onChange={e => setOrdersProductFilter(e.target.value)} className="w-full text-xs p-1.5 mt-1 border rounded outline-none" placeholder="Nombre prod..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={ordersProductOptions} value={ordersProductFilter} onChange={setOrdersProductFilter} placeholder="Elegir producto..." />
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -1744,17 +1739,15 @@ export default function DataConsultation(props) {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Proveedor</label>
-                                                    <div className="flex gap-1 mt-1">
-                                                        <select value={purchasesSupplierFilterOp} onChange={e => setPurchasesSupplierFilterOp(e.target.value)} className="w-[85px] sm:w-[95px] lg:w-[100px] text-xs p-1.5 border rounded bg-slate-50 outline-none">
-                                                            <option value="contains">Contiene</option>
-                                                            <option value="equals">Igual</option>
-                                                        </select>
-                                                        <input type="text" value={purchasesSupplierFilter} onChange={e => setPurchasesSupplierFilter(e.target.value)} className="flex-1 text-xs p-1.5 border rounded outline-none min-w-0" placeholder="Proveedor..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={purchasesSupplierOptions} value={purchasesSupplierFilter} onChange={setPurchasesSupplierFilter} placeholder="Elegir proveedor..." />
                                                     </div>
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Producto/Insumo</label>
-                                                    <input type="text" value={purchasesProductFilter} onChange={e => setPurchasesProductFilter(e.target.value)} className="w-full text-xs p-1.5 mt-1 border rounded outline-none" placeholder="Buscar..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={purchasesProductOptions} value={purchasesProductFilter} onChange={setPurchasesProductFilter} placeholder="Elegir producto o insumo..." />
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -1866,12 +1859,8 @@ export default function DataConsultation(props) {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-bold text-slate-500 uppercase">Producto/Insumo que vende</label>
-                                                    <div className="flex gap-1 mt-1">
-                                                        <select value={suppliersProductFilterOp} onChange={e => setSuppliersProductFilterOp(e.target.value)} className="w-[85px] sm:w-[95px] lg:w-[100px] text-xs p-1.5 border rounded bg-slate-50 outline-none">
-                                                            <option value="contains">Contiene</option>
-                                                            <option value="equals">Igual</option>
-                                                        </select>
-                                                        <input type="text" value={suppliersProductFilter} onChange={e => setSuppliersProductFilter(e.target.value)} className="flex-1 text-xs p-1.5 border rounded outline-none min-w-0" placeholder="Producto..." />
+                                                    <div className="mt-1">
+                                                        <SearchableSelect options={suppliersProductOptions} value={suppliersProductFilter} onChange={setSuppliersProductFilter} placeholder="Elegir producto o insumo..." />
                                                     </div>
                                                 </div>
                                             </div>

@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import api from '../services/api';
+import SearchableSelect from './SearchableSelect';
+import { productLabel } from '../utils/supplierCatalog';
 
-const Proveedores = ({ suppliers, setSuppliers }) => {
+const Proveedores = ({ suppliers, setSuppliers, inventory = [] }) => {
     const [showAddSupplier, setShowAddSupplier] = useState(false);
     const [editingSupplier, setEditingSupplier] = useState(null);
     const [newSupplier, setNewSupplier] = useState({ 
         name: '', 
         cuit: '', 
         address: '', 
-        phone: '', 
-        products: '' 
+        phone: '',
+        supplied_products: []
     });
     const [message, setMessage] = useState('');
     const [showFilters, setShowFilters] = useState(true);
@@ -25,7 +27,6 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
     const [suppliersAddressFilter, setSuppliersAddressFilter] = useState('');
     const [suppliersAddressFilterOp, setSuppliersAddressFilterOp] = useState('contains');
     const [suppliersProductFilter, setSuppliersProductFilter] = useState('');
-    const [suppliersProductFilterOp, setSuppliersProductFilterOp] = useState('contains');
 
     const validateCUIT = (cuit) => /^\d{11}$/.test(cuit);
     const validatePhone = (phone) => /^\d{8,}$/.test(phone);
@@ -59,7 +60,7 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
             await fetchSuppliers();
             setMessage('Proveedor agregado correctamente.');
             setShowAddSupplier(false);
-            setNewSupplier({ name: '', cuit: '', address: '', phone: '', products: '' });
+            setNewSupplier({ name: '', cuit: '', address: '', phone: '', supplied_products: [] });
         } catch (error) {
             setMessage('Error al agregar proveedor.');
         }
@@ -103,6 +104,17 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
     const startEditing = (supplier) => {
         setEditingSupplier({ ...supplier });
         setShowAddSupplier(false);
+    };
+
+    const catalogOptions = (inventory || [])
+        .map(product => ({ value: product.id, label: productLabel(product) }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+
+    const linkedNames = (supplier) => {
+        const names = (supplier.supplied_products || [])
+            .map(id => (inventory || []).find(product => Number(product.id) === Number(id))?.name)
+            .filter(Boolean);
+        return names;
     };
 
     const toggleProducts = (supplierId) => {
@@ -180,37 +192,10 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
             });
         }
 
-        if (suppliersProductFilter.trim()) {
-            filteredSuppliers = filteredSuppliers.filter(supplier => {
-                const filterValue = suppliersProductFilter.toLowerCase().trim();
-                
-                if (Array.isArray(supplier.products)) {
-                    return supplier.products.some(product => {
-                        const productName = String(product.name || product.productName || product || '').toLowerCase().trim();
-                        
-                        switch (suppliersProductFilterOp) {
-                            case 'equals':
-                                return productName === filterValue;
-                            case 'contains':
-                                return productName.includes(filterValue);
-                            default:
-                                return productName.includes(filterValue);
-                        }
-                    });
-                } else {
-                    const productsStr = String(supplier.products || '');
-                    const productList = productsStr.split(',').map(p => p.toLowerCase().trim());
-                    
-                    switch (suppliersProductFilterOp) {
-                        case 'equals':
-                            return productList.some(product => product === filterValue);
-                        case 'contains':
-                            return productList.some(product => product.includes(filterValue));
-                        default:
-                            return productList.some(product => product.includes(filterValue));
-                    }
-                }
-            });
+        if (suppliersProductFilter !== '' && suppliersProductFilter !== null) {
+            filteredSuppliers = filteredSuppliers.filter(supplier =>
+                (supplier.supplied_products || []).some(id => Number(id) === Number(suppliersProductFilter))
+            );
         }
 
         return filteredSuppliers;
@@ -333,23 +318,12 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                     {/* Filtro de Producto/Insumo */}
                     <div className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.67rem)] xl:w-[calc(20%-0.6rem)] min-[1900px]:w-[calc(20%-0.8rem)]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Producto/Insumo</label>
-                        <div className="flex gap-1.5 sm:gap-2">
-                            <select 
-                                value={suppliersProductFilterOp} 
-                                onChange={e => setSuppliersProductFilterOp(e.target.value)}
-                                className="w-[95px] sm:w-[110px] lg:w-[120px] px-2 py-2 text-xs sm:text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                                <option value="contains">Contiene</option>
-                                <option value="equals">Es Igual</option>
-                            </select>
-                            <input 
-                                type="text" 
-                                value={suppliersProductFilter} 
-                                onChange={e => setSuppliersProductFilter(e.target.value)} 
-                                placeholder="Buscar..." 
-                                className="flex-1 min-w-0 px-2 py-2 text-xs sm:text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                        </div>
+                        <SearchableSelect
+                            options={catalogOptions}
+                            value={suppliersProductFilter}
+                            onChange={setSuppliersProductFilter}
+                            placeholder="Elegir producto o insumo..."
+                        />
                     </div>
                 </div>
             </div>
@@ -401,7 +375,7 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                                     <svg className="w-4 h-4 text-purple-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                                     </svg>
-                                    <span className="font-semibold text-sm text-gray-700">Productos:</span>
+                                    <span className="font-semibold text-sm text-gray-700">Productos y insumos:</span>
                                 </div>
                                 <svg 
                                     className={`w-4 h-4 text-gray-600 transition-transform duration-200 ${expandedProducts[supplier.id] ? 'rotate-180' : ''}`}
@@ -413,9 +387,17 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                                 </svg>
                             </div>
                             {expandedProducts[supplier.id] && (
-                                <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                                    {supplier.products || 'Sin productos especificados'}
-                                </p>
+                                <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded max-h-40 overflow-y-auto overflow-x-hidden">
+                                    {linkedNames(supplier).length > 0 ? (
+                                        <ul className="flex flex-wrap gap-1.5">
+                                            {linkedNames(supplier).map((name, index) => (
+                                                <li key={`${supplier.id}-${index}`} className="max-w-full break-words px-2 py-0.5 bg-white border border-gray-200 rounded text-xs text-gray-700">
+                                                    {name}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : 'Sin productos especificados'}
+                                </div>
                             )}
                         </div>
                         
@@ -501,13 +483,13 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Productos que provee</label>
-                                    <textarea 
-                                        value={newSupplier.products} 
-                                        onChange={e => setNewSupplier({ ...newSupplier, products: e.target.value })} 
-                                        placeholder="Productos que provee" 
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        rows="3"
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Productos e insumos que provee</label>
+                                    <SearchableSelect
+                                        isMulti
+                                        options={catalogOptions}
+                                        value={newSupplier.supplied_products}
+                                        onChange={ids => setNewSupplier({ ...newSupplier, supplied_products: ids })}
+                                        placeholder="Elegir productos e insumos..."
                                     />
                                 </div>
                                 <div className="flex gap-3 pt-4">
@@ -583,13 +565,13 @@ const Proveedores = ({ suppliers, setSuppliers }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Productos que provee</label>
-                                    <textarea 
-                                        value={editingSupplier.products} 
-                                        onChange={e => setEditingSupplier({ ...editingSupplier, products: e.target.value })} 
-                                        placeholder="Productos que provee" 
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        rows="3"
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Productos e insumos que provee</label>
+                                    <SearchableSelect
+                                        isMulti
+                                        options={catalogOptions}
+                                        value={editingSupplier.supplied_products || []}
+                                        onChange={ids => setEditingSupplier({ ...editingSupplier, supplied_products: ids })}
+                                        placeholder="Elegir productos e insumos..."
                                     />
                                 </div>
                                 <div className="flex gap-3 pt-4">

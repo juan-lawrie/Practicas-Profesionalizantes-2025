@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import Select from 'react-select';
 import { formatMovementDate } from '../utils/date';
 import { safeToFixed } from '../utils/format';
-import api, { updateOrderStatus, updateOrder } from '../services/api';
+import api, { updateOrderStatus, updateOrder, getApiErrorMessage } from '../services/api';
+import SearchableSelect from './SearchableSelect';
+import { productNameOptions, sameName } from '../utils/filterOptions';
 import {
     round2,
     calculateItemsTotal,
@@ -352,7 +354,7 @@ const Pedidos = ({ orders, setOrders, products, loadCashBalance }) => {
             setMessage(`✅ Estado del pedido #${orderId} actualizado a "${newStatus}"`);
         } catch (error) {
             console.error('Error actualizando estado del pedido:', error);
-            setMessage('❌ Error al actualizar el estado del pedido. Revisá la consola.');
+            setMessage(`❌ ${getApiErrorMessage(error, 'Error al actualizar el estado del pedido. Revisá la consola.')}`);
         }
     };
 
@@ -375,6 +377,10 @@ const Pedidos = ({ orders, setOrders, products, loadCashBalance }) => {
     const productOptions = products
         .filter(p => p.category === 'Producto')
         .map(p => ({ value: p.id, label: p.name }));
+    const productFilterOptions = productNameOptions(products, {
+        type: 'Producto',
+        extraNames: orders.flatMap(order => (order.items || []).map(item => item.productName)),
+    });
 
     return (
         <div className="management-container">
@@ -695,12 +701,11 @@ const Pedidos = ({ orders, setOrders, products, loadCashBalance }) => {
                 {/* Filtro por Producto */}
                 <div className="mb-4">
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Buscar Producto</label>
-                    <input 
-                        type="text" 
-                        value={ordersProductFilter} 
-                        onChange={e => setOrdersProductFilter(e.target.value)} 
-                        placeholder="Nombre del producto..." 
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    <SearchableSelect
+                        options={productFilterOptions}
+                        value={ordersProductFilter}
+                        onChange={setOrdersProductFilter}
+                        placeholder="Elegir producto..."
                     />
                 </div>
                 
@@ -783,9 +788,7 @@ const Pedidos = ({ orders, setOrders, products, loadCashBalance }) => {
                     
                     // Filtro por producto
                     if (ordersProductFilter) {
-                        const hasProduct = order.items.some(item => 
-                            (item.productName || '').toLowerCase().includes(ordersProductFilter.toLowerCase())
-                        );
+                        const hasProduct = order.items.some(item => sameName(item.productName, ordersProductFilter));
                         if (!hasProduct) return false;
                     }
                     

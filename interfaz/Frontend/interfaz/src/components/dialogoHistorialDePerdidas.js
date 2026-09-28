@@ -59,6 +59,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
     // Estado para el ancho del panel izquierdo (ajustable)
     const [leftPanelWidth, setLeftPanelWidth] = useState(400);
     const isResizingPanel = useRef(false);
+    const containerRef = useRef(null);
     
     // Estado para detectar ancho de pantalla
     const [screenWidth, setScreenWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
@@ -89,12 +90,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
     };
     
     const responsiveConfig = getResponsiveConfig();
-    
-    // Calcular ancho efectivo del panel izquierdo
-    const effectiveLeftPanelWidth = Math.max(
-        leftPanelWidth + responsiveConfig.leftPanelExtra,
-        responsiveConfig.isLargeScreen ? 520 + responsiveConfig.leftPanelExtra : leftPanelWidth
-    );
+    const fullBleed = isWindowMode || windowState.isMaximized || isEmbedded;
 
     // Datos
     const [lossRecords, setLossRecords] = useState([]);
@@ -307,19 +303,13 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
 
     const handlePanelResize = (e) => {
         if (!isResizingPanel.current) return;
-        const containerLeft = windowState.x || 0;
-        const extraWidth = responsiveConfig.leftPanelExtra || 0;
-        const newWidth = e.clientX - containerLeft;
-
-        if (responsiveConfig.isLargeScreen) {
-            const minEffectiveWidth = screenWidth * 0.3;
-            const maxEffectiveWidth = screenWidth * 0.7;
-            const clampedEffectiveWidth = Math.max(minEffectiveWidth, Math.min(maxEffectiveWidth, newWidth));
-            setLeftPanelWidth(Math.max(0, clampedEffectiveWidth - extraWidth));
-            return;
-        }
-
-        setLeftPanelWidth(Math.max(200, Math.min(1500, newWidth)));
+        const rect = containerRef.current?.getBoundingClientRect();
+        const containerLeft = rect ? rect.left : 0;
+        const containerWidth = rect ? rect.width : (fullBleed ? screenWidth : windowState.width);
+        const extraWidth = fullBleed ? (responsiveConfig.leftPanelExtra || 0) : 0;
+        const limits = panelLimits(containerWidth);
+        const nextWidth = Math.max(limits.min, Math.min(limits.max, e.clientX - containerLeft));
+        setLeftPanelWidth(Math.max(0, nextWidth - extraWidth));
     };
 
     const handlePanelResizeEnd = () => {
@@ -400,8 +390,28 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
         boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
     };
 
+    const dialogPixelWidth = fullBleed ? screenWidth : windowState.width;
+    const panelLimits = (containerWidth) => {
+        if (responsiveConfig.isLargeScreen) {
+            return { min: containerWidth * 0.3, max: containerWidth * 0.7 };
+        }
+        return { min: 200, max: Math.min(600, Math.max(200, containerWidth - 200)) };
+    };
+    const limits = panelLimits(dialogPixelWidth);
+    const extraWidth = fullBleed ? responsiveConfig.leftPanelExtra : 0;
+    const desiredPanelWidth = Math.max(
+        leftPanelWidth + extraWidth,
+        responsiveConfig.isLargeScreen && fullBleed ? 520 + extraWidth : leftPanelWidth
+    );
+    const panelWidth = Math.min(limits.max, Math.max(limits.min, desiredPanelWidth));
+    const filterItemStyle = {
+        flex: panelWidth < 480 ? '1 1 100%' : (responsiveConfig.isLargeScreen ? '1 1 20%' : '1 1 45%'),
+        minWidth: 0,
+    };
+
     return (
         <div 
+            ref={containerRef}
             style={windowStyle}
             className={`bg-white rounded-lg border border-slate-300 overflow-hidden transition-all duration-75 ${windowState.isMaximized && !isWindowMode ? '!rounded-none' : ''}`}
         >
@@ -434,17 +444,17 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
 
             {/* --- CONTENIDO PRINCIPAL (Si no está minimizado o está embebido) --- */}
             {(isEmbedded || !windowState.isMinimized) && (
-                <div className="flex flex-1 overflow-hidden bg-slate-50" style={{ height: isWindowMode || windowState.isMaximized ? '100%' : 'auto' }}>
+                <div className="flex flex-1 min-h-0 overflow-hidden bg-slate-50">
                     
                     {/* PANEL IZQUIERDO: LISTA COMPACTA (con ancho ajustable y responsivo) */}
                     <div 
                         style={{ 
-                            width: responsiveConfig.isLargeScreen ? `${effectiveLeftPanelWidth}px` : effectiveLeftPanelWidth, 
-                            minWidth: responsiveConfig.isLargeScreen ? '30%' : 200, 
-                            maxWidth: responsiveConfig.isLargeScreen ? '70%' : 600,
+                            width: panelWidth,
+                            minWidth: limits.min,
+                            maxWidth: limits.max,
                             flexShrink: 0
                         }}
-                        className="border-r border-slate-200 flex flex-col bg-white relative"
+                        className="border-r border-slate-200 flex flex-col bg-white relative min-h-0 overflow-hidden"
                     >
                         {/* Header de Lista & Filtros */}
                         <div className={`p-3 border-b border-slate-100 bg-slate-50 flex-shrink-0 ${responsiveConfig.isLargeScreen ? 'p-4' : ''}`}>
@@ -481,7 +491,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                             
                             {/* Panel de Filtros Avanzados - Siempre visible en pantallas grandes */}
                             {effectiveFiltersOpen && (
-                                <div className={`bg-white border border-slate-200 rounded-lg p-3 mb-2 ${!responsiveConfig.isLargeScreen ? 'animate-in slide-in-from-top-2 duration-200 max-h-[60vh] overflow-y-auto' : ''}`}>
+                                <div className="bg-white border border-slate-200 rounded-lg p-3 mb-2 overflow-x-hidden overflow-y-auto max-h-[42vh]">
                                     <div className="flex justify-between items-center mb-3">
                                         <span className="text-xs font-bold text-slate-600 uppercase">Filtros Avanzados</span>
                                         <button 
@@ -493,15 +503,10 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                                     </div>
                                     
                                     {/* Contenedor flexible - más columnas en pantallas grandes */}
-                                    <div className="flex flex-wrap gap-3 text-xs" style={{ 
-                                        ...(responsiveConfig.isLargeScreen && { gap: '12px' })
-                                    }}>
+                                    <div className="flex flex-wrap gap-3 text-xs overflow-x-hidden">
                                         
                                         {/* Filtro ID */}
-                                        <div style={{ 
-                                            flex: responsiveConfig.isLargeScreen ? '1 1 20%' : '1 1 45%', 
-                                            minWidth: responsiveConfig.isLargeScreen ? '120px' : '140px' 
-                                        }}>
+                                        <div style={filterItemStyle}>
                                             <label className="text-slate-500 block mb-1">ID</label>
                                             <div className="flex gap-1">
                                                 <select 
@@ -527,10 +532,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                                         </div>
                                         
                                         {/* Filtro Usuario */}
-                                        <div style={{ 
-                                            flex: responsiveConfig.isLargeScreen ? '1 1 20%' : '1 1 45%', 
-                                            minWidth: responsiveConfig.isLargeScreen ? '120px' : '140px' 
-                                        }}>
+                                        <div style={filterItemStyle}>
                                             <label className="text-slate-500 block mb-1">Usuario</label>
                                             <input 
                                                 type="text"
@@ -542,10 +544,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                                         </div>
                                         
                                         {/* Filtro Cantidad */}
-                                        <div style={{ 
-                                            flex: responsiveConfig.isLargeScreen ? '1 1 20%' : '1 1 45%', 
-                                            minWidth: responsiveConfig.isLargeScreen ? '120px' : '140px' 
-                                        }}>
+                                        <div style={filterItemStyle}>
                                             <label className="text-slate-500 block mb-1">Cantidad</label>
                                             <div className="flex gap-1">
                                                 <select 
@@ -571,10 +570,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                                         </div>
                                         
                                         {/* Filtro Costo Estimado */}
-                                        <div style={{ 
-                                            flex: responsiveConfig.isLargeScreen ? '1 1 20%' : '1 1 45%', 
-                                            minWidth: responsiveConfig.isLargeScreen ? '120px' : '140px' 
-                                        }}>
+                                        <div style={filterItemStyle}>
                                             <label className="text-slate-500 block mb-1">Costo Estimado</label>
                                             <div className="flex gap-1">
                                                 <select 
@@ -649,10 +645,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                                         </div>
                                         
                                         {/* Filtro Descripción - Movido para estar junto a fechas en pantallas grandes */}
-                                        <div style={{ 
-                                            flex: responsiveConfig.isUltraWideScreen ? '1 1 400px' : (responsiveConfig.isLargeScreen ? '1 1 auto' : '1 1 100%'), 
-                                            minWidth: responsiveConfig.isUltraWideScreen ? '400px' : (responsiveConfig.isLargeScreen ? '200px' : '200px')
-                                        }} className={responsiveConfig.isUltraWideScreen ? '' : (responsiveConfig.isLargeScreen ? '' : 'border-t border-slate-100 pt-2 mt-1')}>
+                                        <div style={{ flex: '1 1 100%', minWidth: 0 }} className={responsiveConfig.isUltraWideScreen && fullBleed ? '' : 'border-t border-slate-100 pt-2 mt-1'}>
                                             <label className="text-slate-500 block mb-1">Descripción</label>
                                             <input 
                                                 type="text"
@@ -752,7 +745,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
 
                         {/* Resize Handle del Panel */}
                         <div 
-                            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors z-20"
+                            className="absolute top-0 right-0 w-2 h-full cursor-col-resize bg-slate-200 hover:bg-blue-500 transition-colors z-30"
                             onMouseDown={handlePanelResizeStart}
                         />
                     </div>
