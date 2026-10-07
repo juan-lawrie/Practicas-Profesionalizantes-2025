@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, X, Maximize2, Minimize2, ExternalLink, MoreVertical, PieChart, Sliders, GripHorizontal, AlignLeft, Tag, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { Filter, X, Maximize2, Minimize2, ExternalLink, MoreVertical, PieChart, Sliders, GripHorizontal, AlignLeft, Tag, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { getLossRecords } from '../services/api';
+import SearchableSelect from './SearchableSelect';
+import { nameOptions, sameName } from '../utils/filterOptions';
 import { formatMoney, formatLossQuantity } from '../utils/format';
 
 // --- UTILIDADES ---
@@ -96,9 +98,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
     const [lossRecords, setLossRecords] = useState([]);
     const [selectedLoss, setSelectedLoss] = useState(null);
     
-    // Panel de filtros abierto/cerrado (siempre abierto en pantallas grandes)
     const [filtersOpen, setFiltersOpen] = useState(false);
-    const effectiveFiltersOpen = responsiveConfig.isLargeScreen ? true : filtersOpen;
     
     // Pestaña activa: 'all', 'insumos', 'productos'
     const [activeTab, setActiveTab] = useState('all');
@@ -169,11 +169,9 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
             }
         }
 
-        // Filtro por Producto
+        // Filtro por Producto (nombre elegido de la lista)
         if (filters.product.trim()) {
-            filtered = filtered.filter(record =>
-                String(record.product_name || '').toLowerCase().includes(filters.product.toLowerCase())
-            );
+            filtered = filtered.filter(record => sameName(record.product_name, filters.product));
         }
 
         // Filtro por Usuario
@@ -325,7 +323,30 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
         if (onClose) onClose();
     };
 
+    const recordMatchesTab = (record, tab) => {
+        if (tab === 'insumos') return record.product_category === 'Insumo';
+        if (tab === 'productos') return record.product_category === 'Producto';
+        return true;
+    };
+
+    // En Insumos solo insumos, en Productos solo productos, en Todos ambos.
+    const productOptions = nameOptions(
+        lossRecords
+            .filter(record => recordMatchesTab(record, activeTab))
+            .map(record => record.product_name)
+    );
+
+    const selectTab = (tab) => {
+        setActiveTab(tab);
+        if (!filters.product) return;
+        const stillValid = lossRecords.some(record =>
+            sameName(record.product_name, filters.product) && recordMatchesTab(record, tab)
+        );
+        if (!stillValid) setFilters(prev => ({ ...prev, product: '' }));
+    };
+
     // Usar la función de filtrado completa y aplicar filtro por pestaña
+
     const filteredData = getFilteredRecords().filter(record => {
         if (activeTab === 'all') return true;
         if (activeTab === 'insumos') return record.product_category === 'Insumo';
@@ -352,7 +373,16 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
         display: 'flex',
         flexDirection: 'column',
     } : isWindowMode ? {
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100%',
+        height: '100%',
+        zIndex: 50,
+        display: 'flex',
+        flexDirection: 'column',
     } : windowState.isMinimized ? {
         // Cuando está minimizado: barra compacta en la posición actual
         position: 'fixed',
@@ -458,39 +488,35 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                     >
                         {/* Header de Lista & Filtros */}
                         <div className={`p-3 border-b border-slate-100 bg-slate-50 flex-shrink-0 ${responsiveConfig.isLargeScreen ? 'p-4' : ''}`}>
-                            <div className="flex gap-2 mb-2">
-                                <div className="relative flex-1">
-                                    <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-                                    <input 
-                                        type="text" 
-                                        placeholder="Buscar producto o insumo" 
-                                        className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            <div className="flex gap-2 mb-2 items-center">
+                                <div className="flex-1 min-w-0">
+                                    <SearchableSelect
+                                        options={productOptions}
                                         value={filters.product}
-                                        onChange={(e) => setFilters({...filters, product: e.target.value})}
+                                        onChange={(product) => setFilters({ ...filters, product })}
+                                        placeholder={activeTab === 'insumos' ? 'Buscar insumo' : activeTab === 'productos' ? 'Buscar producto' : 'Buscar producto o insumo'}
                                     />
                                 </div>
-                                {/* Botón de filtros - oculto en pantallas grandes */}
-                                {!responsiveConfig.isLargeScreen && (
-                                    <button 
-                                        onClick={() => setFiltersOpen(!filtersOpen)}
-                                        className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1 transition-colors ${
-                                            filtersOpen || activeFiltersCount > 0
-                                                ? 'bg-blue-600 text-white' 
-                                                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                                        }`}
-                                    >
-                                        <Filter size={14} />
-                                        {activeFiltersCount > 0 && (
-                                            <span className="bg-white text-blue-600 rounded-full px-1.5 text-xs font-bold">
-                                                {activeFiltersCount}
-                                            </span>
-                                        )}
-                                    </button>
-                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setFiltersOpen(!filtersOpen)}
+                                    className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1 transition-colors shrink-0 ${
+                                        filtersOpen || activeFiltersCount > 0
+                                            ? 'bg-blue-600 text-white'
+                                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                                    }`}
+                                    title={filtersOpen ? 'Ocultar filtros' : 'Mostrar filtros'}
+                                >
+                                    <Filter size={14} />
+                                    {activeFiltersCount > 0 && (
+                                        <span className="bg-white text-blue-600 rounded-full px-1.5 text-xs font-bold">
+                                            {activeFiltersCount}
+                                        </span>
+                                    )}
+                                </button>
                             </div>
                             
-                            {/* Panel de Filtros Avanzados - Siempre visible en pantallas grandes */}
-                            {effectiveFiltersOpen && (
+                            {filtersOpen && (
                                 <div className="bg-white border border-slate-200 rounded-lg p-3 mb-2 overflow-x-hidden overflow-y-auto max-h-[42vh]">
                                     <div className="flex justify-between items-center mb-3">
                                         <span className="text-xs font-bold text-slate-600 uppercase">Filtros Avanzados</span>
@@ -667,7 +693,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                             {/* Pestañas: Todos, Insumos, Productos */}
                             <div className="flex gap-1 mt-2">
                                 <button
-                                    onClick={() => setActiveTab('all')}
+                                    onClick={() => selectTab('all')}
                                     className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
                                         activeTab === 'all' 
                                             ? 'bg-blue-600 text-white' 
@@ -677,7 +703,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                                     Todos
                                 </button>
                                 <button
-                                    onClick={() => setActiveTab('insumos')}
+                                    onClick={() => selectTab('insumos')}
                                     className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
                                         activeTab === 'insumos' 
                                             ? 'bg-amber-600 text-white' 
@@ -687,7 +713,7 @@ export default function DialogoHistorialDePerdidas({ onClose, isWindowMode = fal
                                     Insumos
                                 </button>
                                 <button
-                                    onClick={() => setActiveTab('productos')}
+                                    onClick={() => selectTab('productos')}
                                     className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
                                         activeTab === 'productos' 
                                             ? 'bg-green-600 text-white' 
