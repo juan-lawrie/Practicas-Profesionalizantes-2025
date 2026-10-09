@@ -128,7 +128,8 @@ const DialogoCompras = ({
                                 unit: 'u',
                                 unitPrice: 0,
                                 total: 0,
-                                isExisting: false
+                                isExisting: false,
+                                itemKind: ''
                             }))]
                         }));
                         break;
@@ -203,7 +204,8 @@ const DialogoCompras = ({
             unit: 'u',
             unitPrice: 0,
             total: 0,
-            isExisting: false
+            isExisting: false,
+            itemKind: ''
         }));
         setPurchaseData(prev => ({
             ...prev,
@@ -241,7 +243,9 @@ const DialogoCompras = ({
                         updates.productName = product.name;
                         updates.unit = newUnit;
                         updates.unitPrice = product.price || 0;
+                        updates.stock = Number(product.stock) || 0;
                         updates.isExisting = true;
+                        updates.itemKind = '';
                         updates.supplierId = sellers.length === 1
                             ? sellers[0].id
                             : (sellers.some(supplier => Number(supplier.id) === Number(item.supplierId)) ? item.supplierId : '');
@@ -249,12 +253,15 @@ const DialogoCompras = ({
                     } else if (String(value || '').trim()) {
                         updates.productId = '';
                         updates.productName = String(value).trim();
+                        updates.stock = 0;
                         updates.isExisting = false;
                     } else {
                         updates.productId = '';
                         updates.productName = '';
                         updates.supplierId = '';
                         updates.isExisting = false;
+                        updates.itemKind = '';
+                        updates.stock = 0;
                         updates.unit = 'u';
                         updates.unitPrice = 0;
                     }
@@ -315,11 +322,11 @@ const DialogoCompras = ({
         }
 
         const hasInvalidItems = purchaseData.items.some(item =>
-            !String(item.productName || '').trim() || !item.supplierId || item.quantity <= 0
+            !String(item.productName || '').trim() || !item.supplierId || item.quantity <= 0 || (!item.isExisting && !item.itemKind)
         );
 
         if (hasInvalidItems) {
-            setMessage('Elegí el producto o escribí uno nuevo, el proveedor y una cantidad mayor a cero.');
+            setMessage('Elegí el producto o escribí uno nuevo, indicá si es producto o insumo, el proveedor y una cantidad mayor a cero.');
             return;
         }
 
@@ -333,7 +340,8 @@ const DialogoCompras = ({
                 unit: item.unit,
                 unitPrice: parseFloat(item.unitPrice),
                 total: item.total,
-                isExisting: item.isExisting
+                isExisting: item.isExisting,
+                itemKind: item.itemKind || ''
             })),
         });
 
@@ -390,6 +398,7 @@ const DialogoCompras = ({
             name: product.name,
             unit: mapBackendUnitToFrontend(product.unit),
             price: product.price || 0,
+            stock: Number(product.stock) || 0,
             sellerIds: suppliersForProduct(suppliers, product.id).map(supplier => Number(supplier.id)),
         })),
         suppliers: suppliers.map(supplier => ({ id: Number(supplier.id), name: supplier.name })),
@@ -487,13 +496,20 @@ const DialogoCompras = ({
                     
                     // Función para generar HTML de una fila de tabla (TR)
                     window.generateItemRowHTML = function(item) {
+                        const catalogProduct = window.inventoryData.find(function(p) { return p.id === Number(item.productId); });
+                        const unitLocked = item.isExisting && catalogProduct && Number(catalogProduct.stock) > 0;
                         const isUnit = item.unit === 'u';
                         const step = isUnit ? '1' : '0.01';
                         
                         const statusBadge = item.isExisting 
                             ? '<span class="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">✓ Existente</span>'
                             : item.productName 
-                                ? '<span class="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">⚠ Nuevo</span>' 
+                                ? '<span class="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">⚠ Nuevo</span>'
+                                    + '<select class="w-full mt-1 px-2 py-1 border border-slate-200 rounded-md text-xs bg-white" onchange="window.opener.postMessage({type:\\'UPDATE_ITEM\\', itemId: ' + item.id + ', field: \\'itemKind\\', value: this.value}, \\'*\\')">'
+                                    + '<option value=""' + (!item.itemKind ? ' selected' : '') + '>¿Producto o insumo?</option>'
+                                    + '<option value="Producto"' + (item.itemKind === 'Producto' ? ' selected' : '') + '>Registrar como producto</option>'
+                                    + '<option value="Insumo"' + (item.itemKind === 'Insumo' ? ' selected' : '') + '>Registrar como insumo</option>'
+                                    + '</select>'
                                 : '';
 
                         const product = window.inventoryData.find(p => p.id === Number(item.productId));
@@ -546,8 +562,8 @@ const DialogoCompras = ({
                                 </td>
                                 <td class="py-3 px-4 w-32">
                                     <select 
-                                        class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-blue-500 \${item.isExisting ? 'bg-slate-100 text-slate-500' : ''}"
-                                        \${item.isExisting ? 'disabled' : ''}
+                                        class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-blue-500 \${unitLocked ? 'bg-slate-100 text-slate-500' : ''}"
+                                        \${unitLocked ? 'disabled' : ''}
                                         onchange="window.opener.postMessage({type:'UPDATE_ITEM', itemId: \${item.id}, field: 'unit', value: this.value}, '*');"
                                     >
                                         <option value="u" \${item.unit === 'u' ? 'selected' : ''}>Unidades</option>
@@ -1013,6 +1029,15 @@ const DialogoCompras = ({
                                                                                 onChange={(supplierId) => updateItem(item.id, 'supplierId', supplierId)}
                                                                                 placeholder="Buscar proveedor..."
                                                                             />
+                                                                            <select
+                                                                                value={item.itemKind || ''}
+                                                                                onChange={(e) => updateItem(item.id, 'itemKind', e.target.value)}
+                                                                                className="w-full mt-1.5 px-2 py-1.5 border border-slate-200 rounded-md text-xs bg-white focus:outline-none focus:border-blue-500"
+                                                                            >
+                                                                                <option value="">¿Producto o insumo?</option>
+                                                                                <option value="Producto">Registrar como producto</option>
+                                                                                <option value="Insumo">Registrar como insumo</option>
+                                                                            </select>
                                                                         </div>
                                                                     );
                                                                 }
@@ -1047,8 +1072,8 @@ const DialogoCompras = ({
                                                             <select
                                                                 value={item.unit}
                                                                 onChange={(e) => updateItem(item.id, 'unit', e.target.value)}
-                                                                disabled={item.isExisting}
-                                                                className={`w-full px-2.5 py-1.5 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-blue-500 text-center ${item.isExisting ? 'bg-slate-100 text-slate-500' : 'bg-white'}`}
+                                                                disabled={item.isExisting && Number(item.stock) > 0}
+                                                                className={`w-full px-2.5 py-1.5 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-blue-500 text-center ${item.isExisting && Number(item.stock) > 0 ? 'bg-slate-100 text-slate-500' : 'bg-white'}`}
                                                             >
                                                                 <option value="u">Unidades</option>
                                                                 <option value="kg">Kilos (kg)</option>

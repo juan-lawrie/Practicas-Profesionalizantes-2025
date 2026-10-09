@@ -1075,6 +1075,94 @@ class IsGerenteOrEncargado(BasePermission):
         return request.user.role.name in ['Gerente', 'Encargado']
 
 
+def _base_unit_for_purchase(purchase_unit):
+    unit = (purchase_unit or '').lower()
+    if unit in ('kg', 'g'):
+        return 'g'
+    if unit in ('l', 'ml'):
+        return 'ml'
+    return 'u'
+
+
+def _stored_base_unit(product_unit):
+    unit = (product_unit or '').lower()
+    if unit in ('u', 'unidades', 'unidad'):
+        return 'u'
+    if unit in ('g', 'kg'):
+        return 'g'
+    if unit in ('ml', 'l'):
+        return 'ml'
+    return unit
+
+
+def apply_purchase_item_stock(item, supplier=None):
+    """Suma el ítem al stock. Si el producto está en 0, la compra define la unidad.
+    Un nombre nuevo se crea y queda ligado al proveedor de la línea."""
+    product_id = item.get('product_id') or item.get('productId')
+    product_name = str(item.get('productName') or '').strip()
+    try:
+        quantity = Decimal(str(item.get('quantity', '0')))
+        unit_price = Decimal(str(item.get('unitPrice', '0')))
+    except Exception:
+        return
+    if quantity <= 0:
+        return
+
+    purchase_unit = (item.get('unit') or '').lower()
+    product = None
+    if product_id:
+        product = Product.objects.select_for_update().get(id=product_id)
+    elif product_name:
+        product = Product.objects.select_for_update().filter(name__iexact=product_name).first()
+        if product is None:
+            product = Product.objects.create(
+                name=product_name,
+                price=unit_price,
+                stock=0,
+                category='Insumo' if str(item.get('itemKind') or '').strip().lower() == 'insumo' else 'Producto',
+                unit=_base_unit_for_purchase(purchase_unit),
+                is_ingredient=str(item.get('itemKind') or '').strip().lower() == 'insumo',
+            )
+
+    if product is None:
+        return
+
+    # En cero la unidad todavía no importa: la fija esta compra.
+    if product.stock == 0 and purchase_unit:
+        product.unit = _base_unit_for_purchase(purchase_unit)
+        if product.price == 0 and unit_price > 0:
+            product.price = unit_price
+        product.save(update_fields=['unit', 'price'])
+
+    if not purchase_unit:
+        purchase_unit = _stored_base_unit(product.unit)
+
+    base_quantity = quantity
+    product_base_unit = _stored_base_unit(product.unit)
+
+    if product_base_unit == 'g':
+        if purchase_unit == 'kg':
+            base_quantity = quantity * 1000
+        elif purchase_unit != 'g':
+            raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para '{product.name}' (unidad base: kilos).")
+    elif product_base_unit == 'ml':
+        if purchase_unit == 'l':
+            base_quantity = quantity * 1000
+        elif purchase_unit != 'ml':
+            raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para '{product.name}' (unidad base: litros).")
+    elif product_base_unit == 'u':
+        if purchase_unit not in ('u', 'unidades', 'unidad'):
+            raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para '{product.name}' (unidad base: unidades).")
+    elif purchase_unit != product_base_unit:
+        raise ValueError(f"No se puede convertir de '{purchase_unit}' a '{product_base_unit}' para '{product.name}'.")
+
+    product.stock += base_quantity
+    product.save(update_fields=['stock'])
+    item['product_id'] = product.id
+    if supplier is not None:
+        supplier.supplied_products.add(product)
+
+
 # ViewSet para compras
 class PurchaseViewSet(viewsets.ModelViewSet):
     queryset = Purchase.objects.filter(is_active=True).order_by('-created_at')
@@ -1128,6 +1216,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         approved_at = timezone.now() if is_manager else None
 
         supplier_id = self.request.data.get('supplier_id')
+        supplier = None
         supplier_name = None
         if supplier_id:
             try:
@@ -1149,71 +1238,9 @@ class PurchaseViewSet(viewsets.ModelViewSet):
 
                 if is_manager and isinstance(purchase.items, list):
                     for item in purchase.items:
-                        product_id = item.get('product_id')
-                        product_name = item.get('productName')
-                        try:
-                            quantity = Decimal(str(item.get('quantity', '0')))
-                            unit_price = Decimal(str(item.get('unitPrice', '0')))
-                        except:
-                            continue
-                        
-                        purchase_unit = item.get('unit', '').lower()
-
-                        if quantity <= 0:
-                            continue
-
-                        product = None
-                        if product_id:
-                            try:
-                                product = Product.objects.select_for_update().get(id=product_id)
-                            except Product.DoesNotExist:
-                                raise Exception(f"El producto con ID {product_id} no fue encontrado.")
-                        elif product_name:
-                            base_unit_for_new_product = 'u'
-                            if purchase_unit in ['kg', 'g']:
-                                base_unit_for_new_product = 'g'
-                            elif purchase_unit in ['l', 'ml']:
-                                base_unit_for_new_product = 'ml'
-
-                            product, created = Product.objects.select_for_update().get_or_create(
-                                name=product_name,
-                                defaults={
-                                    'price': unit_price,
-                                    'stock': 0,
-                                    'category': 'Insumo',
-                                    'unit': base_unit_for_new_product,
-                                    'is_ingredient': True
-                                }
-                            )
-                        
-                        if not product:
-                            continue
-
-                        if not purchase_unit:
-                            purchase_unit = product.unit.lower()
-
-                        base_quantity = quantity
-                        product_base_unit = product.unit.lower()
-
-                        # Conversión de unidades de compra a unidad base del producto
-                        if product_base_unit == 'g':
-                            if purchase_unit == 'kg':
-                                base_quantity = quantity * 1000
-                            elif purchase_unit != 'g':
-                                raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'g').")
-                        elif product_base_unit == 'ml':
-                            if purchase_unit == 'l':
-                                base_quantity = quantity * 1000
-                            elif purchase_unit != 'ml':
-                                raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'ml').")
-                        elif product_base_unit == 'u':
-                            if purchase_unit != 'u':
-                                raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'u').")
-                        elif purchase_unit != product_base_unit:
-                                raise ValueError(f"No se puede convertir de '{purchase_unit}' a '{product_base_unit}' para el producto '{product.name}'.")
-
-                        product.stock += base_quantity
-                        product.save()
+                        apply_purchase_item_stock(item, supplier)
+                    purchase.items = list(purchase.items)
+                    purchase.save(update_fields=['items'])
         except Exception as e:
             raise e
 
@@ -1271,79 +1298,18 @@ class PurchaseViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 # Update product stock
                 if isinstance(purchase.items, list):
-                    for item in purchase.items:
-                        try:
-                            product_id = item.get('product_id') or item.get('productId')
-                            product_name = item.get('productName')
-                            try:
-                                quantity = Decimal(str(item.get('quantity', '0')))
-                                unit_price = Decimal(str(item.get('unitPrice', '0')))
-                            except:
-                                logger.warning(f"Invalid quantity or price for item {item} in purchase {purchase.id}. Skipping.")
-                                continue
-                            
-                            purchase_unit = item.get('unit', '').lower()
-
-                            if quantity <= 0:
-                                continue
-
-                            product = None
-                            if product_id:
-                                product = Product.objects.select_for_update().get(id=product_id)
-                            elif product_name:
-                                base_unit_for_new_product = 'u'
-                                if purchase_unit in ['kg', 'g']:
-                                    base_unit_for_new_product = 'g'
-                                elif purchase_unit in ['l', 'ml']:
-                                    base_unit_for_new_product = 'ml'
-
-                                product, created = Product.objects.select_for_update().get_or_create(
-                                    name=product_name,
-                                    defaults={
-                                        'price': unit_price,
-                                        'stock': 0,
-                                        'category': 'Insumo',
-                                        'unit': base_unit_for_new_product,
-                                        'is_ingredient': True
-                                    }
-                                )
-                            
-                            if not product:
-                                continue
-
-                            if not purchase_unit:
-                                purchase_unit = product.unit.lower()
-
-                            base_quantity = quantity
-                            product_base_unit = product.unit.lower()
-
-                            # Conversión de unidades de compra a unidad base del producto
-                            if product_base_unit == 'g':
-                                if purchase_unit == 'kg':
-                                    base_quantity = quantity * 1000
-                                elif purchase_unit != 'g':
-                                    raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'g').")
-                            elif product_base_unit == 'ml':
-                                if purchase_unit == 'l':
-                                    base_quantity = quantity * 1000
-                                elif purchase_unit != 'ml':
-                                    raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'ml').")
-                            elif product_base_unit == 'u':
-                                if purchase_unit != 'u':
-                                    raise ValueError(f"Unidad de compra '{purchase_unit}' inválida para el producto '{product.name}' (unidad base: 'u').")
-                            elif purchase_unit != product_base_unit:
-                                    raise ValueError(f"No se puede convertir de '{purchase_unit}' a '{product_base_unit}' para el producto '{product.name}'.")
-
-                            product.stock += base_quantity
-                            product.save()
-                            logger.info(f"Updated product {product.id} stock: +{base_quantity} ({quantity} {purchase_unit}), new stock: {product.stock}")
-                        
-                        except Product.DoesNotExist:
-                            logger.error(f"Product with id {item.get('product_id')} not found during approval of purchase {purchase.id}.")
-                            raise Exception(f"Product with id {item.get('product_id')} not found during approval.")
-                        except ValueError as e:
-                            logger.error(f"Error processing item {item} in purchase {purchase.id}: {str(e)}")
-                            raise e
+                    supplier = Supplier.objects.filter(id=purchase.supplier_id).first() if purchase.supplier_id else None
+                    try:
+                        for item in purchase.items:
+                            apply_purchase_item_stock(item, supplier)
+                        purchase.items = list(purchase.items)
+                        purchase.save(update_fields=['items'])
+                    except Product.DoesNotExist:
+                        logger.error(f"Product with id not found during approval of purchase {purchase.id}.")
+                        raise Exception('El producto de la compra no fue encontrado.')
+                    except ValueError as e:
+                        logger.error(f"Error processing items in purchase {purchase.id}: {str(e)}")
+                        raise e
 
                 purchase.status = 'Aprobada'
                 purchase.approved_by = request.user

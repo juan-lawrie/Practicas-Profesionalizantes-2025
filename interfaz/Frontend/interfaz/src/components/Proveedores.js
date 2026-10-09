@@ -1,9 +1,59 @@
 import React, { useState } from 'react';
+import CreatableSelect from 'react-select/creatable';
 import api from '../services/api';
-import SearchableSelect from './SearchableSelect';
+import SearchableSelect, { portalSelectProps, portalMenuStyle } from './SearchableSelect';
 import { productLabel } from '../utils/supplierCatalog';
 
-const Proveedores = ({ suppliers, setSuppliers, inventory = [] }) => {
+const catalogSelectStyles = {
+    control: (base, state) => ({
+        ...base,
+        minHeight: 38,
+        fontSize: 14,
+        borderColor: state.isFocused ? '#3b82f6' : '#d1d5db',
+        boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : 'none',
+    }),
+    menu: (base) => ({ ...base, fontSize: 14, zIndex: 50 }),
+    menuPortal: portalMenuStyle,
+    valueContainer: (base) => ({ ...base, flexWrap: 'wrap', maxHeight: 120, overflowY: 'auto' }),
+    multiValue: (base) => ({ ...base, maxWidth: '100%' }),
+    multiValueLabel: (base) => ({ ...base, whiteSpace: 'normal', overflowWrap: 'anywhere' }),
+};
+
+const CreatableCatalogSelect = ({ options, selectedIds, pendingNames, onChange, placeholder }) => {
+    const selected = [
+        ...(options || []).filter(option => (selectedIds || []).map(Number).includes(Number(option.value))),
+        ...(pendingNames || []).map(name => ({ value: name, label: name })),
+    ];
+
+    return (
+        <CreatableSelect
+            {...portalSelectProps}
+            isMulti
+            isClearable
+            options={options}
+            value={selected}
+            placeholder={placeholder}
+            formatCreateLabel={(input) => `Agregar "${input}" (no está en el sistema)`}
+            noOptionsMessage={() => 'No hay coincidencias'}
+            styles={catalogSelectStyles}
+            onChange={(chosen) => {
+                const ids = [];
+                const names = [];
+                (chosen || []).forEach(option => {
+                    const existing = (options || []).find(item => String(item.value) === String(option.value));
+                    if (existing) ids.push(existing.value);
+                    else {
+                        const name = String(option.label || option.value || '').trim();
+                        if (name) names.push(name);
+                    }
+                });
+                onChange(ids, names);
+            }}
+        />
+    );
+};
+
+const Proveedores = ({ suppliers, setSuppliers, inventory = [], onCatalogChange }) => {
     const [showAddSupplier, setShowAddSupplier] = useState(false);
     const [editingSupplier, setEditingSupplier] = useState(null);
     const [newSupplier, setNewSupplier] = useState({ 
@@ -11,7 +61,9 @@ const Proveedores = ({ suppliers, setSuppliers, inventory = [] }) => {
         cuit: '', 
         address: '', 
         phone: '',
-        supplied_products: []
+        supplied_products: [],
+        pending_products: [],
+        pending_ingredients: [],
     });
     const [message, setMessage] = useState('');
     const [showFilters, setShowFilters] = useState(true);
@@ -56,11 +108,28 @@ const Proveedores = ({ suppliers, setSuppliers, inventory = [] }) => {
             return;
         }
         try {
-            await api.post('/suppliers/', newSupplier);
+            const productIds = newSupplier.supplied_products.filter(id =>
+                productOptions.some(option => Number(option.value) === Number(id))
+            );
+            const ingredientIds = newSupplier.supplied_products.filter(id =>
+                ingredientOptions.some(option => Number(option.value) === Number(id))
+            );
+            await api.post('/suppliers/', {
+                name: newSupplier.name,
+                cuit: newSupplier.cuit,
+                address: newSupplier.address,
+                phone: newSupplier.phone,
+                supplied_products: [...productIds, ...ingredientIds],
+                new_supplied_products: [
+                    ...newSupplier.pending_products.map(name => ({ name, is_ingredient: false })),
+                    ...newSupplier.pending_ingredients.map(name => ({ name, is_ingredient: true })),
+                ],
+            });
             await fetchSuppliers();
+            if (onCatalogChange) await onCatalogChange();
             setMessage('Proveedor agregado correctamente.');
             setShowAddSupplier(false);
-            setNewSupplier({ name: '', cuit: '', address: '', phone: '', supplied_products: [] });
+            setNewSupplier({ name: '', cuit: '', address: '', phone: '', supplied_products: [], pending_products: [], pending_ingredients: [] });
         } catch (error) {
             setMessage('Error al agregar proveedor.');
         }
@@ -106,9 +175,12 @@ const Proveedores = ({ suppliers, setSuppliers, inventory = [] }) => {
         setShowAddSupplier(false);
     };
 
-    const catalogOptions = (inventory || [])
-        .map(product => ({ value: product.id, label: productLabel(product) }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+    const toOption = (product) => ({ value: product.id, label: productLabel(product) });
+    const byLabel = (a, b) => a.label.localeCompare(b.label, 'es');
+    const isInsumo = (product) => product.is_ingredient || String(product.category || product.type || '').toLowerCase() === 'insumo';
+    const productOptions = (inventory || []).filter(product => !isInsumo(product)).map(toOption).sort(byLabel);
+    const ingredientOptions = (inventory || []).filter(isInsumo).map(toOption).sort(byLabel);
+    const catalogOptions = [...productOptions, ...ingredientOptions].sort(byLabel);
 
     const linkedNames = (supplier) => {
         const names = (supplier.supplied_products || [])
@@ -483,13 +555,42 @@ const Proveedores = ({ suppliers, setSuppliers, inventory = [] }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Productos e insumos que provee</label>
-                                    <SearchableSelect
-                                        isMulti
-                                        options={catalogOptions}
-                                        value={newSupplier.supplied_products}
-                                        onChange={ids => setNewSupplier({ ...newSupplier, supplied_products: ids })}
-                                        placeholder="Elegir productos e insumos..."
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Productos que provee</label>
+                                    <CreatableCatalogSelect
+                                        options={productOptions}
+                                        selectedIds={newSupplier.supplied_products}
+                                        pendingNames={newSupplier.pending_products}
+                                        onChange={(ids, names) => {
+                                            const otherIds = newSupplier.supplied_products.filter(id =>
+                                                ingredientOptions.some(option => Number(option.value) === Number(id))
+                                            );
+                                            setNewSupplier({
+                                                ...newSupplier,
+                                                supplied_products: [...otherIds, ...ids],
+                                                pending_products: names,
+                                            });
+                                        }}
+                                        placeholder="Elegir o escribir un producto nuevo..."
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">Un nombre nuevo queda en el sistema con stock 0. La unidad se define al comprarlo.</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Insumos que provee</label>
+                                    <CreatableCatalogSelect
+                                        options={ingredientOptions}
+                                        selectedIds={newSupplier.supplied_products}
+                                        pendingNames={newSupplier.pending_ingredients}
+                                        onChange={(ids, names) => {
+                                            const otherIds = newSupplier.supplied_products.filter(id =>
+                                                productOptions.some(option => Number(option.value) === Number(id))
+                                            );
+                                            setNewSupplier({
+                                                ...newSupplier,
+                                                supplied_products: [...otherIds, ...ids],
+                                                pending_ingredients: names,
+                                            });
+                                        }}
+                                        placeholder="Elegir o escribir un insumo nuevo..."
                                     />
                                 </div>
                                 <div className="flex gap-3 pt-4">

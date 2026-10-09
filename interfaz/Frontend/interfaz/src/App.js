@@ -2178,7 +2178,7 @@ const App = () => {
 
         // Componente de la interfaz de gestión de proveedores (solo para Gerente).
         const SupplierManagement = () => {
-            return <Proveedores suppliers={suppliers} setSuppliers={setSuppliers} inventory={inventory} />;
+            return <Proveedores suppliers={suppliers} setSuppliers={setSuppliers} inventory={inventory} onCatalogChange={() => loadProducts(false)} />;
         };
     
         // Componente de la interfaz de gestión de compras (para Gerente, Encargado, Cajero, Panadero).

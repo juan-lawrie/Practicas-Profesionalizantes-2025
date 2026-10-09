@@ -22,15 +22,48 @@ def require_open_cash_register():
         raise serializers.ValidationError({'detail': CASH_REGISTER_CLOSED_MESSAGE})
     return session
 
+class NewSuppliedProductSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    is_ingredient = serializers.BooleanField()
+
+
 # Serializer para el modelo de proveedor
 class SupplierSerializer(serializers.ModelSerializer):
     supplied_products = serializers.PrimaryKeyRelatedField(
         many=True, queryset=Product.objects.all(), required=False
     )
+    # Solo en el alta: nombres que todavía no están en el inventario.
+    new_supplied_products = NewSuppliedProductSerializer(many=True, write_only=True, required=False)
 
     class Meta:
         model = Supplier
         fields = '__all__'
+
+    def create(self, validated_data):
+        from decimal import Decimal
+        new_items = validated_data.pop('new_supplied_products', [])
+        supplier = super().create(validated_data)
+        for item in new_items:
+            name = str(item.get('name') or '').strip()
+            if not name:
+                continue
+            product = Product.objects.filter(name__iexact=name).first()
+            if product is None:
+                is_ingredient = bool(item.get('is_ingredient'))
+                product = Product.objects.create(
+                    name=name,
+                    price=Decimal('0'),
+                    stock=Decimal('0'),
+                    category='Insumo' if is_ingredient else 'Producto',
+                    is_ingredient=is_ingredient,
+                    unit='u',
+                )
+            supplier.supplied_products.add(product)
+        return supplier
+
+    def update(self, instance, validated_data):
+        validated_data.pop('new_supplied_products', None)
+        return super().update(instance, validated_data)
 
 # Serializer para UserStorage
 class UserStorageSerializer(serializers.ModelSerializer):

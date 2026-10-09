@@ -102,7 +102,8 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
             unit: 'u',
             unitPrice: 0,
             total: 0,
-            isExisting: false
+            isExisting: false,
+            itemKind: ''
         }));
         setNewPurchase(prev => ({
             ...prev,
@@ -140,18 +141,23 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                         updates.productId = product.id;
                         updates.unit = mapBackendUnitToFrontend(product.unit);
                         updates.unitPrice = product.price || 0;
+                        updates.stock = Number(product.stock) || 0;
                         updates.isExisting = true;
+                        updates.itemKind = '';
                         updates.supplierId = sellers.length === 1
                             ? sellers[0].id
                             : (sellers.some(supplier => Number(supplier.id) === Number(item.supplierId)) ? item.supplierId : '');
                     } else if (String(value || '').trim()) {
                         updates.productId = '';
                         updates.productName = String(value).trim();
+                        updates.stock = 0;
                         updates.isExisting = false;
                     } else {
                         updates.productName = '';
                         updates.productId = '';
                         updates.isExisting = false;
+                        updates.itemKind = '';
+                        updates.stock = 0;
                         updates.supplierId = '';
                         updates.unit = 'u';
                         updates.unitPrice = 0;
@@ -201,11 +207,11 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
 
         // Cada ítem lleva el proveedor que lo vende: con eso se arma una compra por proveedor
         const hasInvalidItems = newPurchase.items.some(item =>
-            !String(item.productName || '').trim() || !item.supplierId || item.quantity <= 0
+            !String(item.productName || '').trim() || !item.supplierId || item.quantity <= 0 || (!item.isExisting && !item.itemKind)
         );
 
         if (hasInvalidItems) {
-            setMessage('Elegí el producto o escribí uno nuevo, el proveedor y una cantidad mayor a cero.');
+            setMessage('Elegí el producto o escribí uno nuevo, indicá si es producto o insumo, el proveedor y una cantidad mayor a cero.');
             return;
         }
 
@@ -236,7 +242,8 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                         quantity: parseFloat(item.quantity),
                         unit: item.unit,
                         unitPrice: parseFloat(item.unitPrice),
-                        total: parseFloat(item.total)
+                        total: parseFloat(item.total),
+                        itemKind: item.itemKind || ''
                     })),
                     total_amount: totalAmount,
                 };
@@ -396,7 +403,8 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                         quantity: parseFloat(item.quantity),
                         unit: item.unit,
                         unitPrice: parseFloat(item.unitPrice),
-                        total: parseFloat(item.total)
+                        total: parseFloat(item.total),
+                        itemKind: item.itemKind || ''
                     })),
                     total_amount: totalAmount,
                 };
@@ -690,6 +698,15 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                                                                         onChange={(supplierId) => updateItem(item.id, 'supplierId', supplierId)}
                                                                         placeholder="Buscar proveedor..."
                                                                     />
+                                                                    <select
+                                                                        value={item.itemKind || ''}
+                                                                        onChange={(e) => updateItem(item.id, 'itemKind', e.target.value)}
+                                                                        className="w-full mt-1.5 px-2.5 py-2 border border-slate-200 rounded-md text-sm bg-white focus:outline-none focus:border-blue-500"
+                                                                    >
+                                                                        <option value="">¿Producto o insumo?</option>
+                                                                        <option value="Producto">Registrar como producto</option>
+                                                                        <option value="Insumo">Registrar como insumo</option>
+                                                                    </select>
                                                                 </div>
                                                             );
                                                         }
@@ -734,8 +751,8 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
                                                         <select
                                                             value={item.unit}
                                                             onChange={(e) => updateItem(item.id, 'unit', e.target.value)}
-                                                            disabled={item.isExisting}
-                                                            className={`w-full px-2.5 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-blue-500 ${item.isExisting ? 'bg-slate-100 text-slate-500' : 'bg-white'}`}
+                                                            disabled={item.isExisting && Number(item.stock) > 0}
+                                                            className={`w-full px-2.5 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-blue-500 ${item.isExisting && Number(item.stock) > 0 ? 'bg-slate-100 text-slate-500' : 'bg-white'}`}
                                                         >
                                                             <option value="u">Unidades</option>
                                                             <option value="kg">Kilos (kg)</option>
