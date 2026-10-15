@@ -9,7 +9,7 @@ export const portalSelectProps = {
 
 export const portalMenuStyle = (base) => ({ ...base, zIndex: 10000 });
 
-const SearchableSelect = ({ options, value, onChange, placeholder, isMulti = false, noOptionsMessage = 'No hay coincidencias' }) => {
+const SearchableSelect = ({ options, value, onChange, placeholder, isMulti = false, noOptionsMessage = 'No hay coincidencias', fontSize = 12 }) => {
     const list = options || [];
     const selected = isMulti
         ? list.filter(option => (value || []).map(String).includes(String(option.value)))
@@ -33,8 +33,12 @@ const SearchableSelect = ({ options, value, onChange, placeholder, isMulti = fal
             isMulti={isMulti}
             noOptionsMessage={() => noOptionsMessage}
             styles={{
-                control: (base) => ({ ...base, minHeight: 32, fontSize: 12 }),
-                menu: (base) => ({ ...base, fontSize: 12 }),
+                control: (base) => ({ ...base, minHeight: fontSize + 20, fontSize }),
+                singleValue: (base) => ({ ...base, fontSize }),
+                input: (base) => ({ ...base, fontSize }),
+                placeholder: (base) => ({ ...base, fontSize }),
+                option: (base) => ({ ...base, fontSize }),
+                menu: (base) => ({ ...base, fontSize }),
                 menuPortal: portalMenuStyle,
                 valueContainer: (base) => ({
                     ...base,

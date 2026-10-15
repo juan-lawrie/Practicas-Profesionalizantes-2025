@@ -451,13 +451,11 @@ const DialogoCompras = ({
                     
                     window.addSupplierByName = function(name) {
                         const supplier = window.suppliersData.find(function(item) { return item.name === name; });
-                        if (!supplier || window.selectedSupplierIds.includes(supplier.id)) return;
-                        const ids = window.selectedSupplierIds.concat([supplier.id]);
-                        const selected = ids.map(function(id) {
-                            const found = window.suppliersData.find(function(item) { return item.id === id; });
-                            return { value: id, label: found ? found.name : String(id) };
-                        });
-                        window.opener.postMessage({ type: 'UPDATE_SUPPLIERS', value: selected }, '*');
+                        if (!supplier) return;
+                        window.opener.postMessage({
+                            type: 'UPDATE_SUPPLIERS',
+                            value: [{ value: supplier.id, label: supplier.name }]
+                        }, '*');
                     };
 
                     window.removeSupplier = function(id) {
@@ -647,7 +645,7 @@ const DialogoCompras = ({
                         box.innerHTML = selectedIds.map(function(id) {
                             const supplier = window.suppliersData.find(function(item) { return item.id === id; });
                             const name = supplier ? window.escapeHtml(supplier.name) : id;
-                            return '<span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-100 text-blue-800 text-xs">'
+                            return '<span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-100 text-blue-800 text-base">'
                                 + name
                                 + '<button type="button" class="text-blue-800 font-bold leading-none" onclick="window.removeSupplier(' + id + ')">×</button></span>';
                         }).join('');
@@ -684,12 +682,12 @@ const DialogoCompras = ({
                                 />
                             </div>
                             <div class="flex-1 min-w-[240px]">
-                                <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Proveedores</label>
+                                <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Proveedor</label>
                                 <input
                                     id="supplier-search"
                                     list="supplier-search-list"
                                     placeholder="Buscar proveedor..."
-                                    class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                                    class="w-full px-3 py-2 border border-slate-200 rounded-lg text-base focus:outline-none focus:border-blue-500"
                                     onchange="window.addSupplierByName(this.value); this.value='';"
                                 />
                                 <datalist id="supplier-search-list">
@@ -935,19 +933,20 @@ const DialogoCompras = ({
                             </div>
                             <div className="flex-1 min-w-[240px]">
                                 <label className="block text-[11px] font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
-                                    Proveedores
+                                    Proveedor
                                 </label>
                                 <SearchableSelect
-                                    isMulti
+                                    fontSize={16}
                                     options={suppliers.map(supplier => ({ value: supplier.id, label: supplier.name }))}
-                                    value={purchaseData.selectedSuppliers.map(supplier => supplier.value)}
-                                    onChange={ids => setPurchaseData(prev => ({
-                                        ...prev,
-                                        selectedSuppliers: ids.map(id => {
-                                            const supplier = suppliers.find(item => Number(item.id) === Number(id));
-                                            return { value: Number(id), label: supplier ? supplier.name : String(id) };
-                                        })
-                                    }))}
+                                    value={purchaseData.selectedSuppliers[0] ? purchaseData.selectedSuppliers[0].value : ''}
+                                    onChange={id => setPurchaseData(prev => {
+                                        if (!id) return { ...prev, selectedSuppliers: [] };
+                                        const supplier = suppliers.find(item => Number(item.id) === Number(id));
+                                        return {
+                                            ...prev,
+                                            selectedSuppliers: [{ value: Number(id), label: supplier ? supplier.name : String(id) }],
+                                        };
+                                    })}
                                     placeholder="Buscar proveedor..."
                                 />
                             </div>

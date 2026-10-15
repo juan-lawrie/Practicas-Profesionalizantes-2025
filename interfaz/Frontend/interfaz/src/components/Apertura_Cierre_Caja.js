@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { formatMovementDate } from '../utils/date';
 import { formatMoney } from '../utils/format';
-import { getCashRegisterSessions, openCashRegister, closeCashRegister, getApiErrorMessage } from '../services/api';
+import api, { getCashRegisterSessions, getCashRegisterStatus, openCashRegister, closeCashRegister, getApiErrorMessage } from '../services/api';
 
 // Roles que pueden abrir y cerrar la caja (todos menos Panadero)
 export const ROLES_APERTURA_CAJA = ['Gerente', 'Encargado', 'Cajero'];
@@ -52,13 +52,30 @@ const TurnoCard = ({ turno, numero }) => (
     </div>
 );
 
-const Apertura_Cierre_Caja = ({ cashRegister, onRefresh }) => {
+const Apertura_Cierre_Caja = ({ cashMovements = [], loadCashMovements, userRole }) => {
+    const [cashRegister, setCashRegister] = useState(null);
     const [confirmAction, setConfirmAction] = useState(null); // 'open' | 'close'
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [message, setMessage] = useState(null);
     const [selectedDate, setSelectedDate] = useState('');
     const [historySessions, setHistorySessions] = useState(null);
     const [historyLoading, setHistoryLoading] = useState(false);
+    const [withdrawAmount, setWithdrawAmount] = useState('');
+    const [withdrawMessage, setWithdrawMessage] = useState(null);
+    const [withdrawing, setWithdrawing] = useState(false);
+
+    const loadStatus = useCallback(async () => {
+        try {
+            const response = await getCashRegisterStatus();
+            setCashRegister(response.data);
+        } catch (error) {
+            console.error('Error cargando el estado de la caja:', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadStatus();
+    }, [loadStatus, cashMovements]);
 
     const today = cashRegister?.today || '';
     const isToday = !selectedDate || selectedDate === today;
@@ -110,7 +127,7 @@ const Apertura_Cierre_Caja = ({ cashRegister, onRefresh }) => {
     const requestAction = (action) => {
         setMessage(null);
         setConfirmAction(action);
-        onRefresh();
+        loadStatus();
     };
 
     const handleConfirm = async () => {
@@ -128,7 +145,7 @@ const Apertura_Cierre_Caja = ({ cashRegister, onRefresh }) => {
         } finally {
             setIsSubmitting(false);
             setConfirmAction(null);
-            onRefresh();
+            loadStatus();
         }
     };
 
@@ -164,7 +181,7 @@ const Apertura_Cierre_Caja = ({ cashRegister, onRefresh }) => {
                     ) : (
                         <>
                             <p className="text-sm text-gray-600 mb-3">
-                                La caja está cerrada. No se pueden registrar ventas ni movimientos hasta que se abra.
+                                La caja está cerrada. No se pueden registrar ventas ni compras hasta que se abra. La extracción para el banco sí se puede registrar.
                             </p>
                             <dl className="text-sm">
                                 <FilaMonto label="Dinero actual en caja" value={currentBalance} destacado />
@@ -232,6 +249,69 @@ const Apertura_Cierre_Caja = ({ cashRegister, onRefresh }) => {
                         </div>
                     )}
                 </section>
+
+                {userRole === 'Gerente' && (
+                <section className="bg-white rounded-lg shadow-md p-4 md:p-6">
+                    <h3 className="text-xl font-bold text-gray-700 mb-1">Extracción para el banco</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Cada extracción descuenta ese monto de la caja. Las compras también se descuentan solas cuando quedan registradas.
+                    </p>
+                    <form
+                        className="flex flex-wrap items-end gap-3"
+                        onSubmit={async (event) => {
+                            event.preventDefault();
+                            const amount = Number(withdrawAmount);
+                            if (!amount || amount <= 0) {
+                                setWithdrawMessage({ type: 'error', text: 'Ingresá cuánto se saca. Tiene que ser mayor a cero.' });
+                                return;
+                            }
+                            setWithdrawing(true);
+                            setWithdrawMessage(null);
+                            try {
+                                await api.post('/cash-movements/', {
+                                    type: 'Salida',
+                                    amount,
+                                    description: 'Depósito en banco',
+                                    payment_method: 'Depósito bancario',
+                                });
+                                setWithdrawAmount('');
+                                setWithdrawMessage({ type: 'success', text: `Se descontaron ${formatMoney(amount)} de la caja.` });
+                                if (loadCashMovements) await loadCashMovements();
+                                await loadStatus();
+                            } catch (error) {
+                                setWithdrawMessage({ type: 'error', text: getApiErrorMessage(error, 'No se pudo registrar la extracción.') });
+                            } finally {
+                                setWithdrawing(false);
+                            }
+                        }}
+                    >
+                        <label className="block text-sm text-gray-700">
+                            Cuánto se saca
+                            <input
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                value={withdrawAmount}
+                                onChange={e => setWithdrawAmount(e.target.value)}
+                                className="mt-1 block w-40 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                                disabled={withdrawing}
+                            />
+                        </label>
+                        <button
+                            type="submit"
+                            disabled={withdrawing}
+                            className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white rounded-md font-semibold"
+                        >
+                            {withdrawing ? 'Registrando...' : 'Registrar extracción'}
+                        </button>
+                    </form>
+                    {withdrawMessage && (
+                        <p className={`mt-3 text-sm ${withdrawMessage.type === 'success' ? 'text-green-700' : 'text-red-600'}`}>
+                            {withdrawMessage.text}
+                        </p>
+                    )}
+                </section>
+                )}
             </div>
 
             {confirmAction && (

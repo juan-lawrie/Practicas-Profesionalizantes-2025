@@ -2,6 +2,104 @@ import React, { useState, useEffect } from 'react';
 import { formatMovementDate } from '../utils/date';
 import { formatMoney } from '../utils/format';
 
+const isPurchaseMovement = (movement) => {
+    const method = String(movement.payment_method || '').toLowerCase();
+    const description = String(movement.description || '').toLowerCase();
+    return method === 'compra' || description.startsWith('compra');
+};
+
+const isBankWithdrawal = (movement) => {
+    const method = String(movement.payment_method || '').toLowerCase();
+    const description = String(movement.description || '').toLowerCase();
+    return method === 'depósito bancario' || method === 'deposito bancario'
+        || description.startsWith('depósito en banco') || description.startsWith('deposito en banco');
+};
+
+const movementTypeLabel = (movement) =>
+    isBankWithdrawal(movement) ? 'Egreso de dinero para Depósito Bancario' : 'Ingreso';
+
+const parseSaleItems = (description) => {
+    const text = String(description || '').replace(/^Venta:\s*/i, '').trim();
+    if (!text) return [];
+    return text.split(',').map(part => part.trim()).filter(Boolean).map(part => {
+        const match = part.match(/^(.*)\sx(\d+(?:[.,]\d+)?)$/i);
+        if (!match) return { name: part, quantity: '—' };
+        return { name: match[1].trim(), quantity: match[2] };
+    });
+};
+
+const ProductsCell = ({ movement }) => {
+    if (isBankWithdrawal(movement)) {
+        const amount = Math.abs(Number(movement.amount) || 0);
+        return (
+            <p className="text-right font-bold text-red-600">Total final = -{formatMoney(amount)}</p>
+        );
+    }
+    const items = parseSaleItems(movement.description);
+    return (
+        <table className="w-full text-xs border border-gray-200 rounded-md overflow-hidden">
+            <thead className="bg-gray-100 text-gray-700">
+                <tr>
+                    <th className="px-2 py-1 text-left font-semibold">Producto</th>
+                    <th className="px-2 py-1 text-right font-semibold">Cant.</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items.length === 0 ? (
+                    <tr>
+                        <td colSpan={2} className="px-2 py-1">{movement.description || '—'}</td>
+                    </tr>
+                ) : items.map((item, index) => (
+                    <tr key={index} className="border-t border-gray-200">
+                        <td className="px-2 py-1 text-left">{item.name}</td>
+                        <td className="px-2 py-1 text-right">{item.quantity}</td>
+                    </tr>
+                ))}
+            </tbody>
+            <tfoot>
+                <tr className="border-t-4 border-gray-900">
+                    <td colSpan={2} className="px-2 py-1 text-right font-bold">
+                        Total final = {formatMoney(movement.amount)}
+                    </td>
+                </tr>
+            </tfoot>
+        </table>
+    );
+};
+
+const MovementsTable = ({ movements }) => (
+    <div className="overflow-x-auto bg-white">
+        {movements.length === 0 ? (
+            <p className="text-center text-gray-500 py-12">No se encontraron movimientos</p>
+        ) : (
+            <table className="min-w-full text-sm">
+                <thead className="bg-slate-800 text-white">
+                    <tr>
+                        <th className="px-3 py-2 text-left font-semibold">Fecha</th>
+                        <th className="px-3 py-2 text-left font-semibold">Método de Pago</th>
+                        <th className="px-3 py-2 text-left font-semibold">Tipo de movimiento</th>
+                        <th className="px-3 py-2 text-right font-semibold">Productos</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                    {movements.map(movement => (
+                        <tr key={movement.id} className="align-top hover:bg-gray-50">
+                            <td className="px-3 py-3 whitespace-nowrap text-gray-700">{formatMovementDate(movement.date)}</td>
+                            <td className="px-3 py-3 capitalize text-gray-700">{isBankWithdrawal(movement) ? '-' : (movement.payment_method || '—')}</td>
+                            <td className={`px-3 py-3 font-semibold ${isBankWithdrawal(movement) ? 'text-red-600' : 'text-green-700'}`}>
+                                {movementTypeLabel(movement)}
+                            </td>
+                            <td className="px-3 py-3 min-w-[240px]">
+                                <div className="ml-auto w-full max-w-md"><ProductsCell movement={movement} /></div>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        )}
+    </div>
+);
+
 const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
     const [cashSortOrder, setCashSortOrder] = useState('desc');
     const [cashAmountFilter, setCashAmountFilter] = useState('');
@@ -15,6 +113,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
     const [cashDateTo, setCashDateTo] = useState('');
 
     const [showFilters, setShowFilters] = useState(false);
+    const [dialogFiltersOpen, setDialogFiltersOpen] = useState(false);
     
     // Estado para el diálogo de historial
     const [showHistoryDialog, setShowHistoryDialog] = useState(false);
@@ -50,7 +149,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
 
     // Función para obtener movimientos filtrados
     const getFilteredCashMovements = () => {
-        let filtered = [...cashMovements];
+        let filtered = [...cashMovements].filter(movement => !isPurchaseMovement(movement));
         
         if (cashAmountFilter.trim()) {
             filtered = filtered.filter(movement => {
@@ -116,6 +215,17 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
         const dateB = new Date(b.date);
         return cashSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     });
+
+    const clearFilters = () => {
+        setCashSortOrder('desc');
+        setCashAmountFilter('');
+        setCashAmountFilterOp('equals');
+        setCashDescriptionFilter('');
+        setCashDescriptionFilterOp('contains');
+        setCashPaymentMethodFilter([]);
+        setCashDateFrom('');
+        setCashDateTo('');
+    };
 
     // Effect para manejar drag/resize con eventos globales
     useEffect(() => {
@@ -236,7 +346,11 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                         }
                         
                         function filterMovements() {
-                            let filtered = [...allMovements];
+                            let filtered = [...allMovements].filter(function(m) {
+                                const method = String(m.payment_method || '').toLowerCase();
+                                const description = String(m.description || '').toLowerCase();
+                                return method !== 'compra' && !description.startsWith('compra');
+                            });
                             
                             // Filtro de monto
                             if (filters.amountFilter.trim()) {
@@ -307,20 +421,70 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                             if (filtered.length === 0) {
                                 container.innerHTML = '<p class="text-center text-gray-500 py-12 text-lg col-span-full">No se encontraron movimientos</p>';
                             } else {
-                                container.innerHTML = filtered.map(m => \`
-                                    <div class="border border-gray-200 rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors hover:shadow-md">
-                                        <div class="flex justify-between items-start mb-3">
-                                            <span class="text-xs text-gray-500">\${formatDate(m.date)}</span>
-                                            <span class="text-lg font-bold text-green-600">\${formatMoney(m.amount)}</span>
-                                        </div>
-                                        <div class="font-medium text-gray-800 text-sm">
-                                            <p class="line-clamp-2 mb-2">\${m.description}</p>
-                                            \${m.payment_method ? \`<span class="block text-xs text-gray-600 mb-2 capitalize"> \${m.payment_method}</span>\` : ''}
-                                            \${m.session_opened_by ? \`<span class="block text-xs text-gray-500">Caja abierta por \${m.session_opened_by}</span>\` : ''}
-                                        </div>
-                                    </div>
-                                \`).join('');
+                                container.innerHTML = '<div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-slate-800 text-white"><tr><th class="px-3 py-2 text-left">Fecha</th><th class="px-3 py-2 text-left">Método de Pago</th><th class="px-3 py-2 text-left">Tipo de movimiento</th><th class="px-3 py-2 text-right">Productos</th></tr></thead><tbody class="divide-y divide-gray-200">'
+                                    + filtered.map(function(m) {
+                                        const egreso = isBankWithdrawal(m);
+                                        return '<tr class="align-top hover:bg-gray-50"><td class="px-3 py-3 whitespace-nowrap">' + formatDate(m.date) + '</td><td class="px-3 py-3 capitalize">' + (egreso ? '-' : (m.payment_method || '—')) + '</td><td class="px-3 py-3 font-semibold ' + (egreso ? 'text-red-600' : 'text-green-700') + '">' + (egreso ? 'Egreso de dinero para Depósito Bancario' : 'Ingreso') + '</td><td class="px-3 py-3 min-w-[240px]"><div class="ml-auto w-full max-w-md">' + movementRows(m) + '</div></td></tr>';
+                                    }).join('')
+                                    + '</tbody></table></div>';
                             }
+                        }
+                        
+                        function toggleFilters() {
+                            const body = document.getElementById('filters-body');
+                            const label = document.getElementById('filters-toggle-label');
+                            if (!body || !label) return;
+                            const isHidden = body.classList.toggle('hidden');
+                            label.textContent = isHidden ? '(mostrar)' : '(ocultar)';
+                        }
+
+                        function clearFilters() {
+                            filters = {
+                                sortOrder: 'desc',
+                                amountFilter: '',
+                                amountFilterOp: 'equals',
+                                descriptionFilter: '',
+                                descriptionFilterOp: 'contains',
+                                paymentMethodFilter: [],
+                                dateFrom: '',
+                                dateTo: ''
+                            };
+                            const body = document.getElementById('filters-body');
+                            if (body) {
+                                body.querySelectorAll('input').forEach(function(input) {
+                                    if (input.type === 'checkbox') input.checked = false;
+                                    else input.value = '';
+                                });
+                                body.querySelectorAll('select').forEach(function(select) {
+                                    select.selectedIndex = 0;
+                                });
+                            }
+                            renderMovements();
+                        }
+
+                        function isBankWithdrawal(movement) {
+                            const method = String(movement.payment_method || '').toLowerCase();
+                            const description = String(movement.description || '').toLowerCase();
+                            return method === 'depósito bancario' || method === 'deposito bancario'
+                                || description.indexOf('depósito en banco') === 0 || description.indexOf('deposito en banco') === 0;
+                        }
+
+                        function movementRows(movement) {
+                            if (isBankWithdrawal(movement)) {
+                                const amount = Math.abs(Number(movement.amount) || 0);
+                                return '<p class="text-right font-bold text-red-600">Total final = -' + formatMoney(amount) + '</p>';
+                            }
+                            const text = String(movement.description || '').replace(/^Venta:\\s*/i, '').trim();
+                            const items = text ? text.split(',').map(function(part) { return part.trim(); }).filter(Boolean) : [];
+                            const rows = items.map(function(part) {
+                                const match = part.match(/^(.*)\\sx(\\d+(?:[.,]\\d+)?)$/i);
+                                const name = match ? match[1].trim() : part;
+                                const quantity = match ? match[2] : '—';
+                                return '<tr class="border-t border-gray-200"><td class="px-2 py-1">' + name + '</td><td class="px-2 py-1 text-right">' + quantity + '</td></tr>';
+                            }).join('');
+                            return '<table class="w-full text-xs border border-gray-200 rounded-md overflow-hidden"><thead class="bg-gray-100"><tr><th class="px-2 py-1 text-left">Producto</th><th class="px-2 py-1 text-right">Cant.</th></tr></thead><tbody>'
+                                + (rows || '<tr><td class="px-2 py-1" colspan="2">' + (movement.description || '—') + '</td></tr>')
+                                + '</tbody><tfoot><tr class="border-t-4 border-gray-900"><td colspan="2" class="px-2 py-1 text-right font-bold">Total final = ' + formatMoney(movement.amount) + '</td></tr></tfoot></table>';
                         }
                         
                         function updateFilter(key, value) {
@@ -351,8 +515,12 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                         </div>
 
                         <!-- Filtros Interactivos -->
-                        <div class="bg-white border-b border-gray-200 p-4 shadow-sm">
-                            <h4 class="text-md font-bold text-gray-700 mb-3">🔍 Filtros</h4>
+                        <div class="bg-white border-b border-gray-200 shadow-sm">
+                            <div class="px-4 py-3 flex items-center justify-between gap-2">
+                                <button type="button" onclick="toggleFilters()" class="text-md font-bold text-gray-700">Filtros <span id="filters-toggle-label">(mostrar)</span></button>
+                                <button type="button" onclick="clearFilters()" class="px-3 py-1 text-xs font-semibold text-blue-700 bg-white border border-blue-200 rounded-md">Limpiar filtros</button>
+                            </div>
+                            <div id="filters-body" class="hidden px-4 pb-4">
                             
                             <!-- Fila 1: Orden + Select Monto + Input Monto -->
                             <div class="grid gap-3 mb-3" style="grid-template-columns: 1fr 180px 1fr;">
@@ -441,11 +609,12 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                     </div>
                                 </div>
                             </div>
+                            </div>
                         </div>
 
                         <!-- Grid de movimientos -->
                         <div class="p-6">
-                            <div id="movementsGrid" class="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                            <div id="movementsGrid" class="overflow-x-auto">
                                 <!-- Se llena dinámicamente -->
                             </div>
                         </div>
@@ -478,7 +647,10 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
 
                     {/* Filtros - Desktop (solo en pantallas <1200px) */}
                     <div className="bg-white rounded-lg shadow-md p-3 overflow-y-auto max-h-[calc(100vh-180px)] hidden lg:block min-[1200px]:hidden">
-                        <h3 className="text-md font-bold text-gray-700 mb-3">🔍 Filtros</h3>
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-md font-bold text-gray-700">Filtros</h3>
+                            <button type="button" onClick={clearFilters} className="px-2 py-1 text-xs font-semibold text-blue-700 border border-blue-200 rounded-md">Limpiar filtros</button>
+                        </div>
                         
                         <div className="flex gap-2 mb-3 flex-col min-[1240px]:flex-row">
                             <div className="w-auto min-w-[140px] max-w-[160px]">
@@ -634,8 +806,17 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                             onClick={() => setShowFilters(!showFilters)}
                             className="w-full font-bold text-gray-700 bg-white rounded-lg shadow-md p-3 cursor-pointer text-left flex justify-between items-center"
                         >
-                            <span>🔍 Filtros</span>
-                            <span className={`transform transition-transform ${showFilters ? 'rotate-180' : ''}`}>▼</span>
+                            <span>Filtros</span>
+                            <span className="flex items-center gap-2">
+                                <span
+                                    role="button"
+                                    onClick={(e) => { e.stopPropagation(); clearFilters(); }}
+                                    className="px-2 py-1 text-xs font-semibold text-blue-700 bg-blue-50 rounded-md"
+                                >
+                                    Limpiar
+                                </span>
+                                <span className={`transform transition-transform ${showFilters ? 'rotate-180' : ''}`}>▼</span>
+                            </span>
                         </button>
                         {showFilters && (
                             <div className="bg-white rounded-lg shadow-md p-3 mt-2 overflow-y-auto max-h-[calc(100vh-200px)]">
@@ -824,40 +1005,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                             {filteredMovements.length === 0 ? (
                                 <p className="text-center text-gray-500 py-12">No se encontraron movimientos</p>
                             ) : (
-                                <div className="
-                                    grid gap-4
-                                    grid-cols-1
-                                    sm:grid-cols-2
-                                    md:grid-cols-2
-                                    min-[1020px]:grid-cols-3
-                                    max-h-[calc(100vh-200px)]
-                                    overflow-y-auto
-                                ">
-                                    {filteredMovements.map(movement => (
-                                        <div 
-                                            key={movement.id} 
-                                            className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors break-words"
-                                        >
-                                            <div className="flex justify-between items-start mb-2">
-                                                <span className="text-xs text-gray-500">{formatMovementDate(movement.date)}</span>
-                                                <span className="text-lg font-bold text-green-600">{formatMoney(movement.amount)}</span>
-                                            </div>
-                                            <div className="font-medium text-gray-800 text-sm">
-                                                {movement.description}
-                                                {movement.payment_method && (
-                                                    <span className="block text-sm text-gray-600 mt-1">
-                                                        ({movement.payment_method})
-                                                    </span>
-                                                )}
-                                                {movement.session_opened_by && (
-                                                    <span className="block text-xs text-gray-500 mt-1">
-                                                        Caja abierta por {movement.session_opened_by}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                                <MovementsTable movements={filteredMovements} />
                             )}
                         </div>
                     </div>
@@ -946,8 +1094,25 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
 
                         {!isMinimized && (
                             <>
-                                <div className="border-b border-gray-200 bg-gray-50 p-3 overflow-y-auto max-h-[300px]">
-                                    <h4 className="text-sm font-bold text-gray-700 mb-3">🔍 Filtros</h4>
+                                <div className="border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                                    <div className="px-3 py-2 flex items-center justify-between gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setDialogFiltersOpen(open => !open)}
+                                            className="text-sm font-bold text-gray-700"
+                                        >
+                                            Filtros {dialogFiltersOpen ? '(ocultar)' : '(mostrar)'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={clearFilters}
+                                            className="px-3 py-1 text-xs font-semibold text-blue-700 bg-white border border-blue-200 rounded-md hover:bg-blue-50"
+                                        >
+                                            Limpiar filtros
+                                        </button>
+                                    </div>
+                                    {dialogFiltersOpen && (
+                                    <div className="px-3 pb-3 overflow-y-auto max-h-[300px]">
                                     
                                     <div className="grid grid-cols-2 gap-3 mb-3">
                                         <div>
@@ -1059,39 +1224,12 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                             </div>
                                         </div>
                                     </div>
+                                    </div>
+                                    )}
                                 </div>
 
                                 <div className="flex-1 p-4 overflow-y-auto">
-                                    {filteredMovements.length === 0 ? (
-                                        <p className="text-center text-gray-500 py-12">No se encontraron movimientos</p>
-                                    ) : (
-                                        <div className="grid gap-3 grid-cols-1 md:grid-cols-2 min-[1200px]:grid-cols-3 min-[1300px]:grid-cols-4 min-[1800px]:grid-cols-5 min-[2400px]:grid-cols-6">
-                                            {filteredMovements.map(movement => (
-                                                <div 
-                                                    key={movement.id} 
-                                                    className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors hover:shadow-md"
-                                                >
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <span className="text-xs text-gray-500">{formatMovementDate(movement.date)}</span>
-                                                        <span className="text-base font-bold text-green-600">{formatMoney(movement.amount)}</span>
-                                                    </div>
-                                                    <div className="font-medium text-gray-800 text-sm">
-                                                        <p className="line-clamp-2">{movement.description}</p>
-                                                        {movement.payment_method && (
-                                                            <span className="block text-xs text-gray-600 mt-1 capitalize">
-                                                                 {movement.payment_method}
-                                                            </span>
-                                                        )}
-                                                        {movement.session_opened_by && (
-                                                            <span className="block text-xs text-gray-500 mt-1">
-                                                                Caja abierta por {movement.session_opened_by}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
+                                    <MovementsTable movements={filteredMovements} />
                                 </div>
 
                                 <div 

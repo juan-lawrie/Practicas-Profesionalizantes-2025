@@ -613,7 +613,6 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
                                         <th className="px-3 py-3 text-left text-sm font-semibold">Fecha</th>
                                         <th className="px-3 py-3 text-left text-sm font-semibold">Método</th>
                                         <th className="px-3 py-3 text-left text-sm font-semibold">Estado</th>
-                                        <th className="px-3 py-3 text-right text-sm font-semibold">Total</th>
                                         <th className="px-3 py-3 text-left text-sm font-semibold">Productos</th>
                                     </tr>
                                 </thead>
@@ -662,9 +661,6 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
                                                     )}
                                                 </div>
                                             </td>
-                                            <td className="px-3 py-3 text-sm text-gray-700 text-right whitespace-nowrap font-semibold">
-                                                ${safeToFixed(order.totalAmount)}
-                                            </td>
                                             <td className="px-3 py-3 text-sm text-gray-700 min-w-[280px]">
                                                 <table className="w-full text-sm border border-gray-200 rounded-md overflow-hidden">
                                                     <thead className="bg-gray-100 text-gray-700">
@@ -685,6 +681,13 @@ function PedDialogo({ orders, setOrders, products = [], loadCashBalance, isOpen,
                                                             </tr>
                                                         ))}
                                                     </tbody>
+                                                    <tfoot>
+                                                        <tr className="border-t-4 border-gray-900">
+                                                            <td colSpan={4} className="px-2 py-2 text-right font-bold text-gray-900">
+                                                                Total final = ${safeToFixed(order.totalAmount)}
+                                                            </td>
+                                                        </tr>
+                                                    </tfoot>
                                                 </table>
                                             </td>
                                         </tr>

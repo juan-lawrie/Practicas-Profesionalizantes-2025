@@ -1,16 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Registrar_Venta from './Registrar_Venta';
 import Movimientos_De_Caja from './Movimientos_De_Caja';
-import Apertura_Cierre_Caja, { ROLES_APERTURA_CAJA } from './Apertura_Cierre_Caja';
 import { getCashRegisterStatus } from '../services/api';
 
 const CASH_REGISTER_REFRESH_MS = 30000;
 
 // Vive fuera de App para no volver a montarse (y perder la pestaña activa) con cada cambio de estado de App
-const SalesView = ({ products, loadProducts, loadCashMovements, cashMovements, cashBalance, userRole }) => {
-    const [activeTab, setActiveTab] = useState('ventas'); // 'ventas', 'caja' o 'apertura'
+const SalesView = ({ products, loadProducts, loadCashMovements, cashMovements, cashBalance }) => {
+    const [activeTab, setActiveTab] = useState('ventas');
     const [cashRegister, setCashRegister] = useState(null);
-    const canManageCashRegister = ROLES_APERTURA_CAJA.includes(userRole);
 
     const loadCashRegister = useCallback(async () => {
         try {
@@ -35,9 +33,6 @@ const SalesView = ({ products, loadProducts, loadCashMovements, cashMovements, c
         { id: 'ventas', label: 'Registrar Venta' },
         { id: 'caja', label: 'Movimientos de Caja' },
     ];
-    if (canManageCashRegister) {
-        tabs.push({ id: 'apertura', label: 'Apertura y Cierre de Caja' });
-    }
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -92,15 +87,6 @@ const SalesView = ({ products, loadProducts, loadCashMovements, cashMovements, c
                         cashBalance={cashBalance}
                     />
                 </div>
-
-                {canManageCashRegister && (
-                    <div style={{ display: activeTab === 'apertura' ? 'block' : 'none' }}>
-                        <Apertura_Cierre_Caja
-                            cashRegister={cashRegister}
-                            onRefresh={loadCashRegister}
-                        />
-                    </div>
-                )}
             </div>
         </div>
     );

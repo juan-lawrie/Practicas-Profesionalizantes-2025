@@ -1163,6 +1163,29 @@ def apply_purchase_item_stock(item, supplier=None):
         supplier.supplied_products.add(product)
 
 
+def deduct_purchase_from_cash(purchase, user):
+    """La compra sale de la caja: registra una salida por el total."""
+    amount = purchase.total_amount or Decimal('0')
+    if amount <= 0:
+        return
+    session = CashRegisterSession.objects.filter(is_open=True).first()
+    if session is None:
+        raise ValidationError({'detail': 'La caja está cerrada. Hay que abrirla para registrar la compra y descontar el dinero.'})
+    supplier_name = purchase.supplier or ''
+    description = f'Compra #{purchase.id}'
+    if supplier_name:
+        description = f'{description} a {supplier_name}'
+    CashMovement.objects.create(
+        type='Salida',
+        amount=amount,
+        description=description,
+        user=user,
+        payment_method='Compra',
+        session=session,
+        hidden_from_history=True,
+    )
+
+
 # ViewSet para compras
 class PurchaseViewSet(viewsets.ModelViewSet):
     queryset = Purchase.objects.filter(is_active=True).order_by('-created_at')
@@ -1241,6 +1264,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
                         apply_purchase_item_stock(item, supplier)
                     purchase.items = list(purchase.items)
                     purchase.save(update_fields=['items'])
+                    deduct_purchase_from_cash(purchase, user)
         except Exception as e:
             raise e
 
@@ -1311,11 +1335,16 @@ class PurchaseViewSet(viewsets.ModelViewSet):
                         logger.error(f"Error processing items in purchase {purchase.id}: {str(e)}")
                         raise e
 
+                deduct_purchase_from_cash(purchase, request.user)
+
                 purchase.status = 'Aprobada'
                 purchase.approved_by = request.user
                 purchase.approved_at = timezone.now()
                 purchase.save()
                 logger.info(f'Purchase {purchase.id} status updated to {purchase.status}')
+        except ValidationError as e:
+            detail = e.detail.get('detail') if isinstance(e.detail, dict) else e.detail
+            return Response({'detail': detail}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f'Error during approval process for purchase {purchase.id}: {str(e)}')
             return Response({'error': f'Error during approval process: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1372,6 +1401,8 @@ class CashMovementViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return (
             CashMovement.objects.filter(hidden_from_history=False)
+            .exclude(payment_method__iexact='Compra')
+            .exclude(description__istartswith='Compra')
             .select_related('user', 'session__opened_by')
             .order_by('-timestamp')
         )
@@ -1387,7 +1418,17 @@ class CashMovementViewSet(viewsets.ModelViewSet):
             print(f"[CashMovementViewSet.perform_create] Creating movement user={self.request.user if self.request.user.is_authenticated else 'Anonymous'} type={data.get('type')} amount={data.get('amount')}")
         except Exception as e:
             print(f"[CashMovementViewSet.perform_create] Error reading validated_data: {e}")
-        session = require_open_cash_register()
+        payment_method = serializer.validated_data.get('payment_method') or ''
+        description = serializer.validated_data.get('description') or ''
+        is_bank_withdrawal = payment_method == 'Depósito bancario' or description == 'Depósito en banco'
+        if is_bank_withdrawal:
+            role = getattr(self.request.user, 'role', None)
+            role_name = role.name if role else None
+            if role_name != 'Gerente':
+                raise ValidationError({'detail': 'Solo el Gerente puede registrar una extracción para el banco.'})
+            session = CashRegisterSession.objects.filter(is_open=True).first()
+        else:
+            session = require_open_cash_register()
         serializer.save(user=self.request.user, session=session)
 
     # Override list to add debug logging for incoming requests

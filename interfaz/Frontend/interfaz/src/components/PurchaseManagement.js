@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import CreatableSelect from 'react-select/creatable';
-import api from '../services/api';
+import api, { getApiErrorMessage } from '../services/api';
 import { formatMoney } from '../utils/format';
 import { productsForSuppliers, productLabel, suppliersForProduct } from '../utils/supplierCatalog';
 import PurchaseRequests from './PurchaseRequests';
@@ -280,7 +280,7 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
             }
         } catch (error) {
             console.error('Error al registrar la compra:', error);
-            setMessage('Error al registrar la compra. Por favor, intente nuevamente.');
+            setMessage(getApiErrorMessage(error, 'Error al registrar la compra. Por favor, intente nuevamente.'));
         }
     };
 
@@ -355,7 +355,7 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
             setTimeout(() => setMessage(''), 3000);
         } catch (error) {
             console.error('Error approving purchase:', error);
-            setMessage('Error al aprobar la compra.');
+            setMessage(getApiErrorMessage(error, 'Error al aprobar la compra.'));
             setTimeout(() => setMessage(''), 3000);
         }
     };
@@ -439,7 +439,7 @@ const PurchaseManagement = ({ userRole, inventory = [], suppliers = [], products
             setTimeout(() => setMessage(''), 3000);
         } catch (error) {
             console.error('Error al registrar la compra desde diálogo:', error);
-            setMessage('Error al registrar la compra. Por favor, intente nuevamente.');
+            setMessage(getApiErrorMessage(error, 'Error al registrar la compra. Por favor, intente nuevamente.'));
             setTimeout(() => setMessage(''), 3000);
         }
     };

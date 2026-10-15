@@ -23,6 +23,7 @@ import ProductManagement from './components/ProductManagement';
 import LossManagement from './components/LossManagement';
 import UserManagement from './components/UserManagement';
 import SalesView from './components/SalesView';
+import Apertura_Cierre_Caja from './components/Apertura_Cierre_Caja';
 import Pedidos from './components/Pedidos';
 import PedDialogo from './components/PedDialogo';
 import Edicion from './components/Edicion';
@@ -166,10 +167,10 @@ const passwordPolicy = {
 };
 
 const rolePermissions = {
-    'Gerente': ['Dashboard', 'Inventario', 'Gestión de Usuarios', 'Ventas', 'Pedidos', 'Productos', 'Edicion', 'Proveedores', 'Compras', 'Consultas', 'Ver Reportes de Faltantes'],
+    'Gerente': ['Dashboard', 'Inventario', 'Gestión de Usuarios', 'Ventas', 'Apertura y Cierre de Caja', 'Pedidos', 'Productos', 'Edicion', 'Proveedores', 'Compras', 'Consultas', 'Ver Reportes de Faltantes'],
     'Panadero': ['Dashboard', 'Inventario', 'Ventas', 'Datos de mi Usuario', 'Reportar Faltantes'],
-    'Encargado': ['Dashboard', 'Inventario', 'Ventas', 'Compras', 'Datos de mi Usuario', 'Gestión de Pérdidas'],
-    'Cajero': ['Dashboard', 'Ventas', 'Inventario', 'Datos de mi Usuario', 'Reportar Faltantes'],
+    'Encargado': ['Dashboard', 'Inventario', 'Ventas', 'Apertura y Cierre de Caja', 'Compras', 'Datos de mi Usuario', 'Gestión de Pérdidas'],
+    'Cajero': ['Dashboard', 'Ventas', 'Apertura y Cierre de Caja', 'Inventario', 'Datos de mi Usuario', 'Reportar Faltantes'],
   };
 
 // Componente principal de la aplicación.
@@ -2846,7 +2847,7 @@ const PurchaseRequests = () => {
 
         // Defensive: ensure currentPage is a known page when logged in to avoid falling
         // into the default case which renders the "Página no encontrada." message
-    const validPages = new Set(['dashboard','inventario','ventas','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'edicion','login', 'reportar faltantes', 'ver reportes de faltantes', 'gestión de pérdidas', 'generate-token']);
+    const validPages = new Set(['dashboard','inventario','ventas','apertura y cierre de caja','productos','gestión de usuarios','proveedores','compras','pedidos','consultas', 'datos de mi usuario', 'edicion','login', 'reportar faltantes', 'ver reportes de faltantes', 'gestión de pérdidas', 'generate-token']);
         let pageToRender = currentPage;
         if (!validPages.has(String(currentPage))) {
             console.warn('⚠️ currentPage inválido detectado, forzando a dashboard:', currentPage);
@@ -2867,6 +2868,14 @@ const PurchaseRequests = () => {
                     cashBalance={cashBalance}
                     userRole={userRole}
                 />;
+            case 'apertura y cierre de caja':
+                return (
+                    <Apertura_Cierre_Caja
+                        cashMovements={cashMovements}
+                        loadCashMovements={loadCashMovements}
+                        userRole={userRole}
+                    />
+                );
           
             case 'productos':
                 return userRole === 'Gerente' ? <ProductManagement 

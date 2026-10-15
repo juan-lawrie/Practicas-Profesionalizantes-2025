@@ -22,6 +22,7 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
 
     // Estados para el diálogo de usuarios
     const [showUsersDialog, setShowUsersDialog] = useState(false);
+    const [dialogFiltersOpen, setDialogFiltersOpen] = useState(false);
     const [isMinimized, setIsMinimized] = useState(false);
     const [dialogSize, setDialogSize] = useState({ width: 1200, height: 700 });
     const [isDragging, setIsDragging] = useState(false);
@@ -929,9 +930,12 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                     function renderFilters() {
                         const container = document.getElementById('filters-container');
                         container.innerHTML = \`
-                            <div class="bg-white rounded-lg shadow-md p-6 mb-4">
-                                <h3 class="text-lg font-bold text-gray-800 mb-4">🔍 Filtros</h3>
-                                <!-- Búsqueda -->
+                            <div class="bg-white rounded-lg shadow-md mb-4">
+                                <button type="button" id="toggle-filters" class="w-full px-6 py-4 flex items-center justify-between text-lg font-bold text-gray-800">
+                                    <span>Filtros</span>
+                                    <span id="toggle-filters-label">Mostrar</span>
+                                </button>
+                                <div id="filters-body" class="hidden px-6 pb-6">
                                 <div class="mb-4">
                                     <label class="block text-sm font-semibold text-gray-700 mb-2">Buscar usuario</label>
                                     <input
@@ -941,7 +945,6 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                     />
                                 </div>
-                                <!-- Filtros por rol y estado en la misma fila -->
                                 <div class="mb-4 flex flex-col xl:flex-row xl:items-end xl:gap-4">
                                     <div>
                                         <label class="block text-sm font-semibold text-gray-700 mb-2">Filtrar por rol</label>
@@ -970,8 +973,16 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                                         </select>
                                     </div>
                                 </div>
+                                </div>
                             </div>
                         \`;
+
+                        document.getElementById('toggle-filters').addEventListener('click', () => {
+                            const body = document.getElementById('filters-body');
+                            const label = document.getElementById('toggle-filters-label');
+                            const isHidden = body.classList.toggle('hidden');
+                            label.textContent = isHidden ? 'Mostrar' : 'Ocultar';
+                        });
                         
                         // Event listeners
                         document.getElementById('search-input').addEventListener('input', (e) => {
@@ -1000,73 +1011,52 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                         const filteredUsers = filterUsers();
                         const container = document.getElementById('users-container');
                         container.innerHTML = \`
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 users-grid-dialog gap-4">
-                                \${filteredUsers.map(user => \`
-                                    <div class="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-5">
-                                        <div class="flex items-center mb-3">
-                                            <div class="flex-shrink-0 h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center">
-                                                <span class="text-blue-600 font-bold text-lg">
-                                                    \${(user.first_name?.[0] || user.username?.[0] || '?').toUpperCase()}
-                                                </span>
-                                            </div>
-                                            <div class="ml-3 flex-1 min-w-0 overflow-hidden">
-                                                <div class="text-sm font-semibold text-gray-900 truncate">
-                                                    \${user.first_name} \${user.last_name}
-                                                </div>
-                                                <div class="text-xs text-gray-500 truncate">
-                                                    @\${user.username}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="mb-3">
-                                            <div class="text-xs text-gray-500 mb-1">Email</div>
-                                            <div class="text-sm text-gray-900 truncate">\${user.email}</div>
-                                        </div>
-                                        <div class="flex flex-wrap gap-2 mb-3">
-                                            <span class="px-2 py-1 text-xs font-semibold rounded-full \${
-                                                user.role?.name === 'Gerente' ? 'bg-purple-100 text-purple-800' :
+                            <div class="bg-white rounded-lg shadow-md overflow-x-auto">
+                                <table class="min-w-full text-sm">
+                                    <thead class="bg-slate-800 text-white">
+                                        <tr>
+                                            <th class="px-3 py-2 text-left font-semibold">Usuario</th>
+                                            <th class="px-3 py-2 text-left font-semibold">Nombre y Apellido</th>
+                                            <th class="px-3 py-2 text-left font-semibold">Email</th>
+                                            <th class="px-3 py-2 text-left font-semibold">Rol</th>
+                                            <th class="px-3 py-2 text-right font-semibold">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-200">
+                                        \${filteredUsers.map(user => {
+                                            const roleClass = user.role?.name === 'Gerente' ? 'bg-purple-100 text-purple-800' :
                                                 user.role?.name === 'Encargado' ? 'bg-blue-100 text-blue-800' :
                                                 user.role?.name === 'Panadero' ? 'bg-green-100 text-green-800' :
                                                 user.role?.name === 'Cajero' ? 'bg-yellow-100 text-yellow-800' :
-                                                'bg-gray-100 text-gray-800'
-                                            }">
-                                                \${user.role?.name || 'Sin rol'}
-                                            </span>
-                                            \${user.is_locked ? '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">🔒 Bloqueado</span>' : ''}
-                                        </div>
-                                        <div class="flex flex-col gap-2">
-                                            \${user.is_locked ? \`
-                                                <button
-                                                    onclick="showModal('unlock', \${JSON.stringify(user).replace(/"/g, '&quot;')})"
-                                                    class="w-full px-3 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
-                                                >
-                                                    🔓 Desbloquear
-                                                </button>
-                                            \` : (user.role?.name !== 'Gerente' ? \`
-                                                <button
-                                                    onclick="showModal('lock', \${JSON.stringify(user).replace(/"/g, '&quot;')})"
-                                                    class="w-full px-3 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-md transition-colors"
-                                                >
-                                                    🔒 Bloquear
-                                                </button>
-                                            \` : '')}
-                                            <div class="grid grid-cols-2 gap-2">
-                                                <button
-                                                    onclick="showModal('edit', \${JSON.stringify(user).replace(/"/g, '&quot;')})"
-                                                    class="px-3 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-                                                >
-                                                    ✏️ Editar
-                                                </button>
-                                                <button
-                                                    onclick="showModal('delete', \${JSON.stringify(user).replace(/"/g, '&quot;')})"
-                                                    class="px-3 py-2 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
-                                                >
-                                                    🗑️ Eliminar
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                \`).join('')}
+                                                'bg-gray-100 text-gray-800';
+                                            const fullName = ((user.first_name || '') + ' ' + (user.last_name || '')).trim() || 'Sin nombre';
+                                            const userArg = JSON.stringify(user).replace(/"/g, '&quot;');
+                                            const lockButton = user.is_locked
+                                                ? '<button onclick="showModal(\\'unlock\\', ' + userArg + ')" class="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md">Desbloquear</button>'
+                                                : (user.role?.name !== 'Gerente'
+                                                    ? '<button onclick="showModal(\\'lock\\', ' + userArg + ')" class="px-3 py-1.5 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-md">Bloquear</button>'
+                                                    : '');
+                                            return \`
+                                            <tr class="hover:bg-gray-50">
+                                                <td class="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">\${user.username}</td>
+                                                <td class="px-3 py-3 text-gray-800">\${fullName}</td>
+                                                <td class="px-3 py-3 text-gray-700">\${user.email}</td>
+                                                <td class="px-3 py-3">
+                                                    <span class="px-2 py-1 text-xs font-semibold rounded-full \${roleClass}">\${user.role?.name || 'Sin rol'}</span>
+                                                    \${user.is_locked ? '<span class="ml-1 px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Bloqueado</span>' : ''}
+                                                </td>
+                                                <td class="px-3 py-3">
+                                                    <div class="flex justify-end flex-wrap gap-2">
+                                                        \${lockButton}
+                                                        <button onclick="showModal('edit', \${userArg})" class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md">Editar</button>
+                                                        <button onclick="showModal('delete', \${userArg})" class="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md">Eliminar</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            \`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
                             </div>
                         \`;
                     }
@@ -1535,10 +1525,17 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                             {!isMinimized && (
                                 <div className="flex flex-col flex-1" style={{minHeight: 0}}>
                                     {/* Filtros dentro del diálogo */}
-                                    <div className="border-b border-gray-200 bg-gray-50 p-4 flex-shrink-0">
-                                        <h4 className="text-sm font-bold text-gray-700 mb-3">🔍 Filtros</h4>
-                                        
-                                        {/* Búsqueda */}
+                                    <div className="border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                                        <button
+                                            type="button"
+                                            onClick={() => setDialogFiltersOpen(open => !open)}
+                                            className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-gray-700 hover:bg-gray-100"
+                                        >
+                                            <span>Filtros</span>
+                                            <span>{dialogFiltersOpen ? 'Ocultar' : 'Mostrar'}</span>
+                                        </button>
+                                        {dialogFiltersOpen && (
+                                        <div className="px-4 pb-4">
                                         <div className="mb-3">
                                             <label className="block text-xs font-semibold text-gray-700 mb-1">Buscar usuario</label>
                                             <input
@@ -1550,7 +1547,6 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                                             />
                                         </div>
 
-                                        {/* Filtros por rol */}
                                         <div className="mb-3">
                                             <label className="block text-xs font-semibold text-gray-700 mb-1">Filtrar por rol</label>
                                             <div className="flex flex-wrap gap-3">
@@ -1574,7 +1570,6 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                                             </div>
                                         </div>
 
-                                        {/* Filtro por estado */}
                                         <div>
                                             <label className="block text-xs font-semibold text-gray-700 mb-1">Estado</label>
                                             <select
@@ -1587,6 +1582,8 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                                                 <option value="locked">Bloqueados</option>
                                             </select>
                                         </div>
+                                        </div>
+                                        )}
                                     </div>
 
                                     {/* Lista de usuarios en el diálogo */}
@@ -1597,81 +1594,76 @@ const UserManagement = ({ users, loadUsers, userRole }) => {
                                                 <p>No se encontraron usuarios</p>
                                             </div>
                                         ) : (
-                                            <div className="users-overlay-grid">
-                                                {filteredUsers.map(user => (
-                                                    <div key={user.id} className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors">
-                                                        <div className="flex items-center mb-3">
-                                                            <div className="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
-                                                                <span className="text-blue-600 font-bold">
-                                                                    {user.first_name?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase()}
-                                                                </span>
-                                                            </div>
-                                                            <div className="ml-3 flex-1 min-w-0">
-                                                                <div className="text-sm font-semibold text-gray-900 truncate">
-                                                                    {user.first_name} {user.last_name}
-                                                                </div>
-                                                                <div className="text-xs text-gray-500 truncate">
-                                                                    @{user.username}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="mb-2">
-                                                            <div className="text-xs text-gray-500">Email</div>
-                                                            <div className="text-sm text-gray-900 truncate">{user.email}</div>
-                                                        </div>
-                                                        <div className="flex flex-wrap gap-2 mb-4">
-                                                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                                                                user.role?.name === 'Gerente' ? 'bg-purple-100 text-purple-800' :
-                                                                user.role?.name === 'Encargado' ? 'bg-blue-100 text-blue-800' :
-                                                                user.role?.name === 'Panadero' ? 'bg-green-100 text-green-800' :
-                                                                user.role?.name === 'Cajero' ? 'bg-yellow-100 text-yellow-800' :
-                                                                'bg-gray-100 text-gray-800'
-                                                            }`}>
-                                                                {user.role?.name || 'Sin rol'}
-                                                            </span>
-                                                            {user.is_locked && (
-                                                                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                                                                    🔒 Bloqueado
-                                                                </span>
-                                                            )}
-                                                        </div>
-
-                                                        {/* Acciones */}
-                                                        <div className="flex flex-col gap-2">
-                                                            {user.is_locked ? (
-                                                                <button
-                                                                    onClick={() => handleConfirmUnlock(user)}
-                                                                    className="w-full px-3 py-2 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
-                                                                >
-                                                                    🔓 Desbloquear
-                                                                </button>
-                                                            ) : (
-                                                                user.role?.name !== 'Gerente' && (
-                                                                    <button
-                                                                        onClick={() => handleConfirmLock(user)}
-                                                                        className="w-full px-3 py-2 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-md transition-colors"
-                                                                    >
-                                                                        🔒 Bloquear
-                                                                    </button>
-                                                                )
-                                                            )}
-                                                            <div className="grid grid-cols-2 gap-2">
-                                                                <button
-                                                                    onClick={() => handleOpenEditModal(user)}
-                                                                    className="px-3 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-                                                                >
-                                                                    ✏️ Editar
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleConfirmDelete(user)}
-                                                                    className="px-3 py-2 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
-                                                                >
-                                                                    🗑️ Eliminar
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full text-sm">
+                                                    <thead className="bg-slate-800 text-white">
+                                                        <tr>
+                                                            <th className="px-3 py-2 text-left font-semibold">Usuario</th>
+                                                            <th className="px-3 py-2 text-left font-semibold">Nombre y Apellido</th>
+                                                            <th className="px-3 py-2 text-left font-semibold">Email</th>
+                                                            <th className="px-3 py-2 text-left font-semibold">Rol</th>
+                                                            <th className="px-3 py-2 text-right font-semibold">Acciones</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-200">
+                                                        {filteredUsers.map(user => (
+                                                            <tr key={user.id} className="hover:bg-gray-50">
+                                                                <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{user.username}</td>
+                                                                <td className="px-3 py-3 text-gray-800">{`${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Sin nombre'}</td>
+                                                                <td className="px-3 py-3 text-gray-700">{user.email}</td>
+                                                                <td className="px-3 py-3">
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                                                            user.role?.name === 'Gerente' ? 'bg-purple-100 text-purple-800' :
+                                                                            user.role?.name === 'Encargado' ? 'bg-blue-100 text-blue-800' :
+                                                                            user.role?.name === 'Panadero' ? 'bg-green-100 text-green-800' :
+                                                                            user.role?.name === 'Cajero' ? 'bg-yellow-100 text-yellow-800' :
+                                                                            'bg-gray-100 text-gray-800'
+                                                                        }`}>
+                                                                            {user.role?.name || 'Sin rol'}
+                                                                        </span>
+                                                                        {user.is_locked && (
+                                                                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Bloqueado</span>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-3 py-3">
+                                                                    <div className="flex justify-end flex-wrap gap-2">
+                                                                        {user.is_locked ? (
+                                                                            <button
+                                                                                onClick={() => handleConfirmUnlock(user)}
+                                                                                className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
+                                                                            >
+                                                                                Desbloquear
+                                                                            </button>
+                                                                        ) : (
+                                                                            user.role?.name !== 'Gerente' && (
+                                                                                <button
+                                                                                    onClick={() => handleConfirmLock(user)}
+                                                                                    className="px-3 py-1.5 text-xs font-medium text-white bg-orange-600 hover:bg-orange-700 rounded-md"
+                                                                                >
+                                                                                    Bloquear
+                                                                                </button>
+                                                                            )
+                                                                        )}
+                                                                        <button
+                                                                            onClick={() => handleOpenEditModal(user)}
+                                                                            className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+                                                                        >
+                                                                            Editar
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => handleConfirmDelete(user)}
+                                                                            className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md"
+                                                                        >
+                                                                            Eliminar
+                                                                        </button>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
                                             </div>
                                         )}
                                     </div>
