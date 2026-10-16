@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { formatMovementDate } from '../utils/date';
 import { formatMoney } from '../utils/format';
+import SearchableSelect from './SearchableSelect';
+import { nameOptions } from '../utils/filterOptions';
 
 const isPurchaseMovement = (movement) => {
     const method = String(movement.payment_method || '').toLowerCase();
@@ -22,44 +24,67 @@ const parseSaleItems = (description) => {
     const text = String(description || '').replace(/^Venta:\s*/i, '').trim();
     if (!text) return [];
     return text.split(',').map(part => part.trim()).filter(Boolean).map(part => {
-        const match = part.match(/^(.*)\sx(\d+(?:[.,]\d+)?)$/i);
-        if (!match) return { name: part, quantity: '—' };
-        return { name: match[1].trim(), quantity: match[2] };
+        const match = part.match(/^(.*)\sx(\d+(?:[.,]\d+)?)(?:\s@(\d+(?:[.,]\d+)?))?$/i);
+        if (!match) return { name: part, quantity: '—', unitPrice: null };
+        const quantity = Number(String(match[2]).replace(',', '.'));
+        const unitPrice = match[3] != null ? Number(String(match[3]).replace(',', '.')) : null;
+        return {
+            name: match[1].trim(),
+            quantity: match[2],
+            unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
+            total: Number.isFinite(unitPrice) && Number.isFinite(quantity) ? quantity * unitPrice : null,
+        };
     });
 };
 
-const ProductsCell = ({ movement }) => {
+const priceForName = (products, name) => {
+    const found = (products || []).find(product => String(product.name || '').toLowerCase() === String(name || '').toLowerCase());
+    return found ? Number(found.price) || 0 : 0;
+};
+
+const withPrices = (items, products) => items.map(item => {
+    const unitPrice = item.unitPrice == null ? priceForName(products, item.name) : item.unitPrice;
+    const quantity = Number(String(item.quantity).replace(',', '.'));
+    const total = Number.isFinite(quantity) ? quantity * unitPrice : 0;
+    return { ...item, unitPrice, total };
+});
+
+const ProductsCell = ({ movement, products }) => {
     if (isBankWithdrawal(movement)) {
         const amount = Math.abs(Number(movement.amount) || 0);
         return (
             <p className="text-right font-bold text-red-600">Total final = -{formatMoney(amount)}</p>
         );
     }
-    const items = parseSaleItems(movement.description);
+    const items = withPrices(parseSaleItems(movement.description), products);
     return (
         <table className="w-full text-xs border border-gray-200 rounded-md overflow-hidden">
             <thead className="bg-gray-100 text-gray-700">
                 <tr>
                     <th className="px-2 py-1 text-left font-semibold">Producto</th>
                     <th className="px-2 py-1 text-right font-semibold">Cant.</th>
+                    <th className="px-2 py-1 text-right font-semibold">P. unit.</th>
+                    <th className="px-2 py-1 text-right font-semibold">Total</th>
                 </tr>
             </thead>
             <tbody>
                 {items.length === 0 ? (
                     <tr>
-                        <td colSpan={2} className="px-2 py-1">{movement.description || '—'}</td>
+                        <td colSpan={4} className="px-2 py-1">{movement.description || '—'}</td>
                     </tr>
                 ) : items.map((item, index) => (
                     <tr key={index} className="border-t border-gray-200">
                         <td className="px-2 py-1 text-left">{item.name}</td>
                         <td className="px-2 py-1 text-right">{item.quantity}</td>
+                        <td className="px-2 py-1 text-right">{formatMoney(item.unitPrice)}</td>
+                        <td className="px-2 py-1 text-right">{formatMoney(item.total)}</td>
                     </tr>
                 ))}
             </tbody>
             <tfoot>
                 <tr className="border-t-4 border-gray-900">
-                    <td colSpan={2} className="px-2 py-1 text-right font-bold">
-                        Total final = {formatMoney(movement.amount)}
+                    <td colSpan={4} className="px-2 py-1 text-right font-bold">
+                        Total final = {formatMoney(items.reduce((sum, item) => sum + (item.total || 0), 0))}
                     </td>
                 </tr>
             </tfoot>
@@ -67,7 +92,7 @@ const ProductsCell = ({ movement }) => {
     );
 };
 
-const MovementsTable = ({ movements }) => (
+const MovementsTable = ({ movements, products }) => (
     <div className="overflow-x-auto bg-white">
         {movements.length === 0 ? (
             <p className="text-center text-gray-500 py-12">No se encontraron movimientos</p>
@@ -90,7 +115,7 @@ const MovementsTable = ({ movements }) => (
                                 {movementTypeLabel(movement)}
                             </td>
                             <td className="px-3 py-3 min-w-[240px]">
-                                <div className="ml-auto w-full max-w-md"><ProductsCell movement={movement} /></div>
+                                <div className="ml-auto w-full max-w-md"><ProductsCell movement={movement} products={products} /></div>
                             </td>
                         </tr>
                     ))}
@@ -100,7 +125,9 @@ const MovementsTable = ({ movements }) => (
     </div>
 );
 
-const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
+const Movimientos_De_Caja = ({ cashMovements, cashBalance, products = [] }) => {
+    const finishedProducts = (products || []).filter(product => !product.is_ingredient && String(product.category || product.type || '').toLowerCase() !== 'insumo');
+    const productFilterOptions = nameOptions(finishedProducts.map(product => product.name));
     const [cashSortOrder, setCashSortOrder] = useState('desc');
     const [cashAmountFilter, setCashAmountFilter] = useState('');
     const [cashAmountFilterOp, setCashAmountFilterOp] = useState('equals');
@@ -168,16 +195,10 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
         }
         
         if (cashDescriptionFilter.trim()) {
-            filtered = filtered.filter(movement => {
-                const description = String(movement.description || '').toLowerCase();
-                const filterValue = cashDescriptionFilter.toLowerCase();
-                
-                switch (cashDescriptionFilterOp) {
-                    case 'equals': return description === filterValue;
-                    case 'contains': return description.includes(filterValue);
-                    default: return description.includes(filterValue);
-                }
-            });
+            const filterValue = cashDescriptionFilter.toLowerCase();
+            filtered = filtered.filter(movement =>
+                String(movement.description || '').toLowerCase().includes(filterValue)
+            );
         }
         
         if (cashPaymentMethodFilter.length > 0) {
@@ -261,6 +282,10 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
     // Función para abrir el diálogo en ventana nueva
     const openInNewWindow = () => {
         const allMovements = JSON.stringify(cashMovements);
+        const productPrices = JSON.stringify((products || []).reduce((prices, product) => {
+            prices[String(product.name || '').toLowerCase()] = Number(product.price) || 0;
+            return prices;
+        }, {}));
         
         const newWindow = window.open('about:blank', '_blank', 'width=1500,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes');
         if (newWindow) {
@@ -312,6 +337,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                     <script>
                         // Datos de movimientos
                         const allMovements = ${allMovements};
+                        const productPrices = ${productPrices};
                         
                         // Estado de filtros actualizados
                         let filters = {
@@ -373,7 +399,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                 filtered = filtered.filter(m => {
                                     const desc = String(m.description || '').toLowerCase();
                                     const filter = filters.descriptionFilter.toLowerCase();
-                                    return filters.descriptionFilterOp === 'contains' ? desc.includes(filter) : desc === filter;
+                                    return desc.includes(filter);
                                 });
                             }
                             
@@ -476,15 +502,22 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                             }
                             const text = String(movement.description || '').replace(/^Venta:\\s*/i, '').trim();
                             const items = text ? text.split(',').map(function(part) { return part.trim(); }).filter(Boolean) : [];
+                            let lineTotal = 0;
                             const rows = items.map(function(part) {
-                                const match = part.match(/^(.*)\\sx(\\d+(?:[.,]\\d+)?)$/i);
+                                const match = part.match(/^(.*)\\sx(\\d+(?:[.,]\\d+)?)(?:\\s@(\\d+(?:[.,]\\d+)?))?$/i);
                                 const name = match ? match[1].trim() : part;
                                 const quantity = match ? match[2] : '—';
-                                return '<tr class="border-t border-gray-200"><td class="px-2 py-1">' + name + '</td><td class="px-2 py-1 text-right">' + quantity + '</td></tr>';
+                                const parsedPrice = match && match[3] != null ? Number(String(match[3]).replace(',', '.')) : null;
+                                const unitPrice = parsedPrice != null && !isNaN(parsedPrice) ? parsedPrice : (productPrices[name.toLowerCase()] || 0);
+                                const qty = Number(String(quantity).replace(',', '.'));
+                                const total = !isNaN(qty) ? qty * unitPrice : 0;
+                                lineTotal += total;
+                                return '<tr class="border-t border-gray-200"><td class="px-2 py-1">' + name + '</td><td class="px-2 py-1 text-right">' + quantity + '</td><td class="px-2 py-1 text-right">' + formatMoney(unitPrice) + '</td><td class="px-2 py-1 text-right">' + formatMoney(total) + '</td></tr>';
                             }).join('');
-                            return '<table class="w-full text-xs border border-gray-200 rounded-md overflow-hidden"><thead class="bg-gray-100"><tr><th class="px-2 py-1 text-left">Producto</th><th class="px-2 py-1 text-right">Cant.</th></tr></thead><tbody>'
-                                + (rows || '<tr><td class="px-2 py-1" colspan="2">' + (movement.description || '—') + '</td></tr>')
-                                + '</tbody><tfoot><tr class="border-t-4 border-gray-900"><td colspan="2" class="px-2 py-1 text-right font-bold">Total final = ' + formatMoney(movement.amount) + '</td></tr></tfoot></table>';
+                            const finalAmount = items.length ? lineTotal : movement.amount;
+                            return '<table class="w-full text-xs border border-gray-200 rounded-md overflow-hidden"><thead class="bg-gray-100"><tr><th class="px-2 py-1 text-left">Producto</th><th class="px-2 py-1 text-right">Cant.</th><th class="px-2 py-1 text-right">P. unit.</th><th class="px-2 py-1 text-right">Total</th></tr></thead><tbody>'
+                                + (rows || '<tr><td class="px-2 py-1" colspan="4">' + (movement.description || '—') + '</td></tr>')
+                                + '</tbody><tfoot><tr class="border-t-4 border-gray-900"><td colspan="4" class="px-2 py-1 text-right font-bold">Total final = ' + formatMoney(finalAmount) + '</td></tr></tfoot></table>';
                         }
                         
                         function updateFilter(key, value) {
@@ -547,19 +580,13 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                 </div>
                             </div>
 
-                            <!-- Fila 2: Select Descripción + Input Descripción -->
-                            <div class="description-row-normal grid gap-3 mb-3" style="grid-template-columns: 180px 1fr;">
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-700 mb-1">TIPO BÚSQUEDA</label>
-                                    <select onchange="updateFilter('descriptionFilterOp', this.value)" class="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
-                                        <option value="contains">Contiene</option>
-                                        <option value="equals">Es igual</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-semibold text-gray-700 mb-1">BUSCAR DESCRIPCIÓN</label>
-                                    <input type="text" oninput="updateFilter('descriptionFilter', this.value)" placeholder="Escribe para buscar..." class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
-                                </div>
+                            <!-- Fila 2: producto -->
+                            <div class="mb-3">
+                                <label class="block text-xs font-semibold text-gray-700 mb-1">PRODUCTO</label>
+                                <input list="product-filter-list" oninput="updateFilter('descriptionFilter', this.value)" placeholder="Buscar producto..." class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                                <datalist id="product-filter-list">
+                                    ${(products || []).filter(product => !product.is_ingredient && String(product.category || product.type || '').toLowerCase() !== 'insumo').map(product => `<option value="${String(product.name || '').replace(/"/g, '&quot;')}"></option>`).join('')}
+                                </datalist>
                             </div>
 
                             <!-- Métodos de pago + Fechas -->
@@ -595,17 +622,13 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                 </div>
                                 
                                 <!-- Descripción inline para pantallas ultrawide -->
-                                <div class="description-row-ultrawide" style="display: flex; flex: 1 1 auto; align-items: flex-end; gap: 12px; min-width: 540px;">
-                                    <div style="flex-shrink: 0;">
-                                        <label class="block text-xs font-semibold text-gray-700 mb-1">TIPO BÚSQUEDA</label>
-                                        <select onchange="updateFilter('descriptionFilterOp', this.value)" class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm" style="width: 120px;">
-                                            <option value="contains">Contiene</option>
-                                            <option value="equals">Es igual</option>
-                                        </select>
-                                    </div>
-                                    <div style="flex: 1 1 420px; min-width: 420px;">
-                                        <label class="block text-xs font-semibold text-gray-700 mb-1">BUSCAR DESCRIPCIÓN</label>
-                                        <input type="text" oninput="updateFilter('descriptionFilter', this.value)" placeholder="Escribe para buscar..." class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                                <div class="description-row-ultrawide" style="display: flex; flex: 1 1 auto; align-items: flex-end; gap: 12px; min-width: 280px;">
+                                    <div style="flex: 1 1 280px; min-width: 220px;">
+                                        <label class="block text-xs font-semibold text-gray-700 mb-1">PRODUCTO</label>
+                                        <input list="product-filter-list-wide" oninput="updateFilter('descriptionFilter', this.value)" placeholder="Buscar producto..." class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+                                        <datalist id="product-filter-list-wide">
+                                            ${(products || []).filter(product => !product.is_ingredient && String(product.category || product.type || '').toLowerCase() !== 'insumo').map(product => `<option value="${String(product.name || '').replace(/"/g, '&quot;')}"></option>`).join('')}
+                                        </datalist>
                                     </div>
                                 </div>
                             </div>
@@ -692,38 +715,24 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
 
                             <div className="hidden min-[1240px]:flex flex-1">
                                 <div className="w-full">
-                                    <label className="block text-xs font-semibold text-gray-700 mb-1">DESCRIPCIÓN</label>
-                                    <select 
-                                        value={cashDescriptionFilterOp} 
-                                        onChange={e => setCashDescriptionFilterOp(e.target.value)}
-                                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                                    >
-                                        <option value="contains">Contiene</option>
-                                        <option value="equals">Es igual</option>
-                                    </select>
+                                    <label className="block text-xs font-semibold text-gray-700 mb-1">PRODUCTO</label>
+                                    <SearchableSelect
+                                        options={productFilterOptions}
+                                        value={cashDescriptionFilter}
+                                        onChange={setCashDescriptionFilter}
+                                        placeholder="Buscar producto..."
+                                    />
                                 </div>
                             </div>
                         </div>
 
                         <div className="mb-3 min-[1240px]:hidden">
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">DESCRIPCIÓN</label>
-                            <select 
-                                value={cashDescriptionFilterOp} 
-                                onChange={e => setCashDescriptionFilterOp(e.target.value)}
-                                className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                            >
-                                <option value="contains">Contiene</option>
-                                <option value="equals">Es igual</option>
-                            </select>
-                        </div>
-
-                        <div className="mb-3">
-                            <input 
-                                type="text" 
-                                value={cashDescriptionFilter} 
-                                onChange={e => setCashDescriptionFilter(e.target.value)}
-                                placeholder="Ingrese descripción..."
-                                className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">PRODUCTO</label>
+                            <SearchableSelect
+                                options={productFilterOptions}
+                                value={cashDescriptionFilter}
+                                onChange={setCashDescriptionFilter}
+                                placeholder="Buscar producto..."
                             />
                         </div>
 
@@ -862,38 +871,24 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
 
                                     <div className="hidden min-[1240px]:flex flex-1">
                                         <div className="w-full">
-                                            <label className="block text-xs font-semibold text-gray-700 mb-1">DESCRIPCIÓN</label>
-                                            <select 
-                                                value={cashDescriptionFilterOp} 
-                                                onChange={e => setCashDescriptionFilterOp(e.target.value)}
-                                                className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                                            >
-                                                <option value="contains">Contiene</option>
-                                                <option value="equals">Es igual</option>
-                                            </select>
+                                            <label className="block text-xs font-semibold text-gray-700 mb-1">PRODUCTO</label>
+                                            <SearchableSelect
+                                                options={productFilterOptions}
+                                                value={cashDescriptionFilter}
+                                                onChange={setCashDescriptionFilter}
+                                                placeholder="Buscar producto..."
+                                            />
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="mb-3 min-[1240px]:hidden">
-                                    <label className="block text-xs font-semibold text-gray-700 mb-1">DESCRIPCIÓN</label>
-                                    <select 
-                                        value={cashDescriptionFilterOp} 
-                                        onChange={e => setCashDescriptionFilterOp(e.target.value)}
-                                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                                    >
-                                        <option value="contains">Contiene</option>
-                                        <option value="equals">Es igual</option>
-                                    </select>
-                                </div>
-
-                                <div className="mb-3">
-                                    <input 
-                                        type="text" 
-                                        value={cashDescriptionFilter} 
-                                        onChange={e => setCashDescriptionFilter(e.target.value)}
-                                        placeholder="Ingrese descripción..."
-                                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                    <label className="block text-xs font-semibold text-gray-700 mb-1">PRODUCTO</label>
+                                    <SearchableSelect
+                                        options={productFilterOptions}
+                                        value={cashDescriptionFilter}
+                                        onChange={setCashDescriptionFilter}
+                                        placeholder="Buscar producto..."
                                     />
                                 </div>
 
@@ -1005,7 +1000,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                             {filteredMovements.length === 0 ? (
                                 <p className="text-center text-gray-500 py-12">No se encontraron movimientos</p>
                             ) : (
-                                <MovementsTable movements={filteredMovements} />
+                                <MovementsTable movements={filteredMovements} products={products} />
                             )}
                         </div>
                     </div>
@@ -1127,27 +1122,14 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 mb-1">DESCRIPCIÓN</label>
-                                            <select 
-                                                value={cashDescriptionFilterOp} 
-                                                onChange={e => setCashDescriptionFilterOp(e.target.value)}
-                                                className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                                            >
-                                                <option value="contains">Contiene</option>
-                                                <option value="equals">Es igual</option>
-                                            </select>
+                                            <label className="block text-xs font-semibold text-gray-700 mb-1">PRODUCTO</label>
+                                            <SearchableSelect
+                                                options={productFilterOptions}
+                                                value={cashDescriptionFilter}
+                                                onChange={setCashDescriptionFilter}
+                                                placeholder="Buscar producto..."
+                                            />
                                         </div>
-                                    </div>
-
-                                    <div className="mb-3">
-                                        <label className="block text-xs font-semibold text-gray-700 mb-1">BUSCAR DESCRIPCIÓN</label>
-                                        <input
-                                            type="text"
-                                            value={cashDescriptionFilter}
-                                            onChange={e => setCashDescriptionFilter(e.target.value)}
-                                            placeholder="Escribe para buscar..."
-                                            className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                                        />
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-3 mb-3">
@@ -1229,7 +1211,7 @@ const Movimientos_De_Caja = ({ cashMovements, cashBalance }) => {
                                 </div>
 
                                 <div className="flex-1 p-4 overflow-y-auto">
-                                    <MovementsTable movements={filteredMovements} />
+                                    <MovementsTable movements={filteredMovements} products={products} />
                                 </div>
 
                                 <div 

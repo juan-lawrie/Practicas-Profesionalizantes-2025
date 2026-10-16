@@ -85,6 +85,7 @@ const SalesView = ({ products, loadProducts, loadCashMovements, cashMovements, c
                     <Movimientos_De_Caja
                         cashMovements={cashMovements}
                         cashBalance={cashBalance}
+                        products={products}
                     />
                 </div>
             </div>

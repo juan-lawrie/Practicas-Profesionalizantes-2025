@@ -202,8 +202,8 @@ const Registrar_Venta = ({ products, loadProducts, loadCashMovements, isCashRegi
                 items: saleItems
             });
 
-            const itemsForThisMethod = cartItems.map(item => 
-                `${item.product.name} x${item.quantity}`
+            const itemsForThisMethod = cartItems.map(item =>
+                `${item.product.name} x${item.quantity} @${item.product.price}`
             ).join(', ');
 
             let remainingChange = change;
